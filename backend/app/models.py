@@ -20,6 +20,10 @@ class ContributorProfile(BaseModel):
     completed_count: int = 0
     similarity_to_history: float = 75.0
     has_feedback_history: bool = False
+    preferences: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    last_active_at: Optional[str] = None
 
 class RankingWeights(BaseModel):
     skill_weight: float = 0.35
@@ -84,6 +88,8 @@ class IssueRecord(BaseModel):
     stale_status: str = "active"
     verified: bool = False
     verification_notes: Optional[str] = None
+    first_seen_at: Optional[str] = None
+    last_seen_at: Optional[str] = None
 
 class ComponentScores(BaseModel):
     skill_match: float
@@ -127,3 +133,35 @@ class FeedbackEvent(BaseModel):
     event_type: str # accepted, rejected, completed
     event_timestamp: Optional[str] = None
     recommendation_snapshot: Optional[Dict[str, Any]] = None
+
+class RecommendationRecord(BaseModel):
+    user_id: str
+    issue_id: str
+    native_id: Optional[str] = None
+    repository_full_name: Optional[str] = None
+    rank: int
+    final_score: float
+    scores: Optional[Dict[str, Any]] = None
+    effective_weights: Optional[Dict[str, float]] = None
+    weighted_contributions: Optional[Dict[str, float]] = None
+    missing_components: List[str] = Field(default_factory=list)
+    explanation: Optional[str] = None
+    verification_notes: Optional[str] = None
+    algorithm_version: str = "1.0.0-phase1"
+    generated_at: Optional[str] = None
+
+class JobRecord(BaseModel):
+    job_id: str
+    job_type: str = "discovery_and_refresh"
+    start_time: str
+    finish_time: Optional[str] = None
+    status: str = "in_progress"
+    checkpoints: Dict[str, Any] = Field(default_factory=dict)
+    queries_executed: List[str] = Field(default_factory=list)
+    issues_discovered: int = 0
+    issues_inserted: int = 0
+    issues_updated: int = 0
+    issues_skipped: int = 0
+    errors: List[str] = Field(default_factory=list)
+    execution_metadata: Dict[str, Any] = Field(default_factory=dict)
+

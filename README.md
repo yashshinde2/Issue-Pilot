@@ -72,19 +72,23 @@ d:/Issue Pilot/
 │   ├── app/
 │   │   ├── main.py               # FastAPI application with CORS and health checks
 │   │   ├── config.py             # Environment configuration (.env / atlas-credentials.env)
-│   │   ├── database.py           # MongoDB Atlas connection & 5 collection indexes
+│   │   ├── database.py           # MongoDB Atlas connection pooling & 5 collection indexes
+│   │   ├── crud.py               # Repository layer for issues, users, recs, feedback, jobs
 │   │   ├── models.py             # Pydantic request/response schemas
 │   │   ├── cpp_engine_client.py  # Subprocess JSON IPC client to C++ engine
 │   │   ├── github_worker.py      # Bounded GitHub Ingestion & Refresh Worker
 │   │   ├── verifier.py           # GitHub Live Verification & Shortlist Backfill
 │   │   └── routes/
+│   │       ├── users.py          # Persistent Contributor Profiles CRUD
+│   │       ├── issues.py         # Candidate Pool CRUD with eligibility & tech filters
 │   │       ├── simulator.py      # Ranking Simulator & What-If endpoints
 │   │       ├── recommendations.py# Personalized recommendations & audit snapshots
 │   │       ├── ingestion.py      # Candidate pool status & manual ingestion trigger
 │   │       ├── feedback.py       # User feedback recording (accepted/rejected/completed)
 │   │       └── validation.py     # Automated validation & benchmark runner
 │   └── tests/
-│       └── test_e2e_pipeline.py  # Pytest end-to-end integration test suite
+│       ├── test_e2e_pipeline.py      # End-to-end API pipeline tests
+│       └── test_atlas_persistence.py # 9-point MongoDB Atlas persistence integration tests
 │
 ├── test_algorithm_interactive.py # CLI runner to test and inspect the C++ algorithm
 ├── requirements.txt              # Python dependencies for backend
@@ -94,6 +98,51 @@ d:/Issue Pilot/
 ├── atlas-credentials.env         # Live MongoDB Atlas connection string (ignored by Git)
 └── issue_pilot_ranking_algo.md   # System technical design document
 ```
+
+---
+
+### MongoDB Atlas Setup & Configuration
+
+#### 1. Cluster Setup & Environment Variables
+1. Create a free cluster on [MongoDB Atlas](https://www.mongodb.com/cloud/atlas).
+2. Create a database user with read and write permissions to `issue_pilot`.
+3. Configure Network Access (IP Access List) to allow connections from your development machine.
+4. Copy `.env.example` to `.env` and provide your connection details:
+   ```env
+   # MongoDB Atlas Configuration
+   MONGODB_URI=mongodb+srv://<username>:<password>@<cluster>.mongodb.net
+   MONGODB_DATABASE=issue_pilot
+
+   # MongoDB Connection Pool & Timeouts (Optional)
+   MONGODB_MAX_POOL_SIZE=50
+   MONGODB_MIN_POOL_SIZE=5
+   MONGODB_SERVER_SELECTION_TIMEOUT_MS=5000
+   MONGODB_CONNECT_TIMEOUT_MS=10000
+   MONGODB_SOCKET_TIMEOUT_MS=10000
+   ```
+5. Credentials and `.env` files are strictly excluded from git via `.gitignore`. Credentials are masked in all logs and error messages.
+
+#### 2. Collections and Indexes (Safe & Idempotent)
+The backend automatically creates and verifies indexes on startup across 5 collections:
+- **`issues`**:
+  - Unique compound index: `[("source", 1), ("repository_full_name", 1), ("issue_number", 1)]` (prevents duplicate discoveries).
+  - Sparse unique index: `[("id", 1)]`.
+  - Query index: `[("state", 1), ("is_assigned", 1)]` (stage 0 eligibility gate).
+  - Query index: `[("detected_technologies", 1)]` (technology filtering).
+  - Query index: `[("updated_at", -1)]` (recency sorting).
+  - Query index: `[("stale_status", 1)]`.
+- **`users`**:
+  - Unique index: `[("user_id", 1)]`.
+  - Query index: `[("updated_at", -1)]`.
+- **`recommendations`**:
+  - Compound index: `[("user_id", 1), ("generated_at", -1)]`.
+  - Query indexes: `[("issue_id", 1)]`, `[("generated_at", -1)]`.
+- **`feedback`**:
+  - Compound index: `[("user_id", 1), ("event_timestamp", -1)]`.
+  - Query indexes: `[("issue_id", 1)]`, `[("event_type", 1)]`.
+- **`jobs`**:
+  - Unique index: `[("job_id", 1)]`.
+  - Query indexes: `[("start_time", -1)]`, `[("status", 1)]`.
 
 ---
 
@@ -108,64 +157,95 @@ Verify the C++ test suite, benchmark, and What-If experiments directly:
 ```bash
 python test_algorithm_interactive.py
 ```
-Or run the binaries directly:
+Or run the binary directly:
 ```bash
 .\ranking_engine\build\test_ranking.exe
-.\ranking_engine\build\issue_pilot_ranking_engine.exe --eval
-.\ranking_engine\build\issue_pilot_ranking_engine.exe --test-experiments
 ```
 
-#### 2. Start the FastAPI Backend (API Headless Server)
+#### 2. Start the FastAPI Backend
 ```bash
 pip install -r requirements.txt
 $env:PYTHONPATH="backend"
 python -m uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8000 --reload
 ```
-Interactive Swagger API documentation will be available at: `http://localhost:8000/docs`
+Interactive Swagger API documentation is available at: `http://localhost:8000/docs`
 
-#### 3. Run the Backend Test Suite
+Health check endpoint:
 ```bash
-$env:PYTHONPATH="backend"
-python -m pytest backend/tests/test_e2e_pipeline.py -v
+curl http://localhost:8000/api/health
 ```
 
-#### 4. Connecting Your Frontend
-Any frontend (React, Vue, Next.js, etc.) can communicate directly with the FastAPI backend at `http://localhost:8000`. CORS is pre-configured to allow requests from any origin.
-Key endpoints:
-- `POST /api/recommendations/personalized`: Get top 5 live-verified issue recommendations.
-- `POST /api/simulator/rank`: Compute custom rankings with arbitrary profiles and candidates.
-- `GET /api/simulator/experiments`: Fetch verified What-If experiment results.
-
-
----
-
-### Demonstration Walkthrough & Viva Guide
-
-1. **Ranking Simulator (Phase 8)**:
-   - Select contributor profile (e.g. Fullstack Python/FastAPI vs Cold-start Beginner).
-   - Adjust skill sliders and observe real-time Skill Match recalculation ($S$).
-   - Adjust Issue Difficulty components ($SC, TC, HE, DI, CC$) and observe Difficulty Match recalculation ($D = 100 - |C - ID|$).
-   - Toggle **Cold Start (Missing Feedback)** to observe automatic weight renormalization without penalizing the final score.
-   - Click any ranked issue to expand the **Score Explanation Panel** displaying the mathematical trace for all 6 factors.
-2. **Phase 9 What-If Experiments**:
-   - Navigate to the **What-If Experiments** tab.
-   - Click **Execute Experiments on C++ Engine** to verify Experiments 1 through 7 with exact formula assertions.
-3. **Personalized Recommendations & Live Verification (Phase 7)**:
-   - Navigate to the **Recommendations & Verification** tab.
-   - Click **Generate Verified Recommendations** to fetch candidates, rank via C++, execute Live GitHub Verification, discard invalid/closed issues, backfill from subsequent candidates, and return top 5.
-   - Click **Accept**, **Reject**, or **Mark Completed** to simulate user feedback recording in MongoDB Atlas.
-4. **Ingestion & Pool Status (Phase 4 & 5)**:
-   - View total stored issues in MongoDB Atlas, open/unassigned counts, and technology distribution.
-   - Click **Run Ingestion Now** to execute a bounded GitHub discovery run.
-5. **Validation & Quality Evaluation (Phase 10)**:
-   - Click **Run Validation Tests** to execute the C++ unit test suite and NDCG@5 ranking benchmark ($0.94$ NDCG@5 vs $0.68$ baseline).
+#### 3. Run Automated Integration & Persistence Tests
+Run all 16 integration tests verifying both the API pipeline and MongoDB Atlas persistence across restarts:
+```bash
+$env:PYTHONPATH="backend"
+pytest backend/tests/test_e2e_pipeline.py backend/tests/test_atlas_persistence.py -v
+```
 
 ---
 
-### MongoDB Atlas Collections Schema
+### Verifying Persistence Across Restarts (Manual & Automated)
 
-1. `issues`: Compound index on `(source, repository_full_name, issue_number)`. Normalizes GitHub issues with detected technologies, difficulty signals, responsiveness, health, freshness, and verification state.
-2. `users`: Contributor skill scores, capability, feedback history, and last active timestamp.
-3. `recommendations`: Audit snapshots containing the exact component scores, active weights, weighted contributions, missing components, explanation, and algorithm version for every recommendation delivered.
+#### Automated Verification
+The test suite in `backend/tests/test_atlas_persistence.py` automatically validates all 9 persistence requirements:
+1. **Insert & Retrieve Issue**: Inserts normalized issue record and retrieves by both ID and natural compound key.
+2. **Upsert Idempotence & Field Preservation**: Upserts an issue twice; verifies exactly 1 document exists and unsupplied fields are preserved.
+3. **User Profile CRUD**: Creates user profile with skills, retrieves it, updates capability and counts, and verifies field preservation.
+4. **Filtered Issue Queries**: Verifies filtering by open status, assignment status, technology, and difficulty.
+5. **Recommendations & Feedback Persistence**: Verifies snapshots and feedback events are saved, and user stats are incremented atomically.
+6. **Unique Indexes**: Asserts that duplicate issue identity or user_id raises duplicate key errors.
+7. **Persistence Across Restart**: Inserts records, disconnects and destroys the database client (simulating server shutdown), connects via a fresh client (simulating restart), and verifies all data survived.
+8. **Clear Error Reporting**: Verifies that when Atlas is unreachable, the system reports a clear HTTP 503 error instead of silently returning fake data.
+9. **C++ Ranking Compatibility & Demo Mode**: Verifies existing C++ ranking engine tests pass and offline demo mode remains functional.
+
+#### Manual Verification Procedure
+1. **Insert a User Profile**:
+   ```bash
+   curl -X POST "http://localhost:8000/api/users" -H "Content-Type: application/json" -d '{
+     "user_id": "test-developer-persist",
+     "capability": 78.0,
+     "skills": {"Python": {"technology": "Python", "score": 90.0, "confidence": 0.95}}
+   }'
+   ```
+2. **Upsert an Issue Record**:
+   ```bash
+   curl -X POST "http://localhost:8000/api/issues" -H "Content-Type: application/json" -d '{
+     "id": "gh_testorg_testrepo_501",
+     "source": "github",
+     "repository_full_name": "testorg/testrepo",
+     "issue_number": 501,
+     "title": "Initial Issue Record",
+     "issue_url": "https://github.com/testorg/testrepo/issues/501",
+     "state": "open",
+     "is_assigned": false,
+     "detected_technologies": ["Python"],
+     "comment_count": 2
+   }'
+   ```
+3. **Stop the Backend**:
+   Press `Ctrl+C` in the backend terminal to stop `uvicorn`.
+4. **Restart the Backend**:
+   ```bash
+   $env:PYTHONPATH="backend"
+   python -m uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8000
+   ```
+5. **Verify Data Remains Available**:
+   ```bash
+   curl "http://localhost:8000/api/users/test-developer-persist"
+   curl "http://localhost:8000/api/issues/gh_testorg_testrepo_501"
+   ```
+   Both documents will be returned with all fields preserved.
+6. **Upsert Again with Partial Data to Verify Idempotence**:
+   ```bash
+   curl -X POST "http://localhost:8000/api/issues" -H "Content-Type: application/json" -d '{
+     "source": "github",
+     "repository_full_name": "testorg/testrepo",
+     "issue_number": 501,
+     "title": "Updated Title - No Duplicate",
+     "issue_url": "https://github.com/testorg/testrepo/issues/501"
+   }'
+   ```
+   Query `http://localhost:8000/api/issues?search=testorg` — exactly 1 document exists, its title is updated, and `comment_count: 2` was preserved!
+contributions, missing components, explanation, and algorithm version for every recommendation delivered.
 4. `feedback`: Audit records of `accepted`, `rejected`, and `completed` events linked to recommendations.
 5. `jobs`: Ingestion and refresh job execution logs, queries run, and counts of issues discovered, inserted, updated, and skipped.

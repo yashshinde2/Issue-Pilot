@@ -9,6 +9,8 @@ from app.routes.recommendations import router as recommendations_router
 from app.routes.ingestion import router as ingestion_router
 from app.routes.feedback import router as feedback_router
 from app.routes.validation import router as validation_router
+from app.routes.users import router as users_router
+from app.routes.issues import router as issues_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("issue_pilot")
@@ -16,7 +18,7 @@ logger = logging.getLogger("issue_pilot")
 app = FastAPI(
     title="Issue Pilot API",
     description="Backend orchestration for Issue Pilot: GitHub Ingestion + MongoDB Atlas + C++ Ranking Engine",
-    version="1.0.0"
+    version="1.1.0"
 )
 
 # Enable CORS for frontend integration
@@ -33,7 +35,7 @@ def startup_event():
     logger.info("Initializing Issue Pilot backend services...")
     atlas_connected = db.connect()
     if atlas_connected:
-        logger.info("MongoDB Atlas connected and verified.")
+        logger.info("MongoDB Atlas connected and verified on database '%s'.", settings.mongodb_database)
     else:
         logger.warning("MongoDB Atlas could not connect. Running in offline/sample mode.")
     try:
@@ -41,6 +43,11 @@ def startup_event():
         logger.info("C++ Ranking Engine loaded successfully (Algorithm Version: %s)", ver)
     except Exception as e:
         logger.error("Could not load C++ Ranking Engine: %s", str(e))
+
+@app.on_event("shutdown")
+def shutdown_event():
+    logger.info("Shutting down Issue Pilot backend services...")
+    db.disconnect()
 
 @app.get("/api/health", tags=["Health"])
 def health_check():
@@ -66,6 +73,8 @@ def health_check():
 # Mount sub-routers
 app.include_router(simulator_router)
 app.include_router(recommendations_router)
+app.include_router(users_router)
+app.include_router(issues_router)
 app.include_router(ingestion_router)
 app.include_router(feedback_router)
 app.include_router(validation_router)
