@@ -1,0 +1,45 @@
+# ==============================================================================
+# Issue Pilot - Git Ignore Configuration
+# ==============================================================================
+
+# --- Secrets and Environment Files (CRITICAL - DO NOT COMMIT) ---
+.env
+atlas-credentials.env
+*.env
+!*.env.example
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- C++ & CMake Build Artifacts ---
+ranking_engine/build/
+ranking_engine/.cache/
+*.exe
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+compile_commands.json
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+
+# --- IDE & System Files ---
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
