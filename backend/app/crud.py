@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional, Union
 from pymongo.errors import DuplicateKeyError, PyMongoError, ConnectionFailure, ServerSelectionTimeoutError
 from bson import ObjectId
@@ -90,18 +90,25 @@ class IssueRepository:
         data.pop("_id", None)
 
         if preserve_unsupplied:
+            first_seen_val = data.get("first_seen_at") or now_iso
+            created_at_val = data.get("created_at") or now_iso
+
             # Partial update preserves fields that are not supplied in data
-            # Use $set on provided fields and $setOnInsert for creation metadata
             update_fields = {k: v for k, v in data.items() if v is not None}
-            update_fields["last_seen_at"] = now_iso
+            if "last_seen_at" not in update_fields:
+                update_fields["last_seen_at"] = now_iso
             if "updated_at" not in update_fields:
                 update_fields["updated_at"] = now_iso
+
+            # Fields in $setOnInsert must never appear in $set to prevent MongoDB path conflict
+            update_fields.pop("first_seen_at", None)
+            update_fields.pop("created_at", None)
 
             update_op = {
                 "$set": update_fields,
                 "$setOnInsert": {
-                    "first_seen_at": data.get("first_seen_at") or now_iso,
-                    "created_at": data.get("created_at") or now_iso
+                    "first_seen_at": first_seen_val,
+                    "created_at": created_at_val
                 }
             }
         else:
@@ -153,6 +160,8 @@ class IssueRepository:
 
         if state and state.lower() != "all":
             query["state"] = state.lower()
+            if state.lower() == "open":
+                query["stale_status"] = {"$nin": ["closed", "unavailable"]}
 
         if is_assigned is not None:
             query["is_assigned"] = is_assigned
@@ -178,12 +187,13 @@ class IssueRepository:
             query["difficulty_evidence.technical_complexity"] = diff_conditions
 
         if search:
-            query["$text"] = {"$search": search} if "idx_text" in database.issues.index_information() else {
-                "$or": [
+            if "idx_text" in database.issues.index_information():
+                query["$text"] = {"$search": search}
+            else:
+                query["$or"] = [
                     {"title": {"$regex": search, "$options": "i"}},
                     {"repository_full_name": {"$regex": search, "$options": "i"}}
                 ]
-            }
 
         cursor = database.issues.find(query).sort("updated_at", -1).skip(skip).limit(limit)
         return [_clean_doc(d) for d in cursor]
@@ -191,6 +201,140 @@ class IssueRepository:
     def count_issues(self, query: Optional[dict] = None) -> int:
         database = self._get_db()
         return database.issues.count_documents(query or {})
+
+    def count_by_repository(self, repo_full_name: str) -> int:
+        """Count active/open issues for a repository to enforce diversity limits."""
+        database = self._get_db()
+        return database.issues.count_documents({
+            "repository_full_name": repo_full_name,
+            "state": "open",
+            "stale_status": {"$nin": ["closed", "unavailable"]}
+        })
+
+    def get_candidates_for_refresh(self, limit: int = 50, max_age_days: int = 3) -> List[Dict[str, Any]]:
+        """
+        Retrieve a bounded batch of stored open candidates for refresh.
+        Prioritizes candidates marked 'needs_refresh' or with the oldest 'last_seen_at'.
+        """
+        database = self._get_db()
+        cutoff_date = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
+        query = {
+            "state": "open",
+            "stale_status": {"$in": ["active", "needs_refresh"]},
+            "$or": [
+                {"stale_status": "needs_refresh"},
+                {"last_seen_at": {"$lt": cutoff_date}},
+                {"last_seen_at": None},
+                {"last_seen_at": {"$exists": False}}
+            ]
+        }
+        cursor = database.issues.find(query).sort("last_seen_at", 1).limit(limit)
+        return [_clean_doc(d) for d in cursor]
+
+    def get_stale_candidates(self, older_than_days: int = 90) -> List[Dict[str, Any]]:
+        """Find active candidates that have not been seen within older_window_days."""
+        database = self._get_db()
+        cutoff_date = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).isoformat()
+        query = {
+            "stale_status": {"$in": ["active", "needs_refresh"]},
+            "last_seen_at": {"$lt": cutoff_date}
+        }
+        cursor = database.issues.find(query)
+        return [_clean_doc(d) for d in cursor]
+
+    def mark_issues_stale(self, issue_ids: List[str]) -> int:
+        """Mark a list of issue records as stale without deleting them."""
+        if not issue_ids:
+            return 0
+        database = self._get_db()
+        now_iso = datetime.now(timezone.utc).isoformat()
+        res = database.issues.update_many(
+            {"id": {"$in": issue_ids}},
+            {"$set": {"stale_status": "stale", "refresh_status": "stale", "updated_at": now_iso}}
+        )
+        return res.modified_count
+
+    def mark_issue_closed(self, issue_id: str, closed_at: Optional[str] = None) -> bool:
+        """Mark an issue closed while preserving it in MongoDB for historical analysis."""
+        database = self._get_db()
+        now_iso = datetime.now(timezone.utc).isoformat()
+        res = database.issues.update_one(
+            {"id": issue_id},
+            {
+                "$set": {
+                    "state": "closed",
+                    "stale_status": "closed",
+                    "refresh_status": "closed",
+                    "closed_at": closed_at or now_iso,
+                    "updated_at": now_iso,
+                    "last_verified_at": now_iso
+                }
+            }
+        )
+        return res.modified_count > 0
+
+    def mark_issue_unavailable(self, issue_id: str) -> bool:
+        """Mark an issue unavailable (e.g. 404 / deleted on GitHub)."""
+        database = self._get_db()
+        now_iso = datetime.now(timezone.utc).isoformat()
+        res = database.issues.update_one(
+            {"id": issue_id},
+            {
+                "$set": {
+                    "stale_status": "unavailable",
+                    "refresh_status": "unavailable",
+                    "updated_at": now_iso,
+                    "last_verified_at": now_iso
+                }
+            }
+        )
+        return res.modified_count > 0
+
+    def get_pool_metrics(self) -> Dict[str, Any]:
+        """Aggregate candidate pool metrics, repository diversity, and lifecycle states."""
+        database = self._get_db()
+        total_count = database.issues.count_documents({})
+        open_count = database.issues.count_documents({"state": "open"})
+        closed_count = database.issues.count_documents({"state": "closed"})
+
+        status_counts = {}
+        for st in ["active", "needs_refresh", "stale", "closed", "unavailable"]:
+            status_counts[st] = database.issues.count_documents({"stale_status": st})
+
+        unique_repos = len(database.issues.distinct("repository_full_name"))
+
+        # Technology breakdown
+        tech_pipeline = [
+            {"$unwind": "$detected_technologies"},
+            {"$group": {"_id": "$detected_technologies", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},
+            {"$limit": 10}
+        ]
+        top_techs = [
+            {"technology": item["_id"], "count": item["count"]}
+            for item in database.issues.aggregate(tech_pipeline)
+        ]
+
+        # Top repositories by representation
+        repo_pipeline = [
+            {"$group": {"_id": "$repository_full_name", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},
+            {"$limit": 10}
+        ]
+        top_repos = [
+            {"repository": item["_id"], "count": item["count"]}
+            for item in database.issues.aggregate(repo_pipeline)
+        ]
+
+        return {
+            "total_candidates": total_count,
+            "open_candidates": open_count,
+            "closed_candidates": closed_count,
+            "status_breakdown": status_counts,
+            "unique_repositories": unique_repos,
+            "top_technologies": top_techs,
+            "top_repositories": top_repos
+        }
 
     def delete_issue(self, issue_id: str) -> bool:
         database = self._get_db()
@@ -447,10 +591,108 @@ class JobRepository:
         database = self._get_db()
         return _clean_doc(database.jobs.find_one({"job_id": job_id}))
 
-    def get_latest_job(self) -> Optional[Dict[str, Any]]:
+    def get_latest_job(self, job_type: Optional[str] = None) -> Optional[Dict[str, Any]]:
         database = self._get_db()
-        doc = database.jobs.find_one(sort=[("start_time", -1)])
+        filter_q = {"job_type": job_type} if job_type else {}
+        doc = database.jobs.find_one(filter_q, sort=[("start_time", -1)])
         return _clean_doc(doc)
+
+    def acquire_job_lock(self, job_type: str, timeout_seconds: int = 1800, metadata: Optional[dict] = None) -> Optional[str]:
+        """
+        Concurrency lock: Prevents overlapping job executions from corrupting data.
+        Returns job_id if lock acquired, or None if another job of same type is currently running.
+        Times out stale locks older than timeout_seconds.
+        """
+        database = self._get_db()
+        now_dt = datetime.now(timezone.utc)
+        timeout_cutoff = (now_dt - timedelta(seconds=timeout_seconds)).isoformat()
+
+        # Check for active in-progress job
+        running_job = database.jobs.find_one({
+            "job_type": job_type,
+            "status": "in_progress"
+        })
+
+        if running_job:
+            start_iso = running_job.get("start_time", "")
+            if start_iso > timeout_cutoff:
+                # Active non-timed-out job is running
+                logger.warning("Job '%s' cannot start; lock held by job %s", job_type, running_job.get("job_id"))
+                return None
+            else:
+                # Timed out, supersede it
+                logger.warning("Superseding timed out job %s for '%s'", running_job.get("job_id"), job_type)
+                database.jobs.update_one(
+                    {"job_id": running_job.get("job_id")},
+                    {"$set": {"status": "timed_out", "finish_time": now_dt.isoformat()}}
+                )
+
+        import uuid
+        job_id = f"{job_type}_{uuid.uuid4().hex[:10]}"
+        now_iso = now_dt.isoformat()
+        job_doc = {
+            "job_id": job_id,
+            "job_type": job_type,
+            "start_time": now_iso,
+            "finish_time": None,
+            "status": "in_progress",
+            "checkpoints": {},
+            "queries_executed": [],
+            "issues_discovered": 0,
+            "issues_inserted": 0,
+            "issues_updated": 0,
+            "issues_skipped": 0,
+            "issues_marked_stale": 0,
+            "issues_marked_closed": 0,
+            "errors": [],
+            "rate_limit_info": None,
+            "execution_metadata": metadata or {}
+        }
+        database.jobs.insert_one(job_doc)
+        return job_id
+
+    def release_job_lock(self, job_id: str, status: str = "completed", updates: Optional[dict] = None) -> Optional[Dict[str, Any]]:
+        """Release job lock by setting status and finish time with execution metrics."""
+        database = self._get_db()
+        now_iso = datetime.now(timezone.utc).isoformat()
+        clean_updates = {k: v for k, v in (updates or {}).items() if k != "_id"}
+        clean_updates["status"] = status
+        clean_updates["finish_time"] = now_iso
+        database.jobs.update_one({"job_id": job_id}, {"$set": clean_updates})
+        return _clean_doc(database.jobs.find_one({"job_id": job_id}))
+
+    def update_checkpoint(self, job_id: str, checkpoint: Dict[str, Any]) -> bool:
+        """Persist checkpoint data to allow resumption of interrupted jobs."""
+        database = self._get_db()
+        now_iso = datetime.now(timezone.utc).isoformat()
+        res = database.jobs.update_one(
+            {"job_id": job_id},
+            {
+                "$set": {
+                    "checkpoints": checkpoint,
+                    "execution_metadata.last_checkpoint_at": now_iso
+                }
+            }
+        )
+        return res.modified_count > 0
+
+    def get_latest_checkpoint(self, job_type: str) -> Optional[Dict[str, Any]]:
+        """Retrieve checkpoint from the most recent job to support resume operations."""
+        database = self._get_db()
+        doc = database.jobs.find_one(
+            {"job_type": job_type, "checkpoints": {"$exists": True, "$ne": {}}},
+            sort=[("start_time", -1)]
+        )
+        if doc and "checkpoints" in doc:
+            return doc["checkpoints"]
+        return None
+
+    def list_jobs(self, limit: int = 20, skip: int = 0, job_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        """List ingestion jobs in reverse chronological order."""
+        database = self._get_db()
+        filter_q = {"job_type": job_type} if job_type else {}
+        cursor = database.jobs.find(filter_q).sort("start_time", -1).skip(skip).limit(limit)
+        return [_clean_doc(d) for d in cursor]
 
 
 # Singletons configured with default active db instance

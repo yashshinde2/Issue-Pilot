@@ -30,6 +30,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from app.ingestion.scheduler import scheduler_service
+
 @app.on_event("startup")
 def startup_event():
     logger.info("Initializing Issue Pilot backend services...")
@@ -44,9 +46,14 @@ def startup_event():
     except Exception as e:
         logger.error("Could not load C++ Ranking Engine: %s", str(e))
 
+    if settings.scheduler_enabled:
+        logger.info("Auto-starting background ingestion scheduler...")
+        scheduler_service.start()
+
 @app.on_event("shutdown")
 def shutdown_event():
     logger.info("Shutting down Issue Pilot backend services...")
+    scheduler_service.stop()
     db.disconnect()
 
 @app.get("/api/health", tags=["Health"])
@@ -67,7 +74,8 @@ def health_check():
         "cpp_ranking_engine_available": cpp_ok,
         "algorithm_version": cpp_ver,
         "github_token_configured": bool(settings.github_token),
-        "ingestion_enabled": settings.ingestion_enabled
+        "ingestion_enabled": settings.ingestion_enabled,
+        "scheduler_active": scheduler_service.is_running
     }
 
 # Mount sub-routers

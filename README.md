@@ -175,12 +175,86 @@ Health check endpoint:
 curl http://localhost:8000/api/health
 ```
 
-#### 3. Run Automated Integration & Persistence Tests
-Run all 16 integration tests verifying both the API pipeline and MongoDB Atlas persistence across restarts:
+#### 3. Run Automated Tests
+Run all 28 automated tests covering API pipelines, Atlas persistence across restarts, and GitHub ingestion/lifecycle:
 ```bash
-$env:PYTHONPATH="backend"
-pytest backend/tests/test_e2e_pipeline.py backend/tests/test_atlas_persistence.py -v
+# Run entire test suite (all 28 tests)
+pytest -v
+
+# Or run individual test modules:
+pytest backend/tests/test_github_ingestion.py -v
+pytest backend/tests/test_atlas_persistence.py -v
+pytest backend/tests/test_e2e_pipeline.py -v
 ```
+
+---
+
+### Milestone 3: GitHub Issue Discovery, Refresh & Lifecycle Management
+
+#### 1. Configuration & Environment Variables
+Configure the ingestion and discovery settings in `.env`:
+```env
+# GitHub Personal Access Token (Recommended for 5,000 req/hr vs 60 req/hr unauthenticated)
+GITHUB_TOKEN=ghp_your_personal_access_token_here
+GITHUB_API_BASE_URL=https://api.github.com
+
+# Candidate Pool Bounds & Cadences
+CANDIDATE_POOL_TARGET=3000          # Bounded shared candidate pool size
+RECENT_WINDOW_DAYS=30               # Discovery recency window in days
+OLDER_WINDOW_DAYS=90                # Stale candidate threshold in days
+DISCOVERY_CADENCE_HOURS=24          # Daily discovery schedule cadence
+REFRESH_CADENCE_DAYS=3              # Older candidate verification cadence (3-7 days)
+MAX_ISSUES_PER_REPO=15              # Maximum issues allowed per repository for diversity
+MAX_SEARCH_PAGES_PER_RUN=5          # Search API pagination limit per query
+PER_PAGE_COUNT=30                   # Results per page
+
+# Rate Limit & Resiliency
+GITHUB_RATE_LIMIT_BUFFER=10         # Stop/defer work when remaining quota drops to buffer
+GITHUB_REQUEST_TIMEOUT_SECONDS=15   # Request timeout
+GITHUB_MAX_RETRIES=3                # Exponential backoff retry count on 5xx/429
+
+# Background Scheduler
+SCHEDULER_ENABLED=false             # Set to true to auto-start scheduler on server startup
+```
+
+#### 2. Manual CLI Commands (`cli.py`)
+Run jobs manually with real-time logging, checkpointing, and metrics:
+```bash
+# Inspect pool metrics, repository diversity, scheduler status, and rate-limits
+python cli.py status
+
+# Run candidate discovery across rotating topics (resumable)
+python cli.py discover --max-issues 100 --pages 3
+
+# Refresh active stored candidates (verifies open/closed status against GitHub)
+python cli.py refresh --batch-size 50
+
+# Stale lifecycle cleanup (marks candidates older than 90 days as stale)
+python cli.py cleanup --older-than-days 90
+
+# Run full ingestion pipeline sequentially (Discovery -> Refresh -> Cleanup)
+python cli.py run-all
+
+# Run the background scheduler continuously
+python cli.py scheduler --daemon
+
+# Inspect ingestion jobs history or a specific job ID
+python cli.py jobs --limit 10
+python cli.py jobs --job-id discovery_1234567890
+```
+
+#### 3. REST API Endpoints for Ingestion & Observability
+- `POST /api/ingestion/discover` — Trigger bounded candidate discovery across rotating topics.
+- `POST /api/ingestion/refresh` — Refresh a batch of active candidates and verify individual state.
+- `POST /api/ingestion/cleanup` — Evaluate candidate recency and mark stale candidates.
+- `POST /api/ingestion/run-all` — Trigger full discovery, refresh, and cleanup cycle.
+- `GET /api/ingestion/status` — Candidate pool metrics, repository diversity, lifecycle states, rate limits, and scheduler status.
+- `GET /api/ingestion/rate-limit` — Safe rate limit inspection (credentials strictly masked).
+- `GET /api/ingestion/jobs` — List past ingestion jobs with counts and status.
+- `GET /api/ingestion/jobs/{job_id}` — Inspect specific job checkpoints, errors, and metadata.
+- `POST /api/ingestion/scheduler/start` — Start the background periodic scheduler.
+- `POST /api/ingestion/scheduler/stop` — Stop the background periodic scheduler.
+- `GET /api/ingestion/scheduler/status` — Inspect background scheduler running state and cadences.
 
 ---
 
@@ -246,6 +320,3 @@ The test suite in `backend/tests/test_atlas_persistence.py` automatically valida
    }'
    ```
    Query `http://localhost:8000/api/issues?search=testorg` — exactly 1 document exists, its title is updated, and `comment_count: 2` was preserved!
-contributions, missing components, explanation, and algorithm version for every recommendation delivered.
-4. `feedback`: Audit records of `accepted`, `rejected`, and `completed` events linked to recommendations.
-5. `jobs`: Ingestion and refresh job execution logs, queries run, and counts of issues discovered, inserted, updated, and skipped.

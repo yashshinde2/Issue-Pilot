@@ -90,6 +90,13 @@ class IssueRecord(BaseModel):
     verification_notes: Optional[str] = None
     first_seen_at: Optional[str] = None
     last_seen_at: Optional[str] = None
+    closed_at: Optional[str] = None
+    last_activity_at: Optional[str] = None
+    repository_language: Optional[str] = None
+    discovery_query: Optional[str] = None
+    discovery_category: Optional[str] = None
+    last_verified_at: Optional[str] = None
+    refresh_status: Optional[str] = "active"
 
 class ComponentScores(BaseModel):
     skill_match: float
@@ -162,6 +169,9 @@ class JobRecord(BaseModel):
     issues_inserted: int = 0
     issues_updated: int = 0
     issues_skipped: int = 0
+    issues_marked_stale: int = 0
+    issues_marked_closed: int = 0
     errors: List[str] = Field(default_factory=list)
+    rate_limit_info: Optional[Dict[str, Any]] = None
     execution_metadata: Dict[str, Any] = Field(default_factory=dict)
 
