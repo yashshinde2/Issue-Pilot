@@ -453,43 +453,76 @@ class RecommendationRepository:
         self,
         user_id: str,
         recommendations: List[Dict[str, Any]],
-        algorithm_version: str = "1.0.0-phase1"
+        algorithm_version: str = "1.0.0-phase1",
+        run_id: Optional[str] = None,
+        audited_candidates: Optional[List[Dict[str, Any]]] = None
     ) -> int:
         database = self._get_db()
-        if not recommendations:
+        items_to_persist = audited_candidates if audited_candidates is not None else recommendations
+        if not items_to_persist:
             return 0
 
         now_iso = datetime.now(timezone.utc).isoformat()
-        docs = []
-        for rec in recommendations:
+        saved_count = 0
+
+        for rec in items_to_persist:
+            issue_id = rec.get("id") or rec.get("issue_id") or ""
             doc = {
                 "user_id": user_id,
-                "issue_id": rec.get("id"),
-                "native_id": str(rec.get("issue_number", "")),
+                "run_id": run_id or rec.get("run_id"),
+                "issue_id": issue_id,
+                "native_id": str(rec.get("issue_number", "") or rec.get("native_id", "")),
                 "repository_full_name": rec.get("repository_full_name"),
-                "rank": rec.get("rank"),
+                "original_rank": rec.get("original_rank") or rec.get("rank"),
+                "original_score": rec.get("original_score") if rec.get("original_score") is not None else (
+                    rec.get("scores", {}).get("final_score") if isinstance(rec.get("scores"), dict) else rec.get("final_score")
+                ),
+                "delivered_rank": rec.get("delivered_rank") if rec.get("delivered_rank") is not None else (
+                    rec.get("rank") if rec.get("decision", "included") == "included" else None
+                ),
+                "rank": rec.get("rank") if rec.get("rank") is not None else rec.get("delivered_rank"),
                 "final_score": rec.get("scores", {}).get("final_score") if isinstance(rec.get("scores"), dict) else rec.get("final_score"),
                 "scores": rec.get("scores"),
                 "effective_weights": rec.get("effective_weights"),
                 "weighted_contributions": rec.get("weighted_contributions"),
                 "missing_components": rec.get("missing_components", []),
                 "explanation": rec.get("explanation"),
+                "verification_status": rec.get("verification_status", "live_verified" if rec.get("verified") else "unverified"),
+                "verified_at": rec.get("verified_at") or rec.get("last_verified_at") or now_iso,
                 "verification_notes": rec.get("verification_notes"),
+                "decision": rec.get("decision", "included"),
+                "exclusion_reason": rec.get("exclusion_reason"),
+                "response_metadata": rec.get("response_metadata"),
                 "algorithm_version": algorithm_version,
-                "generated_at": now_iso
+                "generated_at": rec.get("generated_at") or now_iso
             }
-            docs.append(doc)
 
-        try:
-            res = database.recommendations.insert_many(docs)
-            return len(res.inserted_ids)
-        except PyMongoError as e:
-            logger.error("Failed to persist recommendations: %s", str(e))
-            raise
+            try:
+                if run_id:
+                    # Idempotent write keyed on (run_id, issue_id)
+                    database.recommendations.update_one(
+                        {"run_id": run_id, "issue_id": issue_id},
+                        {"$set": doc},
+                        upsert=True
+                    )
+                    saved_count += 1
+                else:
+                    database.recommendations.insert_one(doc)
+                    saved_count += 1
+            except PyMongoError as e:
+                logger.error("Failed to persist recommendation record for issue %s: %s", issue_id, str(e))
+                raise
+
+        return saved_count
 
     def get_user_recommendations(self, user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
         database = self._get_db()
         cursor = database.recommendations.find({"user_id": user_id}).sort("generated_at", -1).limit(limit)
+        return [_clean_doc(d) for d in cursor]
+
+    def get_run_recommendations(self, run_id: str) -> List[Dict[str, Any]]:
+        database = self._get_db()
+        cursor = database.recommendations.find({"run_id": run_id}).sort([("original_rank", 1), ("delivered_rank", 1)])
         return [_clean_doc(d) for d in cursor]
 
 

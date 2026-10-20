@@ -144,16 +144,25 @@ class FeedbackEvent(BaseModel):
 class RecommendationRecord(BaseModel):
     user_id: str
     issue_id: str
+    run_id: Optional[str] = None
     native_id: Optional[str] = None
     repository_full_name: Optional[str] = None
-    rank: int
+    rank: Optional[int] = None
+    original_rank: Optional[int] = None
+    original_score: Optional[float] = None
+    delivered_rank: Optional[int] = None
     final_score: float
     scores: Optional[Dict[str, Any]] = None
     effective_weights: Optional[Dict[str, float]] = None
     weighted_contributions: Optional[Dict[str, float]] = None
     missing_components: List[str] = Field(default_factory=list)
     explanation: Optional[str] = None
+    verification_status: Optional[str] = "unverified"
+    verified_at: Optional[str] = None
     verification_notes: Optional[str] = None
+    decision: Optional[str] = "included"  # included, rejected, skipped
+    exclusion_reason: Optional[str] = None
+    response_metadata: Optional[Dict[str, Any]] = None
     algorithm_version: str = "1.0.0-phase1"
     generated_at: Optional[str] = None
 

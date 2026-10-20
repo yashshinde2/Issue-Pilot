@@ -320,3 +320,136 @@ The test suite in `backend/tests/test_atlas_persistence.py` automatically valida
    }'
    ```
    Query `http://localhost:8000/api/issues?search=testorg` — exactly 1 document exists, its title is updated, and `comment_count: 2` was preserved!
+
+---
+
+### Milestone 4: Live GitHub Verification & Top-5 Personalized Recommendations
+
+Milestone 4 implements the live verification and recommendation delivery pipeline for Issue Pilot. It integrates the shared MongoDB Atlas candidate pool, the authoritative C++ ranking engine, and the live GitHub verification pipeline to deliver up to five verified, high-suitability issue recommendations.
+
+#### 1. Architecture & Pipeline Data-Flow
+
+```mermaid
+graph TD
+    REQ[Client Recommendation Request] --> RET[Retrieve Candidate Pool from MongoDB Atlas]
+    PROFILE[Contributor Profile & Skills] --> CPP[Authoritative C++ Ranking Engine]
+    RET --> CPP
+    
+    CPP --> SORT[Deterministic Shortlist: Default 30 Candidates]
+    SORT --> VER[Live GitHub Verification Loop]
+    
+    VER -->|Open & Unassigned| DELIV[Top-5 Verified Recommendation Delivery]
+    VER -->|Closed / Assigned / PR / 404| BACKFILL[Exclude & Backfill Next Ranked Candidate]
+    BACKFILL --> VER
+    VER -->|Rate Limited / Timeout| INCONCL[Record Inconclusive & Partial Result State]
+    
+    DELIV --> SNAP[(MongoDB Atlas: Auditable Recommendation Snapshots)]
+    INCONCL --> SNAP
+```
+
+#### 2. Verification & Eligibility Rules
+Before delivering recommendations, shortlisted candidates are verified against GitHub's live API:
+- **Issue Exists**: An issue returning HTTP 404 is excluded with an audit note indicating deletion or private repository restrictions.
+- **Open State**: The issue state must be `open`. Closed or completed issues are excluded.
+- **Pull Request Exclusion**: GitHub Issues API returns both issues and pull requests; any item containing a `"pull_request"` key is excluded.
+- **Assignment Check**: Any issue with an assignee (`assignee != null` or non-empty `assignees`) is excluded to prevent duplicated effort.
+- **Archived & Lock Restrictions**: If the repository is marked as archived or the issue has a lock reason, it is excluded.
+- **Renamed Repositories & Redirects**: HTTP 301/302 redirects and canonical repository URLs are tracked. A repository transfer or rename updates the canonical repository metadata and is never falsely invalidated.
+- **Operational Failures**:
+  - **HTTP 403 / 429**: Distinguishes rate limits (`x-ratelimit-remaining == 0`) from permission errors. Rate limits produce an inconclusive state and a clear operational warning.
+  - **HTTP 5xx & Network Failures**: Transient errors trigger bounded exponential backoff retries (`0.5s * 2^attempt`). If all retries are exhausted, the candidate is marked as **inconclusive** and is never falsely treated as closed.
+  - **Timeouts**: Recorded as inconclusive without mutating the candidate's active state in the database.
+
+#### 3. Shortlist Backfill & Partial Results
+- Shortlist evaluation processes candidates in strictly descending final score order.
+- When an ineligible candidate is encountered, it is excluded with a recorded reason, and the verification loop immediately proceeds to backfill from the next candidate in the shortlist.
+- The loop terminates once **5 valid recommendations** are collected or the configurable verification budget is exhausted.
+- If fewer than 5 valid candidates remain, the API delivers the available valid candidates with `is_partial_result: true` and an explicit `partial_result_reason`. The system never fabricates synthetic recommendations.
+
+#### 4. Persistence & Audit Snapshots
+Each recommendation run persists an audit trail into MongoDB Atlas:
+- **Run ID (`run_id`)**: A stable identifier guaranteeing idempotent writes. Retrying a request with the same `run_id` updates existing records without duplication.
+- **Original & Delivered Position**: Both original rank and delivered rank (1..5) are preserved alongside original and final scores.
+- **Authoritative Scores**: All 6 component scores (`skill_match`, `difficulty_match`, `responsiveness`, `repository_health`, `feedback`, `freshness`) and effective weights.
+- **Decision & Audit Reason**: Whether the candidate was `included`, `rejected`, `skipped`, or `inconclusive`, along with the specific exclusion reason.
+- **Sensitive Data Scrubbing**: No tokens, authorization headers, or private credentials are stored.
+
+#### 5. Configuration & Environment Variables
+
+| Variable | Default | Purpose |
+| :--- | :---: | :--- |
+| `FINAL_RECOMMENDATION_COUNT` | `5` | Maximum delivered recommendations. |
+| `VERIFICATION_CANDIDATE_LIMIT` | `30` | Default candidate shortlist size for verification. |
+| `VERIFICATION_TIMEOUT_SECONDS` | `5` | GitHub verification request timeout per candidate. |
+| `VERIFICATION_MAX_RETRIES` | `2` | Bounded retries for transient 5xx/network errors. |
+| `VERIFICATION_CACHE_TTL_SECONDS`| `300` | Short-lived in-memory caching interval for verified issues. |
+| `VERIFICATION_CONCURRENCY` | `5` | Maximum concurrent verification workers. |
+| `GITHUB_RATE_LIMIT_BUFFER` | `10` | Buffer quota threshold to pause/defer requests. |
+| `GITHUB_TOKEN` | `""` | GitHub personal access token (5,000 req/hr vs 60 req/hr). |
+
+#### 6. REST API Endpoints
+
+- **`POST /api/recommendations/personalized`**:
+  Request Body:
+  ```json
+  {
+    "user_id": "alice_dev",
+    "target_count": 5,
+    "shortlist_size": 30,
+    "prefer_live_atlas": true,
+    "demo_mode": false,
+    "technology_filter": "Python",
+    "run_id": "custom-audit-run-001"
+  }
+  ```
+  Response:
+  ```json
+  {
+    "run_id": "custom-audit-run-001",
+    "data_source": "atlas_candidates",
+    "algorithm_version": "1.0.0-phase1",
+    "user_id": "alice_dev",
+    "total_candidates_considered": 45,
+    "total_ranked": 30,
+    "shortlist_size": 30,
+    "candidates_verified": 5,
+    "candidates_excluded": 2,
+    "candidates_inconclusive": 0,
+    "delivered_count": 5,
+    "is_partial_result": false,
+    "recommendations": [ ... ],
+    "generated_at": "2026-10-20T18:00:00Z"
+  }
+  ```
+
+- **`GET /api/recommendations/runs/{run_id}`**:
+  Retrieves complete audit trail for a recommendation run, including all delivered, rejected, and skipped candidates.
+
+- **`GET /api/recommendations/snapshots/{user_id}`**:
+  Retrieves historical recommendation snapshots for a contributor.
+
+#### 7. Running the Automated Test Suite
+
+Run the full 43-test automated test suite:
+```bash
+pytest -v
+```
+
+Or run the Milestone 4 verification suite individually:
+```bash
+pytest backend/tests/test_milestone4_verification.py -v
+```
+
+#### 8. Troubleshooting
+
+- **GitHub Rate Limit Exceeded (HTTP 403 / 429)**:
+  - Check your token status using `curl http://localhost:8000/api/ingestion/rate-limit`.
+  - Configure a personal access token in `.env` (`GITHUB_TOKEN=ghp_...`).
+  - Inconclusive candidates will be flagged with a warning in the response without crashing or marking valid issues as closed.
+- **Unavailable Repositories & Redirects**:
+  - The verifier automatically tracks HTTP 301/302 redirects and updates canonical repository names.
+  - If a repository was made private or deleted, HTTP 404 is returned and the candidate is excluded with reason `"Issue or repository no longer exists (HTTP 404)"`.
+- **Database Connection Issues**:
+  - In live mode, if MongoDB Atlas is unreachable, the API returns HTTP 503 rather than silently fabricating mock results.
+  - To test without database credentials, set `"demo_mode": true`.
+

@@ -160,6 +160,10 @@ class Database:
                 [("generated_at", DESCENDING)],
                 name="idx_generated_at"
             )
+            target_db.recommendations.create_index(
+                [("run_id", ASCENDING), ("issue_id", ASCENDING)],
+                name="idx_rec_run_issue"
+            )
 
             # -------------------------------------------------------------
             # Collection 4: feedback

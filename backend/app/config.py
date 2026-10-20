@@ -44,6 +44,10 @@ class Settings(BaseModel):
     redis_url: str = os.getenv("REDIS_URL", "")
     final_recommendation_count: int = int(os.getenv("FINAL_RECOMMENDATION_COUNT", "5"))
     verification_candidate_limit: int = int(os.getenv("VERIFICATION_CANDIDATE_LIMIT", "30"))
+    verification_timeout_seconds: int = int(os.getenv("VERIFICATION_TIMEOUT_SECONDS", "5"))
+    verification_max_retries: int = int(os.getenv("VERIFICATION_MAX_RETRIES", "2"))
+    verification_cache_ttl_seconds: int = int(os.getenv("VERIFICATION_CACHE_TTL_SECONDS", "300"))
+    verification_concurrency: int = int(os.getenv("VERIFICATION_CONCURRENCY", "5"))
     cpp_engine_path: str = os.getenv("CPP_ENGINE_PATH", "ranking_engine/build/issue_pilot_ranking_engine.exe")
 
     @property
