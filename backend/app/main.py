@@ -15,25 +15,11 @@ from app.routes.issues import router as issues_router
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("issue_pilot")
 
-app = FastAPI(
-    title="Issue Pilot API",
-    description="Backend orchestration for Issue Pilot: GitHub Ingestion + MongoDB Atlas + C++ Ranking Engine",
-    version="1.1.0"
-)
-
-# Enable CORS for frontend integration
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
+from contextlib import asynccontextmanager
 from app.ingestion.scheduler import scheduler_service
 
-@app.on_event("startup")
-def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     logger.info("Initializing Issue Pilot backend services...")
     atlas_connected = db.connect()
     if atlas_connected:
@@ -50,11 +36,27 @@ def startup_event():
         logger.info("Auto-starting background ingestion scheduler...")
         scheduler_service.start()
 
-@app.on_event("shutdown")
-def shutdown_event():
+    yield
+
     logger.info("Shutting down Issue Pilot backend services...")
     scheduler_service.stop()
     db.disconnect()
+
+app = FastAPI(
+    title="Issue Pilot API",
+    description="Backend orchestration for Issue Pilot: GitHub Ingestion + MongoDB Atlas + C++ Ranking Engine",
+    version="1.1.0",
+    lifespan=lifespan
+)
+
+# Enable CORS for frontend integration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/api/health", tags=["Health"])
 def health_check():

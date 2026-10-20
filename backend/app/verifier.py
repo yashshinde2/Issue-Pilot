@@ -2,6 +2,7 @@ import re
 import time
 import logging
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Tuple, Optional
 import requests
@@ -62,6 +63,12 @@ class LiveVerifier:
         self._lock = threading.Lock()
         # In-memory verification cache: (repo, issue_number) -> dict
         self._cache: Dict[Tuple[str, int], Dict[str, Any]] = {}
+        # In-memory rate-limit tracking
+        self.rate_limit_state: Dict[str, Any] = {
+            "limit": 5000 if self._token else 60,
+            "remaining": 5000 if self._token else 60,
+            "reset": int(time.time()) + 3600
+        }
 
         headers = {
             "Accept": "application/vnd.github.v3+json",
@@ -73,9 +80,27 @@ class LiveVerifier:
             self.session.headers.update(headers)
 
     def clear_cache(self):
-        """Clear cached verification results."""
+        """Clear cached verification results and reset rate limit state."""
         with self._lock:
             self._cache.clear()
+            self.rate_limit_state = {
+                "limit": 5000 if self._token else 60,
+                "remaining": 5000 if self._token else 60,
+                "reset": int(time.time()) + 3600
+            }
+
+    def _update_rate_limit_from_headers(self, headers: Dict[str, str]):
+        """Thread-safe rate limit tracking from GitHub response headers."""
+        try:
+            with self._lock:
+                if "x-ratelimit-remaining" in headers:
+                    self.rate_limit_state["remaining"] = int(headers["x-ratelimit-remaining"])
+                if "x-ratelimit-reset" in headers:
+                    self.rate_limit_state["reset"] = int(headers["x-ratelimit-reset"])
+                if "x-ratelimit-limit" in headers:
+                    self.rate_limit_state["limit"] = int(headers["x-ratelimit-limit"])
+        except (ValueError, TypeError):
+            pass
 
     def _extract_canonical_repo(self, repo_full_name: str, issue_number: int, data: Dict[str, Any]) -> Tuple[str, str]:
         """
@@ -115,6 +140,14 @@ class LiveVerifier:
         - Respects rate limits, transient 5xx retries, and records inconclusive state without marking closed.
         - Uses conditional requests (ETags) and short-lived caching.
         """
+        if not repo_full_name or "/" not in repo_full_name or issue_number <= 0:
+            return VerificationResult(
+                is_valid=False,
+                status="excluded",
+                reason="Invalid repository identity or issue number",
+                canonical_repo=repo_full_name
+            )
+
         timeout_val = timeout or settings.verification_timeout_seconds
         retries_val = max(1, max_retries or settings.verification_max_retries)
         cache_key = (repo_full_name.lower(), issue_number)
@@ -139,6 +172,20 @@ class LiveVerifier:
                     )
                 cached_etag = entry.get("etag")
 
+            # Pre-check rate limit remaining against buffer
+            if self.rate_limit_state.get("remaining", 999) <= settings.github_rate_limit_buffer:
+                logger.warning("GitHub API rate limit remaining (%d) <= buffer (%d). Deferring verification.",
+                               self.rate_limit_state.get("remaining", 0), settings.github_rate_limit_buffer)
+                return VerificationResult(
+                    is_valid=False,
+                    status="inconclusive",
+                    reason=f"GitHub API rate limit budget exhausted (Remaining: {self.rate_limit_state.get('remaining', 0)} <= Buffer: {settings.github_rate_limit_buffer}); verification deferred.",
+                    canonical_repo=repo_full_name,
+                    is_operational_failure=True,
+                    is_inconclusive=True,
+                    response_metadata={"rate_limited": True, "remaining": self.rate_limit_state.get("remaining", 0)}
+                )
+
         url = f"{self._base_url}/repos/{repo_full_name}/issues/{issue_number}"
         req_headers = {}
         if cached_etag:
@@ -153,6 +200,9 @@ class LiveVerifier:
                     timeout=timeout_val,
                     allow_redirects=True
                 )
+
+                if hasattr(resp, "headers"):
+                    self._update_rate_limit_from_headers(resp.headers)
 
                 # 1. Check HTTP 304 Not Modified
                 if resp.status_code == 304 and cache_key in self._cache:
@@ -176,6 +226,8 @@ class LiveVerifier:
                         or "rate limit" in resp.text.lower()
                     )
                     if is_rate_limit:
+                        with self._lock:
+                            self.rate_limit_state["remaining"] = 0
                         # Rate limit reached; inconclusive state, NOT proof of closure!
                         return VerificationResult(
                             is_valid=False,
@@ -389,12 +441,14 @@ class LiveVerifier:
         max_budget: int = 30,
         demo_mode: bool = False,
         timeout: Optional[int] = None,
-        max_retries: Optional[int] = None
+        max_retries: Optional[int] = None,
+        concurrency: Optional[int] = None
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
         """
         Verify candidates in descending rank order until target_count valid recommendations
         have been collected or max_budget is exhausted.
         Backfills lower-ranked candidates when higher-ranked ones are excluded.
+        Applies bounded concurrency while strictly preserving rank-order priority.
 
         Returns:
             Tuple of:
@@ -405,6 +459,20 @@ class LiveVerifier:
         start_time = time.time()
         now_iso = datetime.now(timezone.utc).isoformat()
 
+        if not ranked_items:
+            return [], [], {
+                "candidates_ranked": 0,
+                "shortlist_size": 0,
+                "candidates_verified": 0,
+                "candidates_excluded": 0,
+                "candidates_inconclusive": 0,
+                "delivered_count": 0,
+                "is_partial_result": True,
+                "partial_result_reason": "No ranked candidates provided.",
+                "warning": None,
+                "duration_ms": 0
+            }
+
         shortlist = ranked_items[:max_budget]
         delivered_recommendations: List[Dict[str, Any]] = []
         audited_candidates: List[Dict[str, Any]] = []
@@ -413,169 +481,222 @@ class LiveVerifier:
         count_excluded = 0
         count_inconclusive = 0
 
-        for original_index, candidate in enumerate(shortlist):
-            original_rank = original_index + 1
-            original_score = (
-                candidate.get("scores", {}).get("final_score")
-                if isinstance(candidate.get("scores"), dict)
-                else candidate.get("final_score", 0.0)
-            )
+        eff_concurrency = max(1, concurrency or settings.verification_concurrency)
 
-            # If target count already satisfied, remaining shortlist candidates are skipped
-            if len(delivered_recommendations) >= target_count:
+        # Batch verification loop with bounded concurrency
+        batch_size = eff_concurrency
+        i = 0
+        target_fulfilled = False
+
+        while i < len(shortlist) and not target_fulfilled:
+            chunk = shortlist[i:i + batch_size]
+            results_map: Dict[int, VerificationResult] = {}
+
+            # Identify which items need live network calls
+            tasks_to_run = []
+            for idx_in_chunk, candidate in enumerate(chunk):
+                global_idx = i + idx_in_chunk
+                repo_full_name = candidate.get("repository_full_name", "")
+                issue_number = candidate.get("issue_number", 0)
+                is_sample = (
+                    demo_mode
+                    or candidate.get("id", "").startswith("sample-")
+                    or not repo_full_name
+                    or "/" not in repo_full_name
+                )
+                if is_sample:
+                    results_map[global_idx] = VerificationResult(
+                        is_valid=True,
+                        status="sample_verified",
+                        reason="Verified deterministically in demonstration environment",
+                        canonical_repo=repo_full_name
+                    )
+                else:
+                    tasks_to_run.append((global_idx, repo_full_name, issue_number))
+
+            # Concurrently verify live tasks for this chunk
+            if tasks_to_run:
+                if len(tasks_to_run) == 1:
+                    g_idx, r_name, i_num = tasks_to_run[0]
+                    results_map[g_idx] = self.verify_issue(r_name, i_num, timeout=timeout, max_retries=max_retries)
+                else:
+                    with ThreadPoolExecutor(max_workers=min(eff_concurrency, len(tasks_to_run))) as executor:
+                        future_to_idx = {
+                            executor.submit(self.verify_issue, r_name, i_num, timeout, max_retries): g_idx
+                            for g_idx, r_name, i_num in tasks_to_run
+                        }
+                        for future in future_to_idx:
+                            g_idx = future_to_idx[future]
+                            try:
+                                results_map[g_idx] = future.result()
+                            except Exception as e:
+                                results_map[g_idx] = VerificationResult(
+                                    is_valid=False,
+                                    status="inconclusive",
+                                    reason=f"Executor worker failure: {str(e)}",
+                                    is_operational_failure=True,
+                                    is_inconclusive=True
+                                )
+
+            # Evaluate chunk in exact rank order
+            for idx_in_chunk, candidate in enumerate(chunk):
+                global_idx = i + idx_in_chunk
+                original_rank = global_idx + 1
+                original_score = (
+                    candidate.get("scores", {}).get("final_score")
+                    if isinstance(candidate.get("scores"), dict)
+                    else candidate.get("final_score", 0.0)
+                )
+
+                if target_fulfilled:
+                    # Skip candidate once target count is reached
+                    skip_audit = dict(candidate)
+                    skip_audit["original_rank"] = original_rank
+                    skip_audit["original_score"] = original_score
+                    skip_audit["delivered_rank"] = None
+                    skip_audit["rank"] = None
+                    skip_audit["decision"] = "skipped"
+                    skip_audit["exclusion_reason"] = "Target recommendation count fulfilled"
+                    skip_audit["verification_status"] = "skipped"
+                    audited_candidates.append(skip_audit)
+                    continue
+
+                ver_res = results_map[global_idx]
+
+                if ver_res.is_valid:
+                    count_verified += 1
+                    delivered_rank = len(delivered_recommendations) + 1
+                    item = dict(candidate)
+                    item["original_rank"] = original_rank
+                    item["original_score"] = original_score
+                    item["delivered_rank"] = delivered_rank
+                    item["rank"] = delivered_rank
+                    item["verified"] = True
+                    item["verification_status"] = ver_res.status
+                    item["verified_at"] = now_iso
+                    item["last_verified_at"] = now_iso
+                    item["verification_notes"] = ver_res.reason
+                    item["decision"] = "included"
+                    item["exclusion_reason"] = None
+                    item["response_metadata"] = ver_res.response_metadata
+
+                    # Update canonical repo / URL if redirected/renamed
+                    repo_full_name = candidate.get("repository_full_name", "")
+                    issue_number = candidate.get("issue_number", 0)
+                    if ver_res.canonical_repo and ver_res.canonical_repo != repo_full_name:
+                        item["repository_full_name"] = ver_res.canonical_repo
+                        item["canonical_repo"] = ver_res.canonical_repo
+                    if ver_res.canonical_url:
+                        item["canonical_url"] = ver_res.canonical_url
+                        item["issue_url"] = ver_res.canonical_url
+
+                    delivered_recommendations.append(item)
+                    audited_candidates.append(item)
+
+                    # Update MongoDB Atlas candidate pool state if live
+                    if db.db is not None and ver_res.status == "live_verified":
+                        try:
+                            update_fields = {
+                                "verification_status": "live_verified",
+                                "last_verified_at": now_iso,
+                                "state": "open",
+                                "is_assigned": False
+                            }
+                            if ver_res.canonical_repo:
+                                update_fields["repository_full_name"] = ver_res.canonical_repo
+                            if ver_res.canonical_url:
+                                update_fields["issue_url"] = ver_res.canonical_url
+                            db.db.issues.update_one(
+                                {"repository_full_name": repo_full_name, "issue_number": issue_number},
+                                {"$set": update_fields}
+                            )
+                        except Exception as e:
+                            logger.debug("Could not update candidate pool in Atlas: %s", str(e))
+
+                    if len(delivered_recommendations) >= target_count:
+                        target_fulfilled = True
+
+                elif ver_res.status == "excluded":
+                    count_excluded += 1
+                    repo_full_name = candidate.get("repository_full_name", "")
+                    issue_number = candidate.get("issue_number", 0)
+                    logger.info("Excluding candidate #%d in %s: %s", issue_number, repo_full_name, ver_res.reason)
+                    audit_item = dict(candidate)
+                    audit_item["original_rank"] = original_rank
+                    audit_item["original_score"] = original_score
+                    audit_item["delivered_rank"] = None
+                    audit_item["rank"] = None
+                    audit_item["verified"] = False
+                    audit_item["verification_status"] = "excluded"
+                    audit_item["verified_at"] = now_iso
+                    audit_item["last_verified_at"] = now_iso
+                    audit_item["verification_notes"] = ver_res.reason
+                    audit_item["decision"] = "rejected"
+                    audit_item["exclusion_reason"] = ver_res.reason
+                    audit_item["response_metadata"] = ver_res.response_metadata
+                    audited_candidates.append(audit_item)
+
+                    # Update MongoDB Atlas candidate pool record
+                    if db.db is not None:
+                        try:
+                            pool_updates = {
+                                "verification_status": "excluded",
+                                "last_verified_at": now_iso,
+                                "verification_notes": ver_res.reason
+                            }
+                            if "closed" in ver_res.reason.lower():
+                                pool_updates["state"] = "closed"
+                            elif "assigned" in ver_res.reason.lower():
+                                pool_updates["is_assigned"] = True
+                            db.db.issues.update_one(
+                                {"repository_full_name": repo_full_name, "issue_number": issue_number},
+                                {"$set": pool_updates}
+                            )
+                        except Exception as e:
+                            logger.debug("Could not update candidate exclusion in Atlas: %s", str(e))
+
+                else:
+                    # Inconclusive operational failure (rate limit, network outage, timeout)
+                    # DO NOT label the issue closed or invalid!
+                    count_inconclusive += 1
+                    repo_full_name = candidate.get("repository_full_name", "")
+                    issue_number = candidate.get("issue_number", 0)
+                    logger.warning("Candidate verification inconclusive for #%d in %s: %s", issue_number, repo_full_name, ver_res.reason)
+                    audit_item = dict(candidate)
+                    audit_item["original_rank"] = original_rank
+                    audit_item["original_score"] = original_score
+                    audit_item["delivered_rank"] = None
+                    audit_item["rank"] = None
+                    audit_item["verified"] = False
+                    audit_item["verification_status"] = "inconclusive"
+                    audit_item["verified_at"] = now_iso
+                    audit_item["last_verified_at"] = now_iso
+                    audit_item["verification_notes"] = ver_res.reason
+                    audit_item["decision"] = "inconclusive"
+                    audit_item["exclusion_reason"] = ver_res.reason
+                    audit_item["response_metadata"] = ver_res.response_metadata
+                    audited_candidates.append(audit_item)
+
+            i += batch_size
+
+        # Any remaining un-evaluated candidates in shortlist after target fulfilled
+        while i < len(shortlist):
+            for candidate in shortlist[i:i + batch_size]:
+                original_rank = len(audited_candidates) + 1
                 skip_audit = dict(candidate)
                 skip_audit["original_rank"] = original_rank
-                skip_audit["original_score"] = original_score
+                skip_audit["original_score"] = (
+                    candidate.get("scores", {}).get("final_score")
+                    if isinstance(candidate.get("scores"), dict)
+                    else candidate.get("final_score", 0.0)
+                )
                 skip_audit["delivered_rank"] = None
                 skip_audit["rank"] = None
                 skip_audit["decision"] = "skipped"
                 skip_audit["exclusion_reason"] = "Target recommendation count fulfilled"
                 skip_audit["verification_status"] = "skipped"
                 audited_candidates.append(skip_audit)
-                continue
-
-            repo_full_name = candidate.get("repository_full_name", "")
-            issue_number = candidate.get("issue_number", 0)
-            is_sample = (
-                demo_mode
-                or candidate.get("id", "").startswith("sample-")
-                or not repo_full_name
-                or "/" not in repo_full_name
-            )
-
-            if is_sample:
-                # Deterministic demonstration candidate verification
-                count_verified += 1
-                delivered_rank = len(delivered_recommendations) + 1
-                item = dict(candidate)
-                item["original_rank"] = original_rank
-                item["original_score"] = original_score
-                item["delivered_rank"] = delivered_rank
-                item["rank"] = delivered_rank
-                item["verified"] = True
-                item["verification_status"] = "sample_verified"
-                item["verified_at"] = now_iso
-                item["last_verified_at"] = now_iso
-                item["verification_notes"] = "Verified deterministically in demonstration environment"
-                item["decision"] = "included"
-                item["exclusion_reason"] = None
-
-                delivered_recommendations.append(item)
-                audited_candidates.append(item)
-                continue
-
-            # Live GitHub API verification
-            ver_res = self.verify_issue(
-                repo_full_name,
-                issue_number,
-                timeout=timeout,
-                max_retries=max_retries
-            )
-
-            if ver_res.is_valid:
-                count_verified += 1
-                delivered_rank = len(delivered_recommendations) + 1
-                item = dict(candidate)
-                item["original_rank"] = original_rank
-                item["original_score"] = original_score
-                item["delivered_rank"] = delivered_rank
-                item["rank"] = delivered_rank
-                item["verified"] = True
-                item["verification_status"] = ver_res.status
-                item["verified_at"] = now_iso
-                item["last_verified_at"] = now_iso
-                item["verification_notes"] = ver_res.reason
-                item["decision"] = "included"
-                item["exclusion_reason"] = None
-                item["response_metadata"] = ver_res.response_metadata
-
-                # Update canonical repo / URL if redirected/renamed
-                if ver_res.canonical_repo and ver_res.canonical_repo != repo_full_name:
-                    item["repository_full_name"] = ver_res.canonical_repo
-                    item["canonical_repo"] = ver_res.canonical_repo
-                if ver_res.canonical_url:
-                    item["canonical_url"] = ver_res.canonical_url
-                    item["issue_url"] = ver_res.canonical_url
-
-                delivered_recommendations.append(item)
-                audited_candidates.append(item)
-
-                # Update MongoDB Atlas candidate pool state
-                if db.db is not None:
-                    try:
-                        update_fields = {
-                            "verification_status": "live_verified",
-                            "last_verified_at": now_iso,
-                            "state": "open",
-                            "is_assigned": False
-                        }
-                        if ver_res.canonical_repo:
-                            update_fields["repository_full_name"] = ver_res.canonical_repo
-                        if ver_res.canonical_url:
-                            update_fields["issue_url"] = ver_res.canonical_url
-                        db.db.issues.update_one(
-                            {"repository_full_name": repo_full_name, "issue_number": issue_number},
-                            {"$set": update_fields}
-                        )
-                    except Exception as e:
-                        logger.debug("Could not update candidate pool in Atlas: %s", str(e))
-
-            elif ver_res.status == "excluded":
-                count_excluded += 1
-                logger.info("Excluding candidate #%d in %s: %s", issue_number, repo_full_name, ver_res.reason)
-                audit_item = dict(candidate)
-                audit_item["original_rank"] = original_rank
-                audit_item["original_score"] = original_score
-                audit_item["delivered_rank"] = None
-                audit_item["rank"] = None
-                audit_item["verified"] = False
-                audit_item["verification_status"] = "excluded"
-                audit_item["verified_at"] = now_iso
-                audit_item["last_verified_at"] = now_iso
-                audit_item["verification_notes"] = ver_res.reason
-                audit_item["decision"] = "rejected"
-                audit_item["exclusion_reason"] = ver_res.reason
-                audit_item["response_metadata"] = ver_res.response_metadata
-                audited_candidates.append(audit_item)
-
-                # Update MongoDB Atlas candidate pool record
-                if db.db is not None:
-                    try:
-                        pool_updates = {
-                            "verification_status": "excluded",
-                            "last_verified_at": now_iso,
-                            "verification_notes": ver_res.reason
-                        }
-                        if "closed" in ver_res.reason.lower():
-                            pool_updates["state"] = "closed"
-                        elif "assigned" in ver_res.reason.lower():
-                            pool_updates["is_assigned"] = True
-                        db.db.issues.update_one(
-                            {"repository_full_name": repo_full_name, "issue_number": issue_number},
-                            {"$set": pool_updates}
-                        )
-                    except Exception as e:
-                        logger.debug("Could not update candidate exclusion in Atlas: %s", str(e))
-
-            else:
-                # Inconclusive operational failure (rate limit, network outage, timeout)
-                # DO NOT label the issue closed or invalid!
-                count_inconclusive += 1
-                logger.warning("Candidate verification inconclusive for #%d in %s: %s", issue_number, repo_full_name, ver_res.reason)
-                audit_item = dict(candidate)
-                audit_item["original_rank"] = original_rank
-                audit_item["original_score"] = original_score
-                audit_item["delivered_rank"] = None
-                audit_item["rank"] = None
-                audit_item["verified"] = False
-                audit_item["verification_status"] = "inconclusive"
-                audit_item["verified_at"] = now_iso
-                audit_item["last_verified_at"] = now_iso
-                audit_item["verification_notes"] = ver_res.reason
-                audit_item["decision"] = "inconclusive"
-                audit_item["exclusion_reason"] = ver_res.reason
-                audit_item["response_metadata"] = ver_res.response_metadata
-                audited_candidates.append(audit_item)
+            i += batch_size
 
         elapsed_ms = int((time.time() - start_time) * 1000)
         is_partial = len(delivered_recommendations) < target_count

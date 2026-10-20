@@ -271,10 +271,11 @@ SAMPLE_ISSUES = [
 
 @router.get("/sample-data")
 def get_sample_data():
+    weights_default = RankingWeights()
     return {
         "profiles": SAMPLE_PROFILES,
         "issues": SAMPLE_ISSUES,
-        "default_weights": RankingWeights().dict()
+        "default_weights": weights_default.model_dump() if hasattr(weights_default, "model_dump") else weights_default.dict()
     }
 
 @router.post("/rank")
@@ -282,10 +283,14 @@ def rank_simulator(req: SimulatorRequest):
     try:
         # Use provided candidates or fall back to default samples
         candidates = req.candidates if req.candidates else [IssueRecord(**i) for i in SAMPLE_ISSUES]
+        profile_dict = req.profile.model_dump() if hasattr(req.profile, "model_dump") else req.profile.dict()
+        w = req.weights if req.weights else RankingWeights()
+        weights_dict = w.model_dump() if hasattr(w, "model_dump") else w.dict()
+        candidates_list = [c.model_dump() if hasattr(c, "model_dump") else c.dict() for c in candidates]
         payload = {
-            "profile": req.profile.dict(),
-            "weights": req.weights.dict() if req.weights else RankingWeights().dict(),
-            "candidates": [c.dict() for c in candidates]
+            "profile": profile_dict,
+            "weights": weights_dict,
+            "candidates": candidates_list
         }
         # Execute authoritative C++ ranking engine
         result = cpp_client.execute_ranking(payload)

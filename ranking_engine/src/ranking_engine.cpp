@@ -19,6 +19,18 @@ double RankingEngine::calculate_skill_match(const ContributorProfile& profile,
         auto it = profile.skills.find(t.technology);
         if (it != profile.skills.end()) {
             contributor_skill = it->second.score;
+        } else {
+            // Case-insensitive fallback for robust technology matching
+            std::string t_lower = t.technology;
+            std::transform(t_lower.begin(), t_lower.end(), t_lower.begin(), ::tolower);
+            for (const auto& kv : profile.skills) {
+                std::string s_lower = kv.first;
+                std::transform(s_lower.begin(), s_lower.end(), s_lower.begin(), ::tolower);
+                if (s_lower == t_lower) {
+                    contributor_skill = kv.second.score;
+                    break;
+                }
+            }
         }
         match_sum += (contributor_skill * t.normalized_relevance);
     }

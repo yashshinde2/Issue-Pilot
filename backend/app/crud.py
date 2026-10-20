@@ -55,7 +55,7 @@ class IssueRepository:
         database = self._get_db()
 
         if isinstance(issue_data, IssueRecord):
-            data = issue_data.dict() if hasattr(issue_data, "dict") else issue_data.model_dump()
+            data = issue_data.model_dump() if hasattr(issue_data, "model_dump") else issue_data.dict()
         elif isinstance(issue_data, dict):
             data = dict(issue_data)
         else:
@@ -355,7 +355,7 @@ class UserRepository:
         database = self._get_db()
 
         if isinstance(profile, ContributorProfile):
-            data = profile.dict() if hasattr(profile, "dict") else profile.model_dump()
+            data = profile.model_dump() if hasattr(profile, "model_dump") else profile.dict()
         elif isinstance(profile, dict):
             data = dict(profile)
         else:
@@ -408,7 +408,7 @@ class UserRepository:
         """
         database = self._get_db()
         if isinstance(profile, ContributorProfile):
-            data = profile.dict() if hasattr(profile, "dict") else profile.model_dump()
+            data = profile.model_dump() if hasattr(profile, "model_dump") else profile.dict()
         else:
             data = dict(profile)
 
@@ -536,7 +536,7 @@ class FeedbackRepository:
     def record_feedback(self, event: Union[dict, FeedbackEvent]) -> Dict[str, Any]:
         database = self._get_db()
         if isinstance(event, FeedbackEvent):
-            data = event.dict() if hasattr(event, "dict") else event.model_dump()
+            data = event.model_dump() if hasattr(event, "model_dump") else event.dict()
         else:
             data = dict(event)
 

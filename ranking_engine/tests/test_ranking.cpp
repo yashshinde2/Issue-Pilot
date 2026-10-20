@@ -203,7 +203,22 @@ int main() {
         report_test("Assigned Issue Ineligibility", !assigned_issue.is_eligible(), 0.0, assigned_issue.is_eligible() ? 1.0 : 0.0);
     }
 
-    std::cout << "\nALL 10 UNIT TESTS PASSED SUCCESSFULLY!\n";
+    // Test 11: Case-Insensitive Skill Match Robustness
+    {
+        issue_pilot::ContributorProfile profile;
+        profile.skills["Python"] = issue_pilot::ContributorSkill{"Python", 90.0, 1.0};
+        profile.skills["FastAPI"] = issue_pilot::ContributorSkill{"FastAPI", 80.0, 1.0};
+
+        issue_pilot::IssueRecord issue;
+        // Issue technologies provided in lowercase
+        issue.technologies.push_back(issue_pilot::TechnologyRelevance{"python", 1.0, 0.0});
+        issue.technologies.push_back(issue_pilot::TechnologyRelevance{"fastapi", 1.0, 0.0});
+
+        double s = engine.calculate_skill_match(profile, issue);
+        report_test("Case-Insensitive Skill Matching", std::abs(s - 85.0) < 0.001, 85.0, s);
+    }
+
+    std::cout << "\nALL 11 UNIT TESTS PASSED SUCCESSFULLY!\n";
     std::cout << "========================================\n";
     return 0;
 }
