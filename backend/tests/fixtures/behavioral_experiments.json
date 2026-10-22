@@ -89,7 +89,12 @@
     "profile": {
       "user_id": "test_user_exp_c",
       "capability": 70.0,
-      "skills": {"Python": {"score": 80.0, "confidence": 1.0}}
+      "skills": {"Python": {"score": 80.0, "confidence": 1.0}},
+      "has_feedback_history": true,
+      "accepted_count": 10,
+      "rejected_count": 5,
+      "completed_count": 5,
+      "similarity_to_history": 80.0
     },
     "issue_fresh": {
       "id": "exp_c_fresh",
@@ -129,8 +134,8 @@
       "has_feedback_history": true,
       "similarity_to_history": 80.0
     },
-    "counts_initial": {"accepted": 10, "rejected": 10, "completed": 5},
-    "counts_increased": {"accepted": 20, "rejected": 5, "completed": 16}
+    "counts_initial": {"accepted_count": 10, "rejected_count": 10, "completed_count": 5},
+    "counts_increased": {"accepted_count": 20, "rejected_count": 5, "completed_count": 16}
   },
   "experiment_e_missing_data": {
     "profile_cold_start": {

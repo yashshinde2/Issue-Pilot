@@ -1,0 +1,446 @@
+{
+  "dataset_metadata": {
+    "name": "Issue Pilot Ground-Truth Evaluation Benchmark Dataset",
+    "version": "1.0.0",
+    "description": "Manually reviewed pilot dataset of contributor profiles paired with candidate GitHub issues and expert graded relevance annotations (0-3 scale).",
+    "label_definitions": {
+      "3": "Highly Relevant: Strong technology alignment, well-matched difficulty to contributor capability, active/healthy repo, and prompt maintainers.",
+      "2": "Relevant: Good skill alignment and feasible difficulty, acceptable repository health.",
+      "1": "Marginally Relevant: Partial skill overlap, notable difficulty mismatch, or sluggish maintainer responsiveness.",
+      "0": "Irrelevant: Completely mismatched technology stack, extreme difficulty mismatch, or inactive project."
+    },
+    "leakage_prevention": "All profile features reflect contributor state at query point in time; zero future feedback or contribution outcomes are used."
+  },
+  "queries": [
+    {
+      "query_id": "query_1_backend_python",
+      "contributor_profile": {
+        "user_id": "dev_alex_python",
+        "capability": 75.0,
+        "skills": {
+          "Python": {"score": 90.0, "confidence": 1.0},
+          "FastAPI": {"score": 85.0, "confidence": 1.0},
+          "MongoDB": {"score": 75.0, "confidence": 1.0}
+        },
+        "has_feedback_history": false
+      },
+      "candidates": [
+        {
+          "id": "q1_cand_1",
+          "issue_number": 101,
+          "title": "Optimize async MongoDB connection pool in FastAPI routes",
+          "repository_full_name": "fastapi-users/fastapi-users",
+          "issue_url": "https://github.com/fastapi-users/fastapi-users/issues/101",
+          "state": "open",
+          "ground_truth_relevance": 3.0,
+          "technologies": [
+            {"technology": "FastAPI", "raw_relevance": 0.5},
+            {"technology": "Python", "raw_relevance": 0.3},
+            {"technology": "MongoDB", "raw_relevance": 0.2}
+          ],
+          "difficulty_evidence": {
+            "scope_change_size": 75.0,
+            "technical_complexity": 75.0,
+            "historical_effort": 75.0,
+            "dependency_arch_impact": 70.0,
+            "coordination_complexity": 70.0
+          },
+          "responsiveness_evidence": {"available": true, "response_time_score": 90.0, "response_rate_score": 90.0, "pr_review_score": 85.0, "recent_maintainer_act": 90.0},
+          "health_evidence": {"available": true, "recent_commits": 90.0, "pr_activity": 85.0, "issue_activity": 85.0, "active_contributors": 80.0, "recent_releases": 85.0},
+          "freshness_evidence": {"available": true, "age_score": 95.0, "activity_score": 90.0}
+        },
+        {
+          "id": "q1_cand_2",
+          "issue_number": 102,
+          "title": "Refactor Pydantic v2 validation middleware",
+          "repository_full_name": "tiangolo/fastapi",
+          "issue_url": "https://github.com/tiangolo/fastapi/issues/102",
+          "state": "open",
+          "ground_truth_relevance": 3.0,
+          "technologies": [
+            {"technology": "Python", "raw_relevance": 0.6},
+            {"technology": "FastAPI", "raw_relevance": 0.4}
+          ],
+          "difficulty_evidence": {
+            "scope_change_size": 70.0,
+            "technical_complexity": 75.0,
+            "historical_effort": 70.0,
+            "dependency_arch_impact": 70.0,
+            "coordination_complexity": 65.0
+          },
+          "responsiveness_evidence": {"available": true, "response_time_score": 85.0, "response_rate_score": 85.0, "pr_review_score": 80.0, "recent_maintainer_act": 85.0},
+          "health_evidence": {"available": true, "recent_commits": 95.0, "pr_activity": 90.0, "issue_activity": 90.0, "active_contributors": 90.0, "recent_releases": 85.0},
+          "freshness_evidence": {"available": true, "age_score": 90.0, "activity_score": 85.0}
+        },
+        {
+          "id": "q1_cand_3",
+          "issue_number": 103,
+          "title": "Add retry mechanism for transient network timeouts in Python SDK",
+          "repository_full_name": "psf/requests",
+          "issue_url": "https://github.com/psf/requests/issues/103",
+          "state": "open",
+          "ground_truth_relevance": 2.0,
+          "technologies": [
+            {"technology": "Python", "raw_relevance": 1.0}
+          ],
+          "difficulty_evidence": {
+            "scope_change_size": 65.0,
+            "technical_complexity": 65.0,
+            "historical_effort": 60.0,
+            "dependency_arch_impact": 60.0,
+            "coordination_complexity": 55.0
+          },
+          "responsiveness_evidence": {"available": true, "response_time_score": 80.0, "response_rate_score": 75.0, "pr_review_score": 75.0, "recent_maintainer_act": 80.0},
+          "health_evidence": {"available": true, "recent_commits": 80.0, "pr_activity": 75.0, "issue_activity": 80.0, "active_contributors": 75.0, "recent_releases": 75.0},
+          "freshness_evidence": {"available": true, "age_score": 80.0, "activity_score": 75.0}
+        },
+        {
+          "id": "q1_cand_4",
+          "issue_number": 104,
+          "title": "Fix docstring typos in FastAPI tutorial",
+          "repository_full_name": "tiangolo/fastapi",
+          "issue_url": "https://github.com/tiangolo/fastapi/issues/104",
+          "state": "open",
+          "ground_truth_relevance": 1.0,
+          "technologies": [
+            {"technology": "FastAPI", "raw_relevance": 0.5},
+            {"technology": "Python", "raw_relevance": 0.5}
+          ],
+          "difficulty_evidence": {
+            "scope_change_size": 15.0,
+            "technical_complexity": 10.0,
+            "historical_effort": 10.0,
+            "dependency_arch_impact": 10.0,
+            "coordination_complexity": 10.0
+          },
+          "responsiveness_evidence": {"available": true, "response_time_score": 85.0, "response_rate_score": 85.0, "pr_review_score": 80.0, "recent_maintainer_act": 85.0},
+          "health_evidence": {"available": true, "recent_commits": 90.0, "pr_activity": 85.0, "issue_activity": 85.0, "active_contributors": 85.0, "recent_releases": 80.0},
+          "freshness_evidence": {"available": true, "age_score": 50.0, "activity_score": 40.0}
+        },
+        {
+          "id": "q1_cand_5",
+          "issue_number": 105,
+          "title": "Migrate internal memory management in C-extension module",
+          "repository_full_name": "python/cpython",
+          "issue_url": "https://github.com/python/cpython/issues/105",
+          "state": "open",
+          "ground_truth_relevance": 1.0,
+          "technologies": [
+            {"technology": "Python", "raw_relevance": 0.7},
+            {"technology": "C", "raw_relevance": 0.3}
+          ],
+          "difficulty_evidence": {
+            "scope_change_size": 95.0,
+            "technical_complexity": 98.0,
+            "historical_effort": 95.0,
+            "dependency_arch_impact": 95.0,
+            "coordination_complexity": 90.0
+          },
+          "responsiveness_evidence": {"available": true, "response_time_score": 70.0, "response_rate_score": 65.0, "pr_review_score": 65.0, "recent_maintainer_act": 70.0},
+          "health_evidence": {"available": true, "recent_commits": 95.0, "pr_activity": 90.0, "issue_activity": 90.0, "active_contributors": 95.0, "recent_releases": 90.0},
+          "freshness_evidence": {"available": true, "age_score": 60.0, "activity_score": 60.0}
+        },
+        {
+          "id": "q1_cand_6",
+          "issue_number": 106,
+          "title": "React Native camera permissions error on Android 14",
+          "repository_full_name": "facebook/react-native",
+          "issue_url": "https://github.com/facebook/react-native/issues/106",
+          "state": "open",
+          "ground_truth_relevance": 0.0,
+          "technologies": [
+            {"technology": "Java", "raw_relevance": 0.6},
+            {"technology": "JavaScript", "raw_relevance": 0.4}
+          ],
+          "difficulty_evidence": {
+            "scope_change_size": 70.0,
+            "technical_complexity": 75.0,
+            "historical_effort": 70.0,
+            "dependency_arch_impact": 70.0,
+            "coordination_complexity": 60.0
+          },
+          "responsiveness_evidence": {"available": true, "response_time_score": 60.0, "response_rate_score": 60.0, "pr_review_score": 60.0, "recent_maintainer_act": 65.0},
+          "health_evidence": {"available": true, "recent_commits": 90.0, "pr_activity": 85.0, "issue_activity": 85.0, "active_contributors": 85.0, "recent_releases": 85.0},
+          "freshness_evidence": {"available": true, "age_score": 85.0, "activity_score": 80.0}
+        },
+        {
+          "id": "q1_cand_7",
+          "issue_number": 107,
+          "title": "Rust memory allocator benchmarking",
+          "repository_full_name": "rust-lang/rust",
+          "issue_url": "https://github.com/rust-lang/rust/issues/107",
+          "state": "open",
+          "ground_truth_relevance": 0.0,
+          "technologies": [
+            {"technology": "Rust", "raw_relevance": 1.0}
+          ],
+          "difficulty_evidence": {
+            "scope_change_size": 85.0,
+            "technical_complexity": 90.0,
+            "historical_effort": 85.0,
+            "dependency_arch_impact": 85.0,
+            "coordination_complexity": 80.0
+          },
+          "responsiveness_evidence": {"available": true, "response_time_score": 80.0, "response_rate_score": 80.0, "pr_review_score": 80.0, "recent_maintainer_act": 80.0},
+          "health_evidence": {"available": true, "recent_commits": 95.0, "pr_activity": 90.0, "issue_activity": 90.0, "active_contributors": 90.0, "recent_releases": 90.0},
+          "freshness_evidence": {"available": true, "age_score": 70.0, "activity_score": 70.0}
+        },
+        {
+          "id": "q1_cand_8",
+          "issue_number": 108,
+          "title": "CSS Flexbox alignment bug on mobile view",
+          "repository_full_name": "twbs/bootstrap",
+          "issue_url": "https://github.com/twbs/bootstrap/issues/108",
+          "state": "open",
+          "ground_truth_relevance": 0.0,
+          "technologies": [
+            {"technology": "CSS", "raw_relevance": 0.8},
+            {"technology": "HTML", "raw_relevance": 0.2}
+          ],
+          "difficulty_evidence": {
+            "scope_change_size": 40.0,
+            "technical_complexity": 40.0,
+            "historical_effort": 40.0,
+            "dependency_arch_impact": 35.0,
+            "coordination_complexity": 35.0
+          },
+          "responsiveness_evidence": {"available": true, "response_time_score": 80.0, "response_rate_score": 80.0, "pr_review_score": 75.0, "recent_maintainer_act": 80.0},
+          "health_evidence": {"available": true, "recent_commits": 85.0, "pr_activity": 80.0, "issue_activity": 80.0, "active_contributors": 80.0, "recent_releases": 80.0},
+          "freshness_evidence": {"available": true, "age_score": 75.0, "activity_score": 70.0}
+        }
+      ]
+    },
+    {
+      "query_id": "query_2_frontend_novice",
+      "contributor_profile": {
+        "user_id": "dev_sam_frontend_beginner",
+        "capability": 40.0,
+        "skills": {
+          "JavaScript": {"score": 60.0, "confidence": 1.0},
+          "HTML": {"score": 65.0, "confidence": 1.0},
+          "CSS": {"score": 65.0, "confidence": 1.0}
+        },
+        "has_feedback_history": false
+      },
+      "candidates": [
+        {
+          "id": "q2_cand_1",
+          "issue_number": 201,
+          "title": "Good First Issue: Fix button contrast ratio for accessibility",
+          "repository_full_name": "freeCodeCamp/freeCodeCamp",
+          "issue_url": "https://github.com/freeCodeCamp/freeCodeCamp/issues/201",
+          "state": "open",
+          "ground_truth_relevance": 3.0,
+          "technologies": [
+            {"technology": "CSS", "raw_relevance": 0.5},
+            {"technology": "HTML", "raw_relevance": 0.5}
+          ],
+          "difficulty_evidence": {
+            "scope_change_size": 35.0,
+            "technical_complexity": 35.0,
+            "historical_effort": 35.0,
+            "dependency_arch_impact": 30.0,
+            "coordination_complexity": 30.0
+          },
+          "responsiveness_evidence": {"available": true, "response_time_score": 90.0, "response_rate_score": 90.0, "pr_review_score": 90.0, "recent_maintainer_act": 90.0},
+          "health_evidence": {"available": true, "recent_commits": 95.0, "pr_activity": 90.0, "issue_activity": 90.0, "active_contributors": 95.0, "recent_releases": 85.0},
+          "freshness_evidence": {"available": true, "age_score": 90.0, "activity_score": 90.0}
+        },
+        {
+          "id": "q2_cand_2",
+          "issue_number": 202,
+          "title": "Add form validation helper functions in vanilla JS",
+          "repository_full_name": "validatorjs/validator.js",
+          "issue_url": "https://github.com/validatorjs/validator.js/issues/202",
+          "state": "open",
+          "ground_truth_relevance": 3.0,
+          "technologies": [
+            {"technology": "JavaScript", "raw_relevance": 1.0}
+          ],
+          "difficulty_evidence": {
+            "scope_change_size": 42.0,
+            "technical_complexity": 40.0,
+            "historical_effort": 40.0,
+            "dependency_arch_impact": 35.0,
+            "coordination_complexity": 35.0
+          },
+          "responsiveness_evidence": {"available": true, "response_time_score": 85.0, "response_rate_score": 85.0, "pr_review_score": 80.0, "recent_maintainer_act": 85.0},
+          "health_evidence": {"available": true, "recent_commits": 85.0, "pr_activity": 80.0, "issue_activity": 80.0, "active_contributors": 80.0, "recent_releases": 80.0},
+          "freshness_evidence": {"available": true, "age_score": 85.0, "activity_score": 85.0}
+        },
+        {
+          "id": "q2_cand_3",
+          "issue_number": 203,
+          "title": "Improve mobile responsiveness for navbar component",
+          "repository_full_name": "twbs/bootstrap",
+          "issue_url": "https://github.com/twbs/bootstrap/issues/203",
+          "state": "open",
+          "ground_truth_relevance": 2.0,
+          "technologies": [
+            {"technology": "CSS", "raw_relevance": 0.6},
+            {"technology": "HTML", "raw_relevance": 0.4}
+          ],
+          "difficulty_evidence": {
+            "scope_change_size": 45.0,
+            "technical_complexity": 45.0,
+            "historical_effort": 45.0,
+            "dependency_arch_impact": 40.0,
+            "coordination_complexity": 40.0
+          },
+          "responsiveness_evidence": {"available": true, "response_time_score": 80.0, "response_rate_score": 80.0, "pr_review_score": 75.0, "recent_maintainer_act": 80.0},
+          "health_evidence": {"available": true, "recent_commits": 85.0, "pr_activity": 80.0, "issue_activity": 80.0, "active_contributors": 80.0, "recent_releases": 80.0},
+          "freshness_evidence": {"available": true, "age_score": 80.0, "activity_score": 75.0}
+        },
+        {
+          "id": "q2_cand_4",
+          "issue_number": 204,
+          "title": "Implement Webpack 5 custom code-splitting plugin in JS",
+          "repository_full_name": "webpack/webpack",
+          "issue_url": "https://github.com/webpack/webpack/issues/204",
+          "state": "open",
+          "ground_truth_relevance": 1.0,
+          "technologies": [
+            {"technology": "JavaScript", "raw_relevance": 1.0}
+          ],
+          "difficulty_evidence": {
+            "scope_change_size": 85.0,
+            "technical_complexity": 90.0,
+            "historical_effort": 85.0,
+            "dependency_arch_impact": 85.0,
+            "coordination_complexity": 80.0
+          },
+          "responsiveness_evidence": {"available": true, "response_time_score": 75.0, "response_rate_score": 70.0, "pr_review_score": 70.0, "recent_maintainer_act": 75.0},
+          "health_evidence": {"available": true, "recent_commits": 90.0, "pr_activity": 85.0, "issue_activity": 85.0, "active_contributors": 85.0, "recent_releases": 80.0},
+          "freshness_evidence": {"available": true, "age_score": 70.0, "activity_score": 65.0}
+        },
+        {
+          "id": "q2_cand_5",
+          "issue_number": 205,
+          "title": "Kubernetes Ingress controller certificate renewal daemon",
+          "repository_full_name": "kubernetes/ingress-nginx",
+          "issue_url": "https://github.com/kubernetes/ingress-nginx/issues/205",
+          "state": "open",
+          "ground_truth_relevance": 0.0,
+          "technologies": [
+            {"technology": "Go", "raw_relevance": 1.0}
+          ],
+          "difficulty_evidence": {
+            "scope_change_size": 85.0,
+            "technical_complexity": 90.0,
+            "historical_effort": 85.0,
+            "dependency_arch_impact": 85.0,
+            "coordination_complexity": 80.0
+          },
+          "responsiveness_evidence": {"available": true, "response_time_score": 80.0, "response_rate_score": 80.0, "pr_review_score": 80.0, "recent_maintainer_act": 80.0},
+          "health_evidence": {"available": true, "recent_commits": 90.0, "pr_activity": 85.0, "issue_activity": 85.0, "active_contributors": 85.0, "recent_releases": 85.0},
+          "freshness_evidence": {"available": true, "age_score": 75.0, "activity_score": 70.0}
+        }
+      ]
+    },
+    {
+      "query_id": "query_3_devops_cloud",
+      "contributor_profile": {
+        "user_id": "dev_jordan_devops",
+        "capability": 80.0,
+        "skills": {
+          "Docker": {"score": 90.0, "confidence": 1.0},
+          "Kubernetes": {"score": 85.0, "confidence": 1.0},
+          "Go": {"score": 75.0, "confidence": 1.0}
+        },
+        "has_feedback_history": false
+      },
+      "candidates": [
+        {
+          "id": "q3_cand_1",
+          "issue_number": 301,
+          "title": "Add multi-arch Docker container build workflow for ARM64",
+          "repository_full_name": "moby/moby",
+          "issue_url": "https://github.com/moby/moby/issues/301",
+          "state": "open",
+          "ground_truth_relevance": 3.0,
+          "technologies": [
+            {"technology": "Docker", "raw_relevance": 0.7},
+            {"technology": "Go", "raw_relevance": 0.3}
+          ],
+          "difficulty_evidence": {
+            "scope_change_size": 80.0,
+            "technical_complexity": 80.0,
+            "historical_effort": 80.0,
+            "dependency_arch_impact": 75.0,
+            "coordination_complexity": 75.0
+          },
+          "responsiveness_evidence": {"available": true, "response_time_score": 90.0, "response_rate_score": 85.0, "pr_review_score": 85.0, "recent_maintainer_act": 90.0},
+          "health_evidence": {"available": true, "recent_commits": 95.0, "pr_activity": 90.0, "issue_activity": 90.0, "active_contributors": 95.0, "recent_releases": 90.0},
+          "freshness_evidence": {"available": true, "age_score": 90.0, "activity_score": 90.0}
+        },
+        {
+          "id": "q3_cand_2",
+          "issue_number": 302,
+          "title": "Fix CRD reconciliation loop race condition in Kubernetes Operator",
+          "repository_full_name": "kubernetes-sigs/controller-runtime",
+          "issue_url": "https://github.com/kubernetes-sigs/controller-runtime/issues/302",
+          "state": "open",
+          "ground_truth_relevance": 3.0,
+          "technologies": [
+            {"technology": "Kubernetes", "raw_relevance": 0.6},
+            {"technology": "Go", "raw_relevance": 0.4}
+          ],
+          "difficulty_evidence": {
+            "scope_change_size": 85.0,
+            "technical_complexity": 85.0,
+            "historical_effort": 80.0,
+            "dependency_arch_impact": 80.0,
+            "coordination_complexity": 75.0
+          },
+          "responsiveness_evidence": {"available": true, "response_time_score": 85.0, "response_rate_score": 85.0, "pr_review_score": 85.0, "recent_maintainer_act": 85.0},
+          "health_evidence": {"available": true, "recent_commits": 90.0, "pr_activity": 85.0, "issue_activity": 85.0, "active_contributors": 90.0, "recent_releases": 85.0},
+          "freshness_evidence": {"available": true, "age_score": 85.0, "activity_score": 85.0}
+        },
+        {
+          "id": "q3_cand_3",
+          "issue_number": 303,
+          "title": "Add healthcheck endpoint documentation for Docker daemon",
+          "repository_full_name": "docker/cli",
+          "issue_url": "https://github.com/docker/cli/issues/303",
+          "state": "open",
+          "ground_truth_relevance": 1.0,
+          "technologies": [
+            {"technology": "Docker", "raw_relevance": 1.0}
+          ],
+          "difficulty_evidence": {
+            "scope_change_size": 20.0,
+            "technical_complexity": 15.0,
+            "historical_effort": 15.0,
+            "dependency_arch_impact": 15.0,
+            "coordination_complexity": 15.0
+          },
+          "responsiveness_evidence": {"available": true, "response_time_score": 80.0, "response_rate_score": 80.0, "pr_review_score": 75.0, "recent_maintainer_act": 80.0},
+          "health_evidence": {"available": true, "recent_commits": 85.0, "pr_activity": 80.0, "issue_activity": 80.0, "active_contributors": 80.0, "recent_releases": 80.0},
+          "freshness_evidence": {"available": true, "age_score": 50.0, "activity_score": 45.0}
+        },
+        {
+          "id": "q3_cand_4",
+          "issue_number": 304,
+          "title": "CSS Grid layout glitch in documentation dark mode",
+          "repository_full_name": "twbs/bootstrap",
+          "issue_url": "https://github.com/twbs/bootstrap/issues/304",
+          "state": "open",
+          "ground_truth_relevance": 0.0,
+          "technologies": [
+            {"technology": "CSS", "raw_relevance": 1.0}
+          ],
+          "difficulty_evidence": {
+            "scope_change_size": 40.0,
+            "technical_complexity": 40.0,
+            "historical_effort": 40.0,
+            "dependency_arch_impact": 35.0,
+            "coordination_complexity": 35.0
+          },
+          "responsiveness_evidence": {"available": true, "response_time_score": 80.0, "response_rate_score": 80.0, "pr_review_score": 75.0, "recent_maintainer_act": 80.0},
+          "health_evidence": {"available": true, "recent_commits": 85.0, "pr_activity": 80.0, "issue_activity": 80.0, "active_contributors": 80.0, "recent_releases": 80.0},
+          "freshness_evidence": {"available": true, "age_score": 75.0, "activity_score": 70.0}
+        }
+      ]
+    }
+  ]
+}

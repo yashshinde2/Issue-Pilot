@@ -471,6 +471,7 @@ class RecommendationRepository:
                 "user_id": user_id,
                 "run_id": run_id or rec.get("run_id"),
                 "issue_id": issue_id,
+                "issue_number": rec.get("issue_number") or (int(rec.get("native_id")) if rec.get("native_id") and str(rec.get("native_id")).isdigit() else None),
                 "native_id": str(rec.get("issue_number", "") or rec.get("native_id", "")),
                 "repository_full_name": rec.get("repository_full_name"),
                 "original_rank": rec.get("original_rank") or rec.get("rank"),
@@ -630,7 +631,7 @@ class JobRepository:
         doc = database.jobs.find_one(filter_q, sort=[("start_time", -1)])
         return _clean_doc(doc)
 
-    def acquire_job_lock(self, job_type: str, timeout_seconds: int = 1800, metadata: Optional[dict] = None) -> Optional[str]:
+    def acquire_job_lock(self, job_type: str, timeout_seconds: int = 1800, metadata: Optional[dict] = None, force: bool = False) -> Optional[str]:
         """
         Concurrency lock: Prevents overlapping job executions from corrupting data.
         Returns job_id if lock acquired, or None if another job of same type is currently running.
@@ -648,7 +649,13 @@ class JobRepository:
 
         if running_job:
             start_iso = running_job.get("start_time", "")
-            if start_iso > timeout_cutoff:
+            if force:
+                logger.warning("Forcing takeover of active job %s for '%s'", running_job.get("job_id"), job_type)
+                database.jobs.update_one(
+                    {"job_id": running_job.get("job_id")},
+                    {"$set": {"status": "superseded", "finish_time": now_dt.isoformat()}}
+                )
+            elif start_iso > timeout_cutoff:
                 # Active non-timed-out job is running
                 logger.warning("Job '%s' cannot start; lock held by job %s", job_type, running_job.get("job_id"))
                 return None

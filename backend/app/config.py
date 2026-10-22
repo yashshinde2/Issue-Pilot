@@ -49,6 +49,7 @@ class Settings(BaseModel):
     verification_cache_ttl_seconds: int = int(os.getenv("VERIFICATION_CACHE_TTL_SECONDS", "300"))
     verification_concurrency: int = int(os.getenv("VERIFICATION_CONCURRENCY", "5"))
     cpp_engine_path: str = os.getenv("CPP_ENGINE_PATH", "ranking_engine/build/issue_pilot_ranking_engine.exe")
+    cors_origins: str = os.getenv("CORS_ORIGINS", "*")
 
     @property
     def sanitized_mongodb_uri(self) -> str:

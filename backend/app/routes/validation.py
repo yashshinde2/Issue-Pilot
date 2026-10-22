@@ -51,3 +51,17 @@ def run_validation_suite():
         "experiments": experiments_data.get("experiments", []),
         "evaluation_metrics": eval_data
     }
+
+@router.get("/evaluation-report")
+def get_evaluation_report():
+    """
+    Returns full evaluation report on the ground-truth labeled benchmark dataset,
+    comparing Issue Pilot vs Baseline (Technology-Match-Only) across NDCG@5, Precision@5, Recall@5.
+    """
+    from app.evaluation import run_evaluation
+    try:
+        report = run_evaluation()
+        return report
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+

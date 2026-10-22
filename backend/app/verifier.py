@@ -505,12 +505,23 @@ class LiveVerifier:
                     or "/" not in repo_full_name
                 )
                 if is_sample:
-                    results_map[global_idx] = VerificationResult(
-                        is_valid=True,
-                        status="sample_verified",
-                        reason="Verified deterministically in demonstration environment",
-                        canonical_repo=repo_full_name
-                    )
+                    if candidate.get("is_closed_simulated"):
+                        results_map[global_idx] = VerificationResult(
+                            is_valid=False,
+                            status="excluded",
+                            reason="Issue closed on GitHub (simulated demo exclusion)",
+                            canonical_repo=repo_full_name,
+                            response_metadata={"state": "closed"}
+                        )
+                    elif candidate.get("simulated_verification_result"):
+                        results_map[global_idx] = candidate["simulated_verification_result"]
+                    else:
+                        results_map[global_idx] = VerificationResult(
+                            is_valid=True,
+                            status="sample_verified",
+                            reason="Verified deterministically in demonstration environment",
+                            canonical_repo=repo_full_name
+                        )
                 else:
                     tasks_to_run.append((global_idx, repo_full_name, issue_number))
 

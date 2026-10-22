@@ -54,15 +54,13 @@ class DiscoveryWorker:
         - Respects rate limits, pausing safely if remaining budget is depleted.
         """
         if db.is_connected():
-            job_id = job_repo.acquire_job_lock("discovery")
-            if not job_id and not force:
+            job_id = job_repo.acquire_job_lock("discovery", force=force)
+            if not job_id:
                 return {
                     "status": "locked",
                     "message": "Another discovery job is currently in progress. Please wait for it to complete or release the lock.",
                     "job_id": None
                 }
-            elif not job_id and force:
-                job_id = f"discovery_forced_{int(time.time())}"
         else:
             job_id = f"discovery_offline_{int(time.time())}"
 
@@ -170,7 +168,7 @@ class DiscoveryWorker:
                     errors.append(str(e))
                     break
 
-                items = search_result.get("items", [])
+                items = search_result.get("items", []) if isinstance(search_result, dict) else (search_result if isinstance(search_result, list) else [])
                 total_discovered += len(items)
 
                 if not items:

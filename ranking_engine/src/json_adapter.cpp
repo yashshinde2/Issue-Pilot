@@ -268,9 +268,9 @@ bool JsonAdapter::parse_request(const std::string& json_str,
         const auto& prof = root.get("profile");
         out_profile.user_id = prof.get("user_id").as_str("demo-user");
         out_profile.capability = prof.get("capability").as_double(70.0);
-        out_profile.accepted_count = prof.get("accepted_count").as_int(0);
-        out_profile.rejected_count = prof.get("rejected_count").as_int(0);
-        out_profile.completed_count = prof.get("completed_count").as_int(0);
+        out_profile.accepted_count = prof.has("accepted_count") ? prof.get("accepted_count").as_int(0) : prof.get("accepted").as_int(0);
+        out_profile.rejected_count = prof.has("rejected_count") ? prof.get("rejected_count").as_int(0) : prof.get("rejected").as_int(0);
+        out_profile.completed_count = prof.has("completed_count") ? prof.get("completed_count").as_int(0) : prof.get("completed").as_int(0);
         out_profile.similarity_to_history = prof.get("similarity_to_history").as_double(75.0);
         out_profile.has_feedback_history = prof.get("has_feedback_history").as_bool(false);
 
@@ -419,7 +419,9 @@ std::string JsonAdapter::serialize_results(const std::vector<RankingResult>& res
         // Scores
         ss << "      \"scores\": {\n";
         ss << "        \"skill_match\": " << r.scores.skill_match << ",\n";
+        ss << "        \"skill_available\": " << (r.scores.skill_available ? "true" : "false") << ",\n";
         ss << "        \"difficulty_match\": " << r.scores.difficulty_match << ",\n";
+        ss << "        \"difficulty_available\": " << (r.scores.difficulty_available ? "true" : "false") << ",\n";
         ss << "        \"computed_issue_difficulty\": " << r.scores.computed_issue_difficulty << ",\n";
         ss << "        \"responsiveness\": " << r.scores.responsiveness << ",\n";
         ss << "        \"responsiveness_available\": " << (r.scores.responsiveness_available ? "true" : "false") << ",\n";
@@ -429,6 +431,13 @@ std::string JsonAdapter::serialize_results(const std::vector<RankingResult>& res
         ss << "        \"feedback_available\": " << (r.scores.feedback_available ? "true" : "false") << ",\n";
         ss << "        \"freshness\": " << r.scores.freshness << ",\n";
         ss << "        \"freshness_available\": " << (r.scores.freshness_available ? "true" : "false") << ",\n";
+        ss << "        \"missing_components\": [";
+        for (size_t m = 0; m < r.scores.missing_components.size(); ++m) {
+            ss << "\"" << escape_json(r.scores.missing_components[m]) << "\"";
+            if (m + 1 < r.scores.missing_components.size()) ss << ", ";
+        }
+        ss << "],\n";
+        ss << "        \"explanation\": \"" << escape_json(r.scores.explanation) << "\",\n";
         ss << "        \"final_score\": " << r.scores.final_score << "\n";
         ss << "      },\n";
 
