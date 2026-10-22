@@ -90,6 +90,25 @@ app.include_router(ingestion_router)
 app.include_router(feedback_router)
 app.include_router(validation_router)
 
+# Mount static demo UI dashboard
+import os
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+
+@app.get("/", include_in_schema=False)
+@app.get("/demo", include_in_schema=False)
+def serve_demo_dashboard():
+    index_file = os.path.join(static_dir, "index.html")
+    if os.path.exists(index_file):
+        return FileResponse(index_file)
+    return {"message": "Issue Pilot API is active. Visit /docs for OpenAPI documentation."}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
