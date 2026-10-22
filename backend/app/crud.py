@@ -228,7 +228,7 @@ class IssueRepository:
                 {"last_seen_at": {"$exists": False}}
             ]
         }
-        cursor = database.issues.find(query).sort("last_seen_at", 1).limit(limit)
+        cursor = database.issues.find(query).sort([("stale_status", -1), ("last_seen_at", 1)]).limit(limit)
         return [_clean_doc(d) for d in cursor]
 
     def get_stale_candidates(self, older_than_days: int = 90) -> List[Dict[str, Any]]:
