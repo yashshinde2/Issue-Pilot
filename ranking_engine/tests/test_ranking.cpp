@@ -1,5 +1,6 @@
 #include "../include/ranking_engine.hpp"
 #include "../include/evaluation.hpp"
+#include "../include/json_adapter.hpp"
 #include <iostream>
 #include <cassert>
 #include <cmath>
@@ -218,7 +219,150 @@ int main() {
         report_test("Case-Insensitive Skill Matching", std::abs(s - 85.0) < 0.001, 85.0, s);
     }
 
-    std::cout << "\nALL 11 UNIT TESTS PASSED SUCCESSFULLY!\n";
+    // Test 12: Six Component Weights Total 100%
+    {
+        issue_pilot::RankingWeights w;
+        double sum = w.skill_weight + w.difficulty_weight + w.responsiveness_weight +
+                     w.health_weight + w.feedback_weight + w.freshness_weight;
+        report_test("Six Component Weights Total 100%", std::abs(sum - 1.0) < 0.0001, 1.0, sum);
+    }
+
+    // Test 13: Clamped Component Bounds [0, 100]
+    {
+        issue_pilot::DifficultyEvidence diff;
+        diff.scope_change_size = 500.0; // Extreme
+        diff.technical_complexity = 500.0;
+        diff.historical_effort = 500.0;
+        diff.dependency_arch_impact = 500.0;
+        diff.coordination_complexity = 500.0;
+
+        double out_diff = 0.0;
+        double d = engine.calculate_difficulty_match(-50.0, diff, out_diff);
+        bool bounded = (d >= 0.0 && d <= 100.0);
+        report_test("Component Clamping Upper/Lower Bounds", bounded, 1.0, bounded ? 1.0 : 0.0);
+    }
+
+    // Test 14: Insufficient Scoring Data Identification
+    {
+        issue_pilot::ContributorProfile prof;
+        issue_pilot::IssueRecord empty_issue;
+        empty_issue.id = "empty-issue-all-missing";
+        empty_issue.state = "open";
+        empty_issue.issue_url = "https://github.com/example/repo/issues/999";
+        empty_issue.skill_available = false;
+        empty_issue.difficulty_evidence.available = false;
+        empty_issue.responsiveness_evidence.available = false;
+        empty_issue.health_evidence.available = false;
+        empty_issue.freshness_evidence.available = false;
+        prof.has_feedback_history = false;
+
+        auto scores = engine.compute_scores(prof, empty_issue);
+        bool insufficient = (scores.final_score == 0.0 && scores.explanation == "Insufficient scoring data available.");
+        report_test("Insufficient Scoring Data Handling", insufficient, 1.0, insufficient ? 1.0 : 0.0);
+    }
+
+    // Test 15: Multi-Component Renormalization Sums to 100%
+    {
+        issue_pilot::ContributorProfile prof;
+        prof.skills["Python"] = issue_pilot::ContributorSkill{"Python", 90.0, 1.0};
+        prof.capability = 75.0;
+        prof.has_feedback_history = false; // Feedback missing (0.10)
+
+        issue_pilot::IssueRecord issue;
+        issue.id = "multi-missing";
+        issue.state = "open";
+        issue.issue_url = "https://github.com/example/repo/issues/100";
+        issue.technologies.push_back(issue_pilot::TechnologyRelevance{"Python", 1.0, 1.0});
+        issue.responsiveness_evidence.available = false; // Responsiveness missing (0.15)
+        issue.health_evidence.available = false;         // Health missing (0.10)
+        // Available: Skill (0.35) + Difficulty (0.25) + Freshness (0.05) = 0.65
+
+        auto s = engine.compute_scores(prof, issue);
+        double eff_sum = s.effective_skill_weight + s.effective_diff_weight + s.effective_fresh_weight;
+        report_test("Multi-Component Weight Renormalization Sum", std::abs(eff_sum - 1.0) < 0.001, 1.0, eff_sum);
+        double expected_skill_eff = 0.35 / 0.65;
+        report_test("Multi-Component Effective Skill Weight", std::abs(s.effective_skill_weight - expected_skill_eff) < 0.001, expected_skill_eff, s.effective_skill_weight);
+    }
+
+    // Test 16: Deterministic Tie-Breaking Order
+    {
+        issue_pilot::ContributorProfile prof;
+        prof.capability = 70.0;
+
+        // Two candidates with identical final scores, identical S, identical D, identical N, different issue numbers
+        issue_pilot::IssueRecord i_a;
+        i_a.id = "tie-issue-20";
+        i_a.issue_number = 20;
+        i_a.state = "open";
+        i_a.issue_url = "https://github.com/example/repo/issues/20";
+        i_a.responsiveness_evidence.available = false;
+        i_a.health_evidence.available = false;
+        i_a.freshness_evidence.available = false;
+        i_a.difficulty_evidence.scope_change_size = 70.0;
+        i_a.difficulty_evidence.technical_complexity = 70.0;
+        i_a.difficulty_evidence.historical_effort = 70.0;
+        i_a.difficulty_evidence.dependency_arch_impact = 70.0;
+        i_a.difficulty_evidence.coordination_complexity = 70.0;
+
+        issue_pilot::IssueRecord i_b = i_a;
+        i_b.id = "tie-issue-10";
+        i_b.issue_number = 10;
+        i_b.issue_url = "https://github.com/example/repo/issues/10";
+
+        std::vector<issue_pilot::IssueRecord> cands = {i_a, i_b};
+        auto ranked = engine.rank_candidates(prof, cands);
+        // Smaller issue number 10 should be ranked #1
+        bool tie_ok = (ranked.size() == 2 && ranked[0].issue.issue_number == 10 && ranked[1].issue.issue_number == 20);
+        report_test("Deterministic Tie-Breaking by Issue Number", tie_ok, 1.0, tie_ok ? 1.0 : 0.0);
+    }
+
+    // Test 17: Controlled Error Handling on Malformed JSON
+    {
+        issue_pilot::ContributorProfile p_dummy;
+        issue_pilot::RankingWeights w_dummy;
+        std::vector<issue_pilot::IssueRecord> cands_dummy;
+        std::string err;
+        bool parsed_invalid = issue_pilot::JsonAdapter::parse_request("{invalid_json_missing_quotes", p_dummy, w_dummy, cands_dummy, err);
+        report_test("Controlled Error on Malformed JSON", !parsed_invalid, 1.0, parsed_invalid ? 0.0 : 1.0);
+    }
+
+    // Test 18: Deterministic Reproducibility
+    {
+        issue_pilot::ContributorProfile prof;
+        prof.skills["Python"] = issue_pilot::ContributorSkill{"Python", 85.0, 1.0};
+        prof.capability = 72.0;
+
+        std::vector<issue_pilot::IssueRecord> cands;
+        for (int i = 1; i <= 5; ++i) {
+            issue_pilot::IssueRecord c;
+            c.id = "repro-" + std::to_string(i);
+            c.issue_number = i;
+            c.state = "open";
+            c.issue_url = "https://github.com/example/repo/issues/" + std::to_string(i);
+            c.technologies.push_back(issue_pilot::TechnologyRelevance{"Python", 1.0, 1.0});
+            c.difficulty_evidence.scope_change_size = 60.0 + i * 5;
+            c.difficulty_evidence.technical_complexity = 60.0 + i * 5;
+            c.difficulty_evidence.historical_effort = 60.0 + i * 5;
+            c.difficulty_evidence.dependency_arch_impact = 60.0 + i * 5;
+            c.difficulty_evidence.coordination_complexity = 60.0 + i * 5;
+            cands.push_back(c);
+        }
+
+        auto first_pass = engine.rank_candidates(prof, cands);
+        bool identical_all_runs = true;
+        for (int run = 0; run < 10; ++run) {
+            auto next_pass = engine.rank_candidates(prof, cands);
+            for (size_t k = 0; k < first_pass.size(); ++k) {
+                if (first_pass[k].issue.id != next_pass[k].issue.id ||
+                    std::abs(first_pass[k].scores.final_score - next_pass[k].scores.final_score) > 0.00001) {
+                    identical_all_runs = false;
+                }
+            }
+        }
+        report_test("Deterministic Ranking Reproducibility Across 10 Runs", identical_all_runs, 1.0, identical_all_runs ? 1.0 : 0.0);
+    }
+
+    std::cout << "\nALL 18 UNIT TESTS PASSED SUCCESSFULLY!\n";
     std::cout << "========================================\n";
     return 0;
 }

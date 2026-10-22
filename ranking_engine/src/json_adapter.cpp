@@ -278,6 +278,10 @@ bool JsonAdapter::parse_request(const std::string& json_str,
                 }
             }
 
+            if (item.has("skill_available")) {
+                issue.skill_available = item.get("skill_available").as_bool(true);
+            }
+
             // Technologies
             if (item.has("technologies") && item.get("technologies").type == JsonValue::V_ARR) {
                 for (const auto& t : item.get("technologies").arr_val) {
@@ -291,6 +295,7 @@ bool JsonAdapter::parse_request(const std::string& json_str,
             // Difficulty Evidence
             if (item.has("difficulty_evidence")) {
                 const auto& d = item.get("difficulty_evidence");
+                issue.difficulty_evidence.available = d.get("available").as_bool(true);
                 issue.difficulty_evidence.scope_change_size = d.get("scope_change_size").as_double(50.0);
                 issue.difficulty_evidence.technical_complexity = d.get("technical_complexity").as_double(50.0);
                 issue.difficulty_evidence.historical_effort = d.get("historical_effort").as_double(50.0);

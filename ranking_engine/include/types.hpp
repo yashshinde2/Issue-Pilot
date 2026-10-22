@@ -46,6 +46,7 @@ struct DifficultyEvidence {
     double historical_effort{50.0};           // HE (25%)
     double dependency_arch_impact{50.0};      // DI (15%)
     double coordination_complexity{50.0};     // CC (10%)
+    bool available{true};
 
     double compute_issue_difficulty() const {
         return 0.25 * scope_change_size +
@@ -116,6 +117,7 @@ struct IssueRecord {
     std::string updated_at;
     std::string created_at;
 
+    bool skill_available{true};
     std::vector<TechnologyRelevance> technologies;
     DifficultyEvidence difficulty_evidence;
     ResponsivenessEvidence responsiveness_evidence;

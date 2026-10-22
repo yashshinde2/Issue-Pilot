@@ -92,14 +92,22 @@ ComponentScores RankingEngine::compute_scores(const ContributorProfile& profile,
     ComponentScores s;
 
     // S
-    s.skill_match = calculate_skill_match(profile, issue);
-    s.skill_available = true;
+    s.skill_available = issue.skill_available;
+    if (s.skill_available) {
+        s.skill_match = calculate_skill_match(profile, issue);
+    } else {
+        s.missing_components.push_back("Skill Match");
+    }
 
     // D
-    s.difficulty_match = calculate_difficulty_match(profile.capability, 
-                                                    issue.difficulty_evidence, 
-                                                    s.computed_issue_difficulty);
-    s.difficulty_available = true;
+    s.difficulty_available = issue.difficulty_evidence.available;
+    if (s.difficulty_available) {
+        s.difficulty_match = calculate_difficulty_match(profile.capability, 
+                                                        issue.difficulty_evidence, 
+                                                        s.computed_issue_difficulty);
+    } else {
+        s.missing_components.push_back("Difficulty Match");
+    }
 
     // R
     s.responsiveness_available = issue.responsiveness_evidence.available;
@@ -180,8 +188,16 @@ ComponentScores RankingEngine::compute_scores(const ContributorProfile& profile,
 std::string RankingEngine::generate_explanation(const ComponentScores& s) {
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(2);
-    oss << "Skill Match: " << s.skill_match << " x " << (s.effective_skill_weight * 100.0) << "% = " << s.weighted_skill << " | ";
-    oss << "Difficulty Match: " << s.difficulty_match << " x " << (s.effective_diff_weight * 100.0) << "% = " << s.weighted_difficulty << " | ";
+    if (s.skill_available) {
+        oss << "Skill Match: " << s.skill_match << " x " << (s.effective_skill_weight * 100.0) << "% = " << s.weighted_skill << " | ";
+    } else {
+        oss << "Skill Match: [N/A] | ";
+    }
+    if (s.difficulty_available) {
+        oss << "Difficulty Match: " << s.difficulty_match << " x " << (s.effective_diff_weight * 100.0) << "% = " << s.weighted_difficulty << " | ";
+    } else {
+        oss << "Difficulty Match: [N/A] | ";
+    }
     if (s.responsiveness_available) {
         oss << "Responsiveness: " << s.responsiveness << " x " << (s.effective_resp_weight * 100.0) << "% = " << s.weighted_responsiveness << " | ";
     } else {
