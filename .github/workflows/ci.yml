@@ -1,0 +1,43 @@
+name: Issue Pilot CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up CMake and C++ Compiler
+      uses: jwlawson/actions-setup-cmake@v1.14
+      with:
+        cmake-version: '3.25.x'
+
+    - name: Build C++ Ranking Engine & Run Unit Tests
+      run: |
+        cmake -S ranking_engine -B ranking_engine/build -DCMAKE_BUILD_TYPE=Release
+        cmake --build ranking_engine/build --config Release
+        cd ranking_engine/build && ctest --output-on-failure
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.8'
+
+    - name: Install Python Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov
+
+    - name: Run Python Automated Test Suite
+      env:
+        CPP_ENGINE_PATH: ranking_engine/build/issue_pilot_ranking_engine
+        MONGODB_URI: ""
+      run: |
+        python -m pytest backend/tests/ -v

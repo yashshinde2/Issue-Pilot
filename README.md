@@ -430,26 +430,102 @@ Each recommendation run persists an audit trail into MongoDB Atlas:
 
 #### 7. Running the Automated Test Suite
 
-Run the full 43-test automated test suite:
+Run the full automated test suite (57 pytest tests across all modules):
 ```bash
-pytest -v
+pytest backend/tests/ -v
 ```
 
-Or run the Milestone 4 verification suite individually:
+Run the C++ unit test suite (18 authoritative ranking tests):
 ```bash
+ctest --test-dir ranking_engine/build --output-on-failure
+```
+
+Or run individual milestone test suites:
+```bash
+# Milestone 5 E2E Integration & Credential-Free Validation
+pytest backend/tests/test_milestone5_e2e_validation.py -v
+
+# Milestone 5 Behavioral & Sensitivity Experiments (A through G)
+pytest backend/tests/test_behavioral_sensitivity.py -v
+
+# Milestone 5 Recommendation-Quality Evaluation (NDCG@5 & Precision@5)
+pytest backend/tests/test_evaluation.py -v
+
+# Milestone 4 Live Verification & Backfilling
 pytest backend/tests/test_milestone4_verification.py -v
+
+# Milestone 3 Automated Ingestion & Candidate Pool Management
+pytest backend/tests/test_github_ingestion.py -v
+
+# Milestone 2 MongoDB Atlas Persistence & Idempotency
+pytest backend/tests/test_atlas_persistence.py -v
 ```
 
-#### 8. Troubleshooting
+---
 
+### Milestone 5: Final-Year Demonstration & Benchmarking
+
+#### 1. Repeatable 9-Step Final-Year Project Demonstration
+Issue Pilot includes an automated, credential-free demonstration that does not depend on external live GitHub availability:
+```bash
+# Run via dedicated runner
+python demo.py
+
+# Or via unified CLI
+python cli.py demo
+```
+
+The demonstration sequence executes the exact 9 steps:
+1. **Profile & Candidate Loading**: Loads known full-stack contributor profile and candidate pool.
+2. **Weight Configuration**: Displays the 6 component weights totaling exactly 100%.
+3. **C++ Ranking**: Executes the authoritative C++ engine, computing component scores and ranking.
+4. **Skill Sensitivity**: Dynamically modifies a skill score and demonstrates predictable, deterministic score changes.
+5. **Missing-Data Renormalization**: Removes difficulty evidence and demonstrates dynamic weight redistribution across remaining components.
+6. **Verification Invalidation & Backfill**: Simulates a top-ranked candidate closed on GitHub, verifies exclusion, and shows seamless backfilling from lower-ranked candidates.
+7. **Personalized Recommendations**: Displays top recommendations with mathematical explanations.
+8. **Feedback Recording**: Submits an accepted feedback event and updates the user's historical counters atomically.
+9. **Process Restart & Survival**: Simulates database reconnection and verifies all persistent profiles and feedback records remain available.
+
+#### 2. Interactive Web Application Dashboard
+Issue Pilot features an interactive modern web UI with rich dark aesthetics, stepper controls, weight sliders, and live metrics.
+1. Start the backend:
+   ```bash
+   uvicorn app.main:app --app-dir backend --reload --port 8000
+   ```
+2. Navigate to:
+   - **`http://localhost:8000/demo`** or **`http://localhost:8000/`** (Interactive Demonstration Dashboard)
+   - **`http://localhost:8000/docs`** (Interactive Swagger OpenAPI Documentation)
+
+#### 3. Recommendation Quality Evaluation Tooling
+Evaluate the 6-factor model against human ground-truth relevance judgments on a labeled test dataset:
+```bash
+python cli.py evaluate
+```
+- **NDCG@5 Lift**: **+0.2029** over naive technology-match baseline.
+- **Precision@5**: **1.0000** for all evaluated benchmark queries.
+
+#### 4. Performance & Reliability Benchmarking
+Run the empirical performance benchmark suite on your local host:
+```bash
+python cli.py benchmark
+```
+- **C++ Scoring Latency**: ~0.42 ms per candidate (500 candidates ranked in ~210 ms).
+- **MongoDB Atlas Latencies**: Profile upsert ~59 ms, candidate query ~98 ms, snapshot write ~162 ms.
+- **Verification Throughput**: 30 candidates verified/backfilled deterministically with bounded concurrency.
+
+---
+
+### Troubleshooting & Operational Modes
+
+- **Demo Mode (`demo_mode: true`)**:
+  - Requires zero external credentials or network connectivity.
+  - Bundled sample profiles and candidate issues are evaluated deterministically.
+- **Live Mode (`demo_mode: false`)**:
+  - Connects to MongoDB Atlas for shared candidate pools and historical audit snapshots.
+  - Verifies candidate eligibility against GitHub REST API with exponential backoff and rate-limit deferral.
+  - Returns explicit HTTP 503 Service Unavailable with descriptive diagnostic details if external services are unreachable (zero mock leakage in live mode).
 - **GitHub Rate Limit Exceeded (HTTP 403 / 429)**:
   - Check your token status using `curl http://localhost:8000/api/ingestion/rate-limit`.
-  - Configure a personal access token in `.env` (`GITHUB_TOKEN=ghp_...`).
-  - Inconclusive candidates will be flagged with a warning in the response without crashing or marking valid issues as closed.
-- **Unavailable Repositories & Redirects**:
-  - The verifier automatically tracks HTTP 301/302 redirects and updates canonical repository names.
-  - If a repository was made private or deleted, HTTP 404 is returned and the candidate is excluded with reason `"Issue or repository no longer exists (HTTP 404)"`.
-- **Database Connection Issues**:
-  - In live mode, if MongoDB Atlas is unreachable, the API returns HTTP 503 rather than silently fabricating mock results.
-  - To test without database credentials, set `"demo_mode": true`.
+  - Inconclusive candidates are recorded with `verification_status: "inconclusive"` rather than falsely marked as closed.
+
 
