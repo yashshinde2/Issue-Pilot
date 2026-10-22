@@ -210,6 +210,10 @@ def run_demonstration(verbose: bool = True) -> Dict[str, Any]:
     for d in delivered:
         print(f"  Delivered Rank #{d.get('rank')}: {d.get('id')} (Original Rank: #{d.get('original_rank')}) - {d.get('title')[:45]}")
 
+    assert metrics.get("candidates_excluded") == 1, "Candidate #1 must be excluded"
+    assert len(delivered) == target_count, f"Target count of {target_count} must be delivered via backfill"
+    assert delivered[0]["id"] != top_candidate_to_fail["id"], "Top delivered issue cannot be the excluded candidate"
+
     results["step6"] = {
         "delivered_count": len(delivered),
         "excluded_count": metrics.get("candidates_excluded"),

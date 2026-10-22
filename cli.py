@@ -2,6 +2,9 @@
 """
 Issue Pilot CLI Driver script.
 Usage:
+    python cli.py demo
+    python cli.py benchmark
+    python cli.py evaluate
     python cli.py discover
     python cli.py refresh
     python cli.py cleanup

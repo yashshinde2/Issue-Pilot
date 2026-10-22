@@ -129,9 +129,35 @@ def cmd_jobs(args):
         print(json.dumps({"count": len(jobs), "jobs": jobs}, indent=2, default=str))
 
 
+def cmd_demo(args):
+    from app.demo_runner import run_demonstration
+    run_demonstration()
+
+
+def cmd_benchmark(args):
+    from app.benchmark import run_full_benchmark, format_benchmark_markdown
+    rep = run_full_benchmark()
+    print(format_benchmark_markdown(rep))
+
+
+def cmd_evaluate(args):
+    from app.evaluation import run_evaluation, format_evaluation_report_markdown
+    res = run_evaluation()
+    print(format_evaluation_report_markdown(res))
+
+
 def main():
     parser = argparse.ArgumentParser(description="Issue Pilot Ingestion & Candidate Pool Management CLI")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # demo
+    subparsers.add_parser("demo", help="Run the 9-step credential-free final-year project demonstration")
+
+    # benchmark
+    subparsers.add_parser("benchmark", help="Run C++ scoring and system performance benchmarks")
+
+    # evaluate
+    subparsers.add_parser("evaluate", help="Evaluate recommendation quality (NDCG@5, Precision@5) against baseline")
 
     # discover
     p_disc = subparsers.add_parser("discover", help="Discover candidates across rotating topics")
@@ -175,6 +201,9 @@ def main():
         sys.exit(1)
 
     cmds = {
+        "demo": cmd_demo,
+        "benchmark": cmd_benchmark,
+        "evaluate": cmd_evaluate,
         "discover": cmd_discover,
         "refresh": cmd_refresh,
         "cleanup": cmd_cleanup,
