@@ -1,0 +1,150 @@
+{
+  "experiment_a_skill": {
+    "profile": {
+      "user_id": "test_user_exp_a",
+      "capability": 75.0,
+      "skills": {
+        "Python": {"score": 90.0, "confidence": 1.0},
+        "FastAPI": {"score": 80.0, "confidence": 1.0},
+        "MongoDB": {"score": 70.0, "confidence": 1.0}
+      },
+      "has_feedback_history": true,
+      "accepted_count": 12,
+      "rejected_count": 8,
+      "completed_count": 9,
+      "similarity_to_history": 90.0
+    },
+    "issue": {
+      "id": "exp_a_issue",
+      "issue_number": 201,
+      "title": "FastAPI async pipeline",
+      "issue_url": "https://github.com/org/repo/issues/201",
+      "state": "open",
+      "technologies": [
+        {"technology": "FastAPI", "raw_relevance": 5.0},
+        {"technology": "Python", "raw_relevance": 3.0},
+        {"technology": "MongoDB", "raw_relevance": 2.0}
+      ],
+      "difficulty_evidence": {
+        "scope_change_size": 75.0,
+        "technical_complexity": 75.0,
+        "historical_effort": 75.0,
+        "dependency_arch_impact": 75.0,
+        "coordination_complexity": 75.0
+      },
+      "responsiveness_evidence": {
+        "available": true,
+        "response_time_score": 85.0,
+        "response_rate_score": 85.0,
+        "pr_review_score": 85.0,
+        "recent_maintainer_act": 85.0
+      },
+      "health_evidence": {
+        "available": true,
+        "recent_commits": 80.0,
+        "pr_activity": 80.0,
+        "issue_activity": 80.0,
+        "active_contributors": 80.0,
+        "recent_releases": 80.0
+      },
+      "freshness_evidence": {
+        "available": true,
+        "age_score": 90.0,
+        "activity_score": 90.0
+      }
+    },
+    "fastapi_modified_score": 30.0,
+    "expected_initial_skill": 81.0,
+    "expected_modified_skill": 56.0,
+    "expected_skill_delta": -25.0,
+    "expected_final_score_delta": -8.75
+  },
+  "experiment_b_difficulty": {
+    "profile": {
+      "user_id": "test_user_exp_b",
+      "capability": 76.0,
+      "skills": {"Python": {"score": 80.0, "confidence": 1.0}}
+    },
+    "issue": {
+      "id": "exp_b_issue",
+      "issue_number": 202,
+      "title": "Difficulty Match Test",
+      "issue_url": "https://github.com/org/repo/issues/202",
+      "state": "open",
+      "technologies": [{"technology": "Python", "raw_relevance": 1.0}],
+      "difficulty_evidence": {
+        "scope_change_size": 70.0,
+        "technical_complexity": 70.0,
+        "historical_effort": 70.0,
+        "dependency_arch_impact": 70.0,
+        "coordination_complexity": 70.0
+      }
+    },
+    "modified_capability": 95.0,
+    "expected_initial_diff_match": 94.0,
+    "expected_modified_diff_match": 75.0,
+    "expected_diff_delta": -19.0
+  },
+  "experiment_c_freshness": {
+    "profile": {
+      "user_id": "test_user_exp_c",
+      "capability": 70.0,
+      "skills": {"Python": {"score": 80.0, "confidence": 1.0}}
+    },
+    "issue_fresh": {
+      "id": "exp_c_fresh",
+      "issue_number": 203,
+      "title": "Fresh Issue",
+      "issue_url": "https://github.com/org/repo/issues/203",
+      "state": "open",
+      "technologies": [{"technology": "Python", "raw_relevance": 1.0}],
+      "freshness_evidence": {
+        "available": true,
+        "age_score": 92.0,
+        "activity_score": 92.0
+      }
+    },
+    "issue_aged": {
+      "id": "exp_c_aged",
+      "issue_number": 204,
+      "title": "Aged Issue",
+      "issue_url": "https://github.com/org/repo/issues/204",
+      "state": "open",
+      "technologies": [{"technology": "Python", "raw_relevance": 1.0}],
+      "freshness_evidence": {
+        "available": true,
+        "age_score": 72.0,
+        "activity_score": 72.0
+      }
+    },
+    "expected_fresh_score": 92.0,
+    "expected_aged_score": 72.0,
+    "expected_weighted_freshness_delta": -1.0
+  },
+  "experiment_d_feedback": {
+    "base_profile": {
+      "user_id": "test_user_exp_d",
+      "capability": 75.0,
+      "skills": {"Python": {"score": 85.0, "confidence": 1.0}},
+      "has_feedback_history": true,
+      "similarity_to_history": 80.0
+    },
+    "counts_initial": {"accepted": 10, "rejected": 10, "completed": 5},
+    "counts_increased": {"accepted": 20, "rejected": 5, "completed": 16}
+  },
+  "experiment_e_missing_data": {
+    "profile_cold_start": {
+      "user_id": "test_user_cold",
+      "capability": 70.0,
+      "skills": {"Python": {"score": 80.0, "confidence": 1.0}},
+      "has_feedback_history": false
+    },
+    "expected_weights_without_feedback": {
+      "skill": 0.388889,
+      "difficulty": 0.277778,
+      "responsiveness": 0.166667,
+      "health": 0.111111,
+      "freshness": 0.055556
+    }
+  }
+}
