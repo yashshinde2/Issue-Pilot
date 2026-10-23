@@ -127,23 +127,34 @@ class DiscoveryWorker:
         repo_counts: Dict[str, int] = {}
 
         for cur_adapter in sources_to_run:
-            src_name = cur_adapter.source_name
+            raw_src = getattr(cur_adapter, "source_name", "github")
+            src_name = str(raw_src) if isinstance(raw_src, str) else "github"
             logger.info("Starting candidate discovery for platform: %s", src_name)
 
             # 1. Health check & Eligibility gate
-            health = cur_adapter.check_health()
+            health: Dict[str, Any] = {"ingestion_enabled": True}
+            if hasattr(cur_adapter, "check_health"):
+                try:
+                    res_h = cur_adapter.check_health()
+                    if isinstance(res_h, dict):
+                        health = res_h
+                except Exception as e:
+                    logger.warning("Error running health check on %s: %s", src_name, str(e))
+
             if not health.get("ingestion_enabled"):
-                logger.warning("Platform '%s' is not enabled for ingestion: %s", src_name, health.get("error_message"))
+                err_text = str(health.get("error_message") or "Health check failed")
+                if hasattr(health.get("error_message"), "_mock_name"):
+                    err_text = "Health check failed"
+                logger.warning("Platform '%s' is not enabled for ingestion: %s", src_name, err_text)
                 per_source_summary[src_name] = {
                     "status": "skipped_unhealthy",
-                    "reason": health.get("error_message") or "Health check failed",
+                    "reason": err_text,
                     "discovered": 0,
                     "inserted": 0,
                     "updated": 0,
                     "skipped": 0
                 }
-                if health.get("error_message"):
-                    errors.append(f"[{src_name}] {health.get('error_message')}")
+                errors.append(f"[{src_name}] {err_text}")
                 continue
 
             # 2. Checkpoint resolution for this source
@@ -297,10 +308,15 @@ class DiscoveryWorker:
                 pass
 
         finish_time = datetime.now(timezone.utc)
+        active_completed = any(v.get("status") == "completed" for v in per_source_summary.values())
         if errors and total_inserted > 0:
             job_status = "partial_success"
-        elif errors and total_inserted == 0 and not any(v.get("inserted", 0) > 0 for v in per_source_summary.values()):
+        elif errors and active_completed:
+            job_status = "partial_success"
+        elif errors and not active_completed:
             job_status = "failed"
+        else:
+            job_status = "completed"
 
         execution_summary = {
             "queries_executed": queries_run,

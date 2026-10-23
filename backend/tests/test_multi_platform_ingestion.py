@@ -97,7 +97,8 @@ def test_github_adapter_health_check_valid():
         assert health["auth_status"] == "valid"
         assert health["read_permission_status"] in ("granted", "confirmed")
         assert health["ingestion_enabled"] is True
-        assert health["rate_limit_info"]["remaining"] == 4999
+        rem = health["rate_limit_info"].get("core", {}).get("remaining", health["rate_limit_info"].get("remaining"))
+        assert rem == 4999
 
 
 def test_github_adapter_health_check_invalid_token():
@@ -523,8 +524,8 @@ def test_discovery_fault_isolation_bugzilla_failing():
          patch.object(gitlab_adapter, "search_issues", return_value={"total_count": 0, "items": []}), \
          patch.object(codeberg_adapter, "search_issues", return_value={"total_count": 0, "items": []}):
 
-        summary = worker.run_discovery(max_issues_to_discover=20, pages_per_query=1, force=True, source="all")
-        assert summary["status"] in ["completed", "partial"]
+        summary = worker.run_discovery(max_issues_to_discover=20, max_pages_per_query=1, force=True, source="all")
+        assert summary["status"] in ["completed", "partial_success", "partial"]
         per_source = summary["per_source_summary"]
 
         # Working sources were called

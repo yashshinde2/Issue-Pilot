@@ -331,6 +331,7 @@ class CodebergAdapter(BaseIssueSourceAdapter):
                     issue_reading_ok = True
                     if read_permission != "denied":
                         read_permission = "granted"
+                    rate_limit_info = dict(self.rate_limit_state)
             except Exception as e:
                 if not error_msg:
                     error_msg = f"Codeberg issue reading check failed: {str(e)}"
