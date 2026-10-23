@@ -31,7 +31,9 @@ class BugzillaAdapter(BaseIssueSourceAdapter):
         self,
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
-        session: Optional[requests.Session] = None
+        session: Optional[requests.Session] = None,
+        local_budget: Optional[int] = None,
+        local_request_budget: Optional[int] = None
     ):
         raw_url = (base_url if base_url is not None else settings.bugzilla_base_url).strip()
         self._base_url = raw_url.rstrip("/")
@@ -48,7 +50,8 @@ class BugzillaAdapter(BaseIssueSourceAdapter):
             self.session.headers.update(headers)
 
         # Conservative local request budget tracking for unexposed quotas
-        self.local_budget_limit = settings.bugzilla_local_request_budget
+        budget_val = local_budget if local_budget is not None else local_request_budget
+        self.local_budget_limit = budget_val if budget_val is not None else settings.bugzilla_local_request_budget
         self.local_requests_used = 0
         self.rate_limit_state: Dict[str, Any] = {
             "limit": "unknown",
@@ -60,6 +63,18 @@ class BugzillaAdapter(BaseIssueSourceAdapter):
             "local_budget_remaining": self.local_budget_limit
         }
         self._last_successful_check: Optional[str] = None
+
+    def _check_rate_limit(self):
+        if self.local_requests_used >= self.local_budget_limit:
+            raise RateLimitExceededError(
+                f"Bugzilla local request budget exhausted ({self.local_requests_used}/{self.local_budget_limit})",
+                remaining=0
+            )
+
+    def _record_request(self):
+        self.local_requests_used += 1
+        self.rate_limit_state["used"] = self.local_requests_used
+        self.rate_limit_state["local_budget_remaining"] = max(0, self.local_budget_limit - self.local_requests_used)
 
     @property
     def source_name(self) -> str:
@@ -231,6 +246,14 @@ class BugzillaAdapter(BaseIssueSourceAdapter):
     def get_rate_limit(self) -> Dict[str, Any]:
         """Report rate limit state as unknown with local budget metrics (never invent quota)."""
         return {
+            "source": self.source_name,
+            "source_instance": self.source_instance,
+            "server_quota": "unknown",
+            "limit": "unknown",
+            "remaining": "unknown",
+            "local_request_budget": self.local_budget_limit,
+            "remaining_local_budget": max(0, self.local_budget_limit - self.local_requests_used),
+            "requests_made": self.local_requests_used,
             "api": dict(self.rate_limit_state),
             "current_state": dict(self.rate_limit_state)
         }

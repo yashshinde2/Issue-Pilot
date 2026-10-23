@@ -73,11 +73,12 @@ def query_issues(
     min_difficulty: Optional[float] = Query(None, ge=0, le=100, description="Minimum technical complexity"),
     max_difficulty: Optional[float] = Query(None, ge=0, le=100, description="Maximum technical complexity"),
     search: Optional[str] = Query(None, description="Search term in title or repo"),
+    source: Optional[str] = Query(None, description="Filter by source platform: 'github', 'gitlab', 'codeberg', 'bugzilla'"),
     limit: int = Query(50, ge=1, le=500),
     skip: int = Query(0, ge=0)
 ):
     """
-    Retrieve candidate issues from MongoDB Atlas with eligibility and tech filters.
+    Retrieve candidate issues from MongoDB Atlas with eligibility, source, and tech filters.
     """
     if not db.is_connected():
         raise HTTPException(
@@ -93,6 +94,7 @@ def query_issues(
             min_difficulty=min_difficulty,
             max_difficulty=max_difficulty,
             search=search,
+            source=source,
             limit=limit,
             skip=skip
         )
@@ -106,7 +108,8 @@ def query_issues(
                 "technology": technology,
                 "min_difficulty": min_difficulty,
                 "max_difficulty": max_difficulty,
-                "search": search
+                "search": search,
+                "source": source
             },
             "issues": issues
         }

@@ -132,8 +132,8 @@ class GitHubAdapter(BaseIssueSourceAdapter):
                 resource = "search" if "search/" in endpoint else "core"
                 self._update_rate_limit_from_headers(resp.headers, resource=resource)
 
-                # 1. Rate Limit Exceeded
-                if resp.status_code in (403, 429):
+                # 1. Rate Limit Exceeded or Auth Error
+                if resp.status_code in (401, 403, 429):
                     is_rate_limit = (
                         resp.status_code == 429
                         or "rate limit" in resp.text.lower()

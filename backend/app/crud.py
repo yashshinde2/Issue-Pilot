@@ -163,6 +163,23 @@ class IssueRepository:
         })
         return _clean_doc(doc)
 
+    def get_by_source_identity(self, source: str, source_instance: str, source_issue_id: str) -> Optional[Dict[str, Any]]:
+        database = self._get_db()
+        doc = database.issues.find_one({
+            "source": source,
+            "source_instance": source_instance,
+            "source_issue_id": str(source_issue_id)
+        })
+        if not doc:
+            doc = database.issues.find_one({
+                "source": source,
+                "$or": [
+                    {"source_issue_id": str(source_issue_id)},
+                    {"issue_number": int(source_issue_id) if str(source_issue_id).isdigit() else -1}
+                ]
+            })
+        return _clean_doc(doc)
+
     def query_issues(
         self,
         state: Optional[str] = "open",
@@ -171,14 +188,18 @@ class IssueRepository:
         min_difficulty: Optional[float] = None,
         max_difficulty: Optional[float] = None,
         search: Optional[str] = None,
+        source: Optional[str] = None,
         limit: int = 50,
         skip: int = 0
     ) -> List[Dict[str, Any]]:
         """
-        Query issues with filters for open status, technology, difficulty, and eligibility.
+        Query issues with filters for open status, technology, difficulty, source, and eligibility.
         """
         database = self._get_db()
         query: Dict[str, Any] = {}
+
+        if source and source.lower() != "all":
+            query["source"] = source.lower()
 
         if state and state.lower() != "all":
             query["state"] = state.lower()

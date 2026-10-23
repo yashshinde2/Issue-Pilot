@@ -93,7 +93,7 @@ class CodebergAdapter(BaseIssueSourceAdapter):
 
             rl_policy = h_lower.get("ratelimit-policy")
             if rl_policy:
-                m_q = re.search(r'q=(\d+)', rl_policy)
+                m_q = re.search(r'(?:q=)?(\d+)', rl_policy)
                 if m_q:
                     self.rate_limit_state["limit"] = int(m_q.group(1))
 
@@ -107,6 +107,9 @@ class CodebergAdapter(BaseIssueSourceAdapter):
 
         except (ValueError, TypeError) as e:
             logger.debug("Could not parse Codeberg rate-limit headers: %s", str(e))
+
+    def _parse_rate_limit_headers(self, headers: Dict[str, str]):
+        self._update_rate_limit_from_headers(headers)
 
     def _execute_request(self, method: str, endpoint: str, params: Optional[dict] = None) -> requests.Response:
         """Execute HTTP request with backoff, rate budgeting, and sanitized logging."""
@@ -137,8 +140,8 @@ class CodebergAdapter(BaseIssueSourceAdapter):
 
                 self._update_rate_limit_from_headers(resp.headers)
 
-                # 1. Rate Limit Exceeded
-                if resp.status_code in (429, 403):
+                # 1. Rate Limit Exceeded or Auth Error
+                if resp.status_code in (401, 403, 429):
                     is_rate_limit = (
                         resp.status_code == 429
                         or "rate limit" in resp.text.lower()

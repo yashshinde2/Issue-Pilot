@@ -118,8 +118,8 @@ class GitLabAdapter(BaseIssueSourceAdapter):
 
                 self._update_rate_limit_from_headers(resp.headers)
 
-                # 1. Rate Limit Exceeded
-                if resp.status_code in (429, 403):
+                # 1. Rate Limit Exceeded or Auth Error
+                if resp.status_code in (401, 403, 429):
                     is_rate_limit = (
                         resp.status_code == 429
                         or "rate limit" in resp.text.lower()
@@ -318,7 +318,13 @@ class GitLabAdapter(BaseIssueSourceAdapter):
                     issue_reading_ok = True
                     if read_permission != "denied":
                         read_permission = "granted"
+            except AuthenticationError as e:
+                read_permission = "denied"
+                error_msg = f"GitLab permission denied for issue reading: {str(e)}"
+                recommended_action = "Ensure GITLAB_TOKEN has 'read_api' scope."
             except Exception as e:
+                if "forbidden" in str(e).lower() or "scope" in str(e).lower():
+                    read_permission = "denied"
                 if not error_msg:
                     error_msg = f"GitLab issue reading check failed: {str(e)}"
                     recommended_action = "Check project access permissions."
@@ -366,6 +372,8 @@ class GitLabAdapter(BaseIssueSourceAdapter):
                 return None
 
             web_url = raw_item.get("web_url", "")
+            if "/merge_requests/" in web_url or "/-/merge_requests/" in web_url:
+                return None
             issue_iid = int(raw_item.get("iid", 0))
             native_id = str(raw_item.get("id"))
 

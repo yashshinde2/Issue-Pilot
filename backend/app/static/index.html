@@ -508,6 +508,7 @@
     <!-- Navigation Tabs -->
     <nav class="tab-bar">
       <button class="tab-btn active" onclick="switchTab('demo')">Final-Year 9-Step Demo</button>
+      <button class="tab-btn" onclick="switchTab('platforms')">Platform Health & Ingestion</button>
       <button class="tab-btn" onclick="switchTab('simulator')">C++ Ranking Simulator</button>
       <button class="tab-btn" onclick="switchTab('evaluation')">Recommendation Quality & Metrics</button>
       <button class="tab-btn" onclick="switchTab('benchmark')">Performance & Latency</button>
@@ -810,6 +811,152 @@
         </div>
       </div>
     </div>
+
+    <!-- TAB 5: Platform Health & Ingestion Dashboard -->
+    <div id="tab-platforms" class="tab-content" style="display:none;">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Multi-Platform Integration & Quota Observability</div>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem;">
+              Live health validation, rate-limit tracking, and candidate discovery across GitHub, GitLab, Codeberg, and Bugzilla.
+            </p>
+          </div>
+          <div style="display: flex; gap: 0.75rem; align-items: center;">
+            <button class="btn btn-secondary" id="btn-check-api" onclick="checkApiAccess()">
+              <span>Check API Access</span>
+            </button>
+            <button class="btn" id="btn-run-discovery" onclick="runDiscoveryAdmin()">
+              <span>Run Discovery</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="action-status-banner" style="display:none; padding: 0.75rem 1rem; border-radius: var(--radius-sm); margin-bottom: 1.5rem; font-size: 0.85rem;"></div>
+
+        <!-- 4 Platforms Grid -->
+        <div class="grid-2" id="platforms-grid" style="margin-bottom: 1.5rem;">
+          <!-- Dynamically populated or rendered -->
+          <div class="card" style="background: var(--bg-surface-elevated);" id="card-github">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+              <div style="display:flex; align-items:center; gap:0.5rem;">
+                <strong style="font-size:1.05rem;">GitHub</strong>
+                <span class="pill" id="pill-github"><span class="pill-dot blue"></span>Checking...</span>
+              </div>
+              <span class="pill" id="ingest-github" style="font-size:0.7rem;">Ingestion: Checking</span>
+            </div>
+            <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.75rem;" class="mono" id="instance-github">https://api.github.com</div>
+            <div class="table-container">
+              <table>
+                <tbody>
+                  <tr><td style="color:var(--text-dim); width:40%;">Auth Status</td><td class="mono" id="auth-github">-</td></tr>
+                  <tr><td style="color:var(--text-dim);">API Version / Env</td><td class="mono" id="ver-github">-</td></tr>
+                  <tr><td style="color:var(--text-dim);">Read Permissions</td><td class="mono" id="perm-github">-</td></tr>
+                  <tr><td style="color:var(--text-dim);">Rate Limit Remaining</td><td class="mono" id="quota-github">-</td></tr>
+                  <tr><td style="color:var(--text-dim);">Atlas Candidates</td><td class="mono" id="count-github">-</td></tr>
+                  <tr><td style="color:var(--text-dim);">Last Check Time</td><td class="mono" id="check-github">-</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div id="err-github" style="display:none; margin-top:0.75rem; font-size:0.75rem; color:var(--accent-rose); background:rgba(239,68,68,0.1); padding:0.5rem; border-radius:4px;"></div>
+          </div>
+
+          <div class="card" style="background: var(--bg-surface-elevated);" id="card-gitlab">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+              <div style="display:flex; align-items:center; gap:0.5rem;">
+                <strong style="font-size:1.05rem;">GitLab</strong>
+                <span class="pill" id="pill-gitlab"><span class="pill-dot blue"></span>Checking...</span>
+              </div>
+              <span class="pill" id="ingest-gitlab" style="font-size:0.7rem;">Ingestion: Checking</span>
+            </div>
+            <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.75rem;" class="mono" id="instance-gitlab">https://gitlab.com/api/v4</div>
+            <div class="table-container">
+              <table>
+                <tbody>
+                  <tr><td style="color:var(--text-dim); width:40%;">Auth Status</td><td class="mono" id="auth-gitlab">-</td></tr>
+                  <tr><td style="color:var(--text-dim);">API Version / Env</td><td class="mono" id="ver-gitlab">-</td></tr>
+                  <tr><td style="color:var(--text-dim);">Read Permissions</td><td class="mono" id="perm-gitlab">-</td></tr>
+                  <tr><td style="color:var(--text-dim);">Rate Limit Remaining</td><td class="mono" id="quota-gitlab">-</td></tr>
+                  <tr><td style="color:var(--text-dim);">Atlas Candidates</td><td class="mono" id="count-gitlab">-</td></tr>
+                  <tr><td style="color:var(--text-dim);">Last Check Time</td><td class="mono" id="check-gitlab">-</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div id="err-gitlab" style="display:none; margin-top:0.75rem; font-size:0.75rem; color:var(--accent-rose); background:rgba(239,68,68,0.1); padding:0.5rem; border-radius:4px;"></div>
+          </div>
+
+          <div class="card" style="background: var(--bg-surface-elevated);" id="card-codeberg">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+              <div style="display:flex; align-items:center; gap:0.5rem;">
+                <strong style="font-size:1.05rem;">Codeberg / Forgejo</strong>
+                <span class="pill" id="pill-codeberg"><span class="pill-dot blue"></span>Checking...</span>
+              </div>
+              <span class="pill" id="ingest-codeberg" style="font-size:0.7rem;">Ingestion: Checking</span>
+            </div>
+            <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.75rem;" class="mono" id="instance-codeberg">https://codeberg.org/api/v1</div>
+            <div class="table-container">
+              <table>
+                <tbody>
+                  <tr><td style="color:var(--text-dim); width:40%;">Auth Status</td><td class="mono" id="auth-codeberg">-</td></tr>
+                  <tr><td style="color:var(--text-dim);">API Version / Env</td><td class="mono" id="ver-codeberg">-</td></tr>
+                  <tr><td style="color:var(--text-dim);">Read Permissions</td><td class="mono" id="perm-codeberg">-</td></tr>
+                  <tr><td style="color:var(--text-dim);">Rate Limit Remaining</td><td class="mono" id="quota-codeberg">-</td></tr>
+                  <tr><td style="color:var(--text-dim);">Atlas Candidates</td><td class="mono" id="count-codeberg">-</td></tr>
+                  <tr><td style="color:var(--text-dim);">Last Check Time</td><td class="mono" id="check-codeberg">-</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div id="err-codeberg" style="display:none; margin-top:0.75rem; font-size:0.75rem; color:var(--accent-rose); background:rgba(239,68,68,0.1); padding:0.5rem; border-radius:4px;"></div>
+          </div>
+
+          <div class="card" style="background: var(--bg-surface-elevated);" id="card-bugzilla">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+              <div style="display:flex; align-items:center; gap:0.5rem;">
+                <strong style="font-size:1.05rem;">Bugzilla</strong>
+                <span class="pill" id="pill-bugzilla"><span class="pill-dot blue"></span>Checking...</span>
+              </div>
+              <span class="pill" id="ingest-bugzilla" style="font-size:0.7rem;">Ingestion: Checking</span>
+            </div>
+            <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.75rem;" class="mono" id="instance-bugzilla">Instance Configured</div>
+            <div class="table-container">
+              <table>
+                <tbody>
+                  <tr><td style="color:var(--text-dim); width:40%;">Auth Status</td><td class="mono" id="auth-bugzilla">-</td></tr>
+                  <tr><td style="color:var(--text-dim);">API Version / Env</td><td class="mono" id="ver-bugzilla">-</td></tr>
+                  <tr><td style="color:var(--text-dim);">Read Permissions</td><td class="mono" id="perm-bugzilla">-</td></tr>
+                  <tr><td style="color:var(--text-dim);">Rate Limit Remaining</td><td class="mono" id="quota-bugzilla">-</td></tr>
+                  <tr><td style="color:var(--text-dim);">Atlas Candidates</td><td class="mono" id="count-bugzilla">-</td></tr>
+                  <tr><td style="color:var(--text-dim);">Last Check Time</td><td class="mono" id="check-bugzilla">-</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div id="err-bugzilla" style="display:none; margin-top:0.75rem; font-size:0.75rem; color:var(--accent-rose); background:rgba(239,68,68,0.1); padding:0.5rem; border-radius:4px;"></div>
+          </div>
+        </div>
+
+        <!-- Ingestion Pipeline Overview -->
+        <div class="card" style="background: var(--bg-surface-elevated);">
+          <div class="card-header">
+            <div class="card-title" style="font-size:1rem;">Candidate Pool Multi-Platform Distribution</div>
+            <span class="pill" id="pill-overall-status"><span class="pill-dot green"></span>Status Loading</span>
+          </div>
+          <div class="grid-3" style="margin-bottom:1rem;">
+            <div style="background:var(--bg-surface); padding:1rem; border-radius:var(--radius-sm); text-align:center;">
+              <div style="font-size:0.75rem; color:var(--text-dim); text-transform:uppercase;">Total Candidates</div>
+              <div style="font-size:1.8rem; font-weight:800; color:var(--text-main);" id="pool-total-candidates">-</div>
+            </div>
+            <div style="background:var(--bg-surface); padding:1rem; border-radius:var(--radius-sm); text-align:center;">
+              <div style="font-size:0.75rem; color:var(--text-dim); text-transform:uppercase;">Active Sources</div>
+              <div style="font-size:1.8rem; font-weight:800; color:var(--accent-emerald);" id="pool-active-sources">-</div>
+            </div>
+            <div style="background:var(--bg-surface); padding:1rem; border-radius:var(--radius-sm); text-align:center;">
+              <div style="font-size:0.75rem; color:var(--text-dim); text-transform:uppercase;">Scheduler Cycle</div>
+              <div style="font-size:1.1rem; font-weight:700; color:var(--accent-cyan); margin-top:0.5rem;" id="pool-scheduler-state">Periodic</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </main>
 
   <!-- Footer -->
@@ -832,6 +979,8 @@
       if (tabId === 'simulator' && !window.simulatorLoaded) {
         calculateRanking();
         window.simulatorLoaded = true;
+      } else if (tabId === 'platforms') {
+        fetchPlatformDetails();
       }
     }
 
@@ -1003,6 +1152,169 @@
         }
       } catch (e) {
         console.log('Evaluation report fetch error:', e);
+      }
+    }
+
+    async function fetchPlatformDetails() {
+      try {
+        const resp = await fetch('/api/ingestion/platforms');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        const platforms = data.platforms || {};
+
+        let activeCount = 0;
+        let totalCandidates = 0;
+
+        for (const [key, p] of Object.entries(platforms)) {
+          // Pill connection status
+          const pill = document.getElementById(`pill-${key}`);
+          const ingestPill = document.getElementById(`ingest-${key}`);
+          const instEl = document.getElementById(`instance-${key}`);
+          const authEl = document.getElementById(`auth-${key}`);
+          const verEl = document.getElementById(`ver-${key}`);
+          const permEl = document.getElementById(`perm-${key}`);
+          const quotaEl = document.getElementById(`quota-${key}`);
+          const countEl = document.getElementById(`count-${key}`);
+          const checkEl = document.getElementById(`check-${key}`);
+          const errEl = document.getElementById(`err-${key}`);
+
+          if (instEl && p.source_instance) {
+            instEl.innerText = p.source_instance;
+          }
+
+          if (p.ingestion_enabled) {
+            activeCount++;
+            if (pill) pill.innerHTML = '<span class="pill-dot green"></span>Operational';
+            if (ingestPill) {
+              ingestPill.style.color = 'var(--accent-emerald)';
+              ingestPill.innerText = 'Ingestion: Active';
+            }
+          } else if (p.reachable) {
+            if (pill) pill.innerHTML = '<span class="pill-dot amber"></span>Degraded';
+            if (ingestPill) {
+              ingestPill.style.color = 'var(--accent-amber)';
+              ingestPill.innerText = 'Ingestion: Limited';
+            }
+          } else {
+            if (pill) pill.innerHTML = '<span class="pill-dot red" style="background:var(--accent-rose); box-shadow:0 0 8px var(--accent-rose);"></span>Failing';
+            if (ingestPill) {
+              ingestPill.style.color = 'var(--accent-rose)';
+              ingestPill.innerText = 'Ingestion: Disabled';
+            }
+          }
+
+          if (authEl) authEl.innerText = p.auth_status || 'unknown';
+          if (verEl) verEl.innerText = p.api_version || 'unknown';
+          if (permEl) permEl.innerText = p.read_permission_status || 'unknown';
+
+          if (quotaEl) {
+            const rl = p.rate_limit_info || {};
+            if (rl.limit === 'unknown' || rl.remaining === 'unknown') {
+              quotaEl.innerText = 'Unknown (Local budget tracked)';
+            } else {
+              quotaEl.innerText = `${rl.remaining} / ${rl.limit}`;
+            }
+          }
+
+          const cCount = p.candidate_count_in_atlas || 0;
+          totalCandidates += cCount;
+          if (countEl) countEl.innerText = `${cCount} issues`;
+
+          if (checkEl) {
+            checkEl.innerText = p.last_successful_check_at ? new Date(p.last_successful_check_at).toLocaleTimeString() : 'Never';
+          }
+
+          if (errEl) {
+            if (p.error_message) {
+              errEl.style.display = 'block';
+              errEl.innerHTML = `<strong>Issue:</strong> ${p.error_message}<br><strong>Action:</strong> ${p.recommended_action || 'Inspect platform configuration.'}`;
+            } else {
+              errEl.style.display = 'none';
+            }
+          }
+        }
+
+        const totalEl = document.getElementById('pool-total-candidates');
+        const activeSourcesEl = document.getElementById('pool-active-sources');
+        const overallPill = document.getElementById('pill-overall-status');
+
+        if (totalEl) totalEl.innerText = totalCandidates;
+        if (activeSourcesEl) activeSourcesEl.innerText = `${activeCount} / 4 Sources`;
+        if (overallPill) {
+          if (activeCount === 4) {
+            overallPill.innerHTML = '<span class="pill-dot green"></span>All Operational';
+          } else if (activeCount > 0) {
+            overallPill.innerHTML = `<span class="pill-dot amber"></span>${activeCount} Active / ${4 - activeCount} Degraded`;
+          } else {
+            overallPill.innerHTML = '<span class="pill-dot red" style="background:var(--accent-rose);"></span>Failing';
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching platform details:', err);
+      }
+    }
+
+    async function checkApiAccess() {
+      const btn = document.getElementById('btn-check-api');
+      const banner = document.getElementById('action-status-banner');
+      btn.disabled = true;
+      btn.innerHTML = '<span>Validating APIs...</span>';
+      banner.style.display = 'block';
+      banner.style.background = 'rgba(99, 102, 241, 0.15)';
+      banner.style.border = '1px solid rgba(99, 102, 241, 0.4)';
+      banner.style.color = '#C7D2FE';
+      banner.innerText = 'Calling live backend API health verification across all 4 platforms...';
+
+      try {
+        const resp = await fetch('/api/ingestion/health/check', { method: 'POST' });
+        const res = await resp.json();
+        await fetchPlatformDetails();
+
+        banner.style.background = 'rgba(16, 185, 129, 0.15)';
+        banner.style.border = '1px solid rgba(16, 185, 129, 0.4)';
+        banner.style.color = '#A7F3D0';
+        banner.innerText = `Health check completed. Overall status: ${res.overall_status.toUpperCase()}. Active sources: ${res.active_sources.join(', ') || 'none'}. Degraded sources: ${res.degraded_sources.join(', ') || 'none'}.`;
+      } catch (err) {
+        banner.style.background = 'rgba(239, 68, 68, 0.15)';
+        banner.style.border = '1px solid rgba(239, 68, 68, 0.4)';
+        banner.style.color = '#FECACA';
+        banner.innerText = `API health check failed: ${err.message}`;
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>Check API Access</span>';
+      }
+    }
+
+    async function runDiscoveryAdmin() {
+      const btn = document.getElementById('btn-run-discovery');
+      const banner = document.getElementById('action-status-banner');
+      btn.disabled = true;
+      btn.innerHTML = '<span>Discovering Issues...</span>';
+      banner.style.display = 'block';
+      banner.style.background = 'rgba(99, 102, 241, 0.15)';
+      banner.style.border = '1px solid rgba(99, 102, 241, 0.4)';
+      banner.style.color = '#C7D2FE';
+      banner.innerText = 'Triggering multi-platform candidate discovery with bounded request quotas...';
+
+      try {
+        const resp = await fetch('/api/ingestion/discover?source=all', { method: 'POST' });
+        const res = await resp.json();
+        await fetchPlatformDetails();
+
+        banner.style.background = 'rgba(16, 185, 129, 0.15)';
+        banner.style.border = '1px solid rgba(16, 185, 129, 0.4)';
+        banner.style.color = '#A7F3D0';
+        const summary = res.per_source_summary || {};
+        const summaryParts = Object.entries(summary).map(([s, stats]) => `${s}: +${stats.inserted} ins, ${stats.skipped} skp`);
+        banner.innerText = `Discovery finished (${res.status}). Discovered: ${res.discovered_count}, Inserted: ${res.inserted_count}. [${summaryParts.join(' | ')}]`;
+      } catch (err) {
+        banner.style.background = 'rgba(239, 68, 68, 0.15)';
+        banner.style.border = '1px solid rgba(239, 68, 68, 0.4)';
+        banner.style.color = '#FECACA';
+        banner.innerText = `Discovery job encountered an issue: ${err.message}`;
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>Run Discovery</span>';
       }
     }
 

@@ -29,6 +29,7 @@ class RecommendationRequest(BaseModel):
     prefer_live_atlas: bool = True
     demo_mode: bool = False
     technology_filter: Optional[str] = None
+    source_filter: Optional[str] = None
     min_difficulty: Optional[float] = None
     max_difficulty: Optional[float] = None
     run_id: Optional[str] = None
@@ -44,7 +45,7 @@ def get_personalized_recommendations(req: RecommendationRequest):
     2. Resolve contributor profile (from Atlas or payload).
     3. Retrieve eligible candidates (from Atlas candidate pool or demo pool).
     4. Score and rank candidates using authoritative C++ engine.
-    5. Run live GitHub verification & shortlist backfill in descending rank order.
+    5. Run live multi-platform verification & shortlist backfill in descending rank order.
     6. Persist complete audit snapshots idempotently to MongoDB Atlas.
     7. Return final recommendations, explanations, verification metadata, and operational status.
     """
@@ -101,6 +102,7 @@ def get_personalized_recommendations(req: RecommendationRequest):
                 technology=req.technology_filter,
                 min_difficulty=req.min_difficulty,
                 max_difficulty=req.max_difficulty,
+                source=req.source_filter,
                 limit=100
             )
             candidates = live_candidates
