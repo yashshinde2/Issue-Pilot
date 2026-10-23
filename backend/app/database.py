@@ -116,6 +116,15 @@ class Database:
                 name="idx_issue_id"
             )
             target_db.issues.create_index(
+                [
+                    ("source", ASCENDING),
+                    ("source_instance", ASCENDING),
+                    ("source_issue_id", ASCENDING)
+                ],
+                sparse=True,
+                name="idx_source_instance_issue_id"
+            )
+            target_db.issues.create_index(
                 [("state", ASCENDING), ("is_assigned", ASCENDING)],
                 name="idx_state_assigned"
             )

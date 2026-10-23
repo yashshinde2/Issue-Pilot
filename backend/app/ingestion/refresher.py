@@ -12,13 +12,15 @@ from typing import Dict, Any, Optional, List
 from app.config import settings
 from app.database import db
 from app.crud import issue_repo, job_repo
-from app.adapters.github_adapter import github_adapter, RateLimitExceededError, SourceAPIError
+from app.adapters import get_adapter, ADAPTERS, github_adapter
+from app.adapters.base import RateLimitExceededError, SourceAPIError
 
 logger = logging.getLogger(__name__)
 
 
 class RefreshWorker:
     def __init__(self, adapter=None):
+        self._custom_adapter = adapter is not None
         self.adapter = adapter or github_adapter
 
     def run_refresh(
@@ -28,9 +30,9 @@ class RefreshWorker:
         force: bool = False
     ) -> Dict[str, Any]:
         """
-        Refresh a bounded batch of stored issue candidates.
+        Refresh a bounded batch of stored issue candidates across platforms.
         - Prioritizes candidates with oldest last_seen_at or marked 'needs_refresh'.
-        - Verifies individual issue state against official GitHub API.
+        - Verifies individual issue state against official source platform API.
         - Marks closed issues as 'closed' (kept for history, excluded from recommendations).
         - Marks missing (404) issues as 'unavailable'.
         - Preserves ranking evidence if API response lacks replacement data.
@@ -70,12 +72,13 @@ class RefreshWorker:
         job_status = "completed"
 
         for candidate in candidates:
+            source = (candidate.get("source") or "github").lower()
             repo_owner = candidate.get("repository_owner")
             repo_name = candidate.get("repository_name")
             repo_full_name = candidate.get("repository_full_name", "")
             issue_number = candidate.get("issue_number")
 
-            if not repo_owner or not repo_name:
+            if source != "bugzilla" and (not repo_owner or not repo_name):
                 parts = repo_full_name.split("/")
                 if len(parts) == 2:
                     repo_owner, repo_name = parts
@@ -84,8 +87,16 @@ class RefreshWorker:
                     continue
 
             try:
-                # Query GitHub for canonical current state
-                fresh_data = self.adapter.get_issue(repo_owner, repo_name, issue_number)
+                # Query appropriate platform adapter for current state
+                if self._custom_adapter:
+                    cur_adapter = self.adapter
+                else:
+                    cur_adapter = get_adapter(source)
+
+                if source == "bugzilla":
+                    fresh_data = cur_adapter.get_issue("", "", issue_number)
+                else:
+                    fresh_data = cur_adapter.get_issue(repo_owner, repo_name, issue_number)
 
                 if fresh_data is None:
                     # 404 on GitHub -> mark unavailable
@@ -101,7 +112,7 @@ class RefreshWorker:
                     total_closed += 1
                 else:
                     # Normalize fresh data
-                    normalized = self.adapter.normalize_issue(fresh_data)
+                    normalized = cur_adapter.normalize_issue(fresh_data)
                     if not normalized:
                         # e.g., converted to PR
                         issue_repo.mark_issue_closed(candidate["id"])

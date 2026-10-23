@@ -48,9 +48,9 @@ class IssueRepository:
 
     def upsert_issue(self, issue_data: Union[dict, IssueRecord], preserve_unsupplied: bool = True) -> Dict[str, Any]:
         """
-        Idempotent upsert for an issue record.
-        Enforces natural identity (source, repository_full_name, issue_number).
-        Preserves existing fields not supplied in partial updates.
+        Idempotent upsert for an issue record across all supported platforms (GitHub, GitLab, Codeberg, Bugzilla).
+        Enforces natural identity (source, repository_full_name, issue_number) or compound ID.
+        Preserves existing fields and ranking evidence not supplied in partial updates.
         """
         database = self._get_db()
 
@@ -62,52 +62,74 @@ class IssueRepository:
             raise InvalidDataError("issue_data must be a dict or IssueRecord")
 
         # Validate natural key identity
-        source = data.get("source", "github")
+        source = (data.get("source") or "github").lower()
+        data["source"] = source
         repo_full_name = data.get("repository_full_name")
         issue_number = data.get("issue_number")
+        source_instance = data.get("source_instance") or (f"{source}.com" if source != "bugzilla" else "bugzilla-instance")
+        data["source_instance"] = source_instance
 
-        if not repo_full_name or issue_number is None:
-            raise InvalidDataError("repository_full_name and issue_number are required for issue identity.")
-
-        try:
-            issue_number = int(issue_number)
-        except (ValueError, TypeError):
-            raise InvalidDataError(f"issue_number must be an integer, got: {issue_number}")
+        if issue_number is not None:
+            try:
+                issue_number = int(issue_number)
+                data["issue_number"] = issue_number
+            except (ValueError, TypeError):
+                raise InvalidDataError(f"issue_number must be an integer, got: {issue_number}")
 
         # Ensure ID is generated if not provided
         if not data.get("id"):
-            data["id"] = f"{source}_{repo_full_name}_{issue_number}".replace("/", "_")
+            if repo_full_name and issue_number is not None:
+                data["id"] = f"{source}_{repo_full_name}_{issue_number}".replace("/", "_")
+            elif data.get("source_issue_id"):
+                data["id"] = f"{source}_{source_instance}_{data['source_issue_id']}".replace("/", "_").replace(".", "_")
+            elif issue_number is not None:
+                data["id"] = f"{source}_{source_instance}_{issue_number}".replace("/", "_").replace(".", "_")
+            else:
+                raise InvalidDataError("repository_full_name and issue_number or source_issue_id are required for issue identity.")
 
-        filter_query = {
-            "source": source,
-            "repository_full_name": repo_full_name,
-            "issue_number": issue_number
-        }
+        # Match either compound natural key or ID
+        if repo_full_name and issue_number is not None:
+            filter_query = {
+                "source": source,
+                "repository_full_name": repo_full_name,
+                "issue_number": issue_number
+            }
+        else:
+            filter_query = {"id": data["id"]}
 
         now_iso = datetime.now(timezone.utc).isoformat()
+        if "first_seen_at" in data and "first_seen" not in data:
+            data["first_seen"] = data["first_seen_at"]
+        if "last_seen_at" in data and "last_seen" not in data:
+            data["last_seen"] = data["last_seen_at"]
+        if "last_verified_at" in data and "last_verified" not in data:
+            data["last_verified"] = data["last_verified_at"]
         
         # Strip mongo _id if passed
         data.pop("_id", None)
 
         if preserve_unsupplied:
-            first_seen_val = data.get("first_seen_at") or now_iso
+            first_seen_val = data.get("first_seen_at") or data.get("first_seen") or now_iso
             created_at_val = data.get("created_at") or now_iso
 
             # Partial update preserves fields that are not supplied in data
             update_fields = {k: v for k, v in data.items() if v is not None}
             if "last_seen_at" not in update_fields:
                 update_fields["last_seen_at"] = now_iso
+                update_fields["last_seen"] = now_iso
             if "updated_at" not in update_fields:
                 update_fields["updated_at"] = now_iso
 
             # Fields in $setOnInsert must never appear in $set to prevent MongoDB path conflict
             update_fields.pop("first_seen_at", None)
+            update_fields.pop("first_seen", None)
             update_fields.pop("created_at", None)
 
             update_op = {
                 "$set": update_fields,
                 "$setOnInsert": {
                     "first_seen_at": first_seen_val,
+                    "first_seen": first_seen_val,
                     "created_at": created_at_val
                 }
             }
@@ -326,15 +348,37 @@ class IssueRepository:
             for item in database.issues.aggregate(repo_pipeline)
         ]
 
+        # Source platform breakdown
+        source_pipeline = [
+            {"$group": {"_id": "$source", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}}
+        ]
+        source_counts = {
+            item["_id"]: item["count"]
+            for item in database.issues.aggregate(source_pipeline)
+            if item.get("_id")
+        }
+
         return {
             "total_candidates": total_count,
             "open_candidates": open_count,
             "closed_candidates": closed_count,
             "status_breakdown": status_counts,
+            "source_breakdown": source_counts,
             "unique_repositories": unique_repos,
             "top_technologies": top_techs,
             "top_repositories": top_repos
         }
+
+    def count_by_source(self, source: str, state: Optional[str] = "open") -> int:
+        """Count issues belonging to a specific source platform."""
+        database = self._get_db()
+        q: Dict[str, Any] = {"source": source.lower()}
+        if state:
+            q["state"] = state
+            q["stale_status"] = {"$nin": ["closed", "unavailable"]}
+        return database.issues.count_documents(q)
+
 
     def delete_issue(self, issue_id: str) -> bool:
         database = self._get_db()

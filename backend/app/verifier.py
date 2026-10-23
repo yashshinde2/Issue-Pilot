@@ -419,7 +419,7 @@ class LiveVerifier:
             is_inconclusive=True
         )
 
-    def _cache_result(self, cache_key: Tuple[str, int], result: VerificationResult, etag: Optional[str]):
+    def _cache_result(self, cache_key: Any, result: VerificationResult, etag: Optional[str] = None):
         """Thread-safe update to short-lived verification cache."""
         with self._lock:
             self._cache[cache_key] = {
@@ -433,6 +433,324 @@ class LiveVerifier:
                 "is_operational_failure": result.is_operational_failure,
                 "is_inconclusive": result.is_inconclusive
             }
+
+    def verify_gitlab_issue(
+        self,
+        candidate: Dict[str, Any],
+        timeout: Optional[int] = None,
+        max_retries: Optional[int] = None
+    ) -> VerificationResult:
+        from app.adapters import gitlab_adapter
+        repo_full_name = candidate.get("repository_full_name", "")
+        issue_number = int(candidate.get("issue_number", 0))
+        cache_key = ("gitlab", repo_full_name.lower(), issue_number)
+
+        now_ts = time.time()
+        with self._lock:
+            if cache_key in self._cache:
+                entry = self._cache[cache_key]
+                if now_ts - entry.get("cached_at", 0) < self.cache_ttl_seconds:
+                    return VerificationResult(
+                        is_valid=entry["is_valid"],
+                        status=entry["status"],
+                        reason=f"{entry['reason']} (cached)",
+                        canonical_repo=entry.get("canonical_repo", repo_full_name),
+                        canonical_url=entry.get("canonical_url"),
+                        is_operational_failure=entry.get("is_operational_failure", False),
+                        is_inconclusive=entry.get("is_inconclusive", False),
+                        response_metadata={"cached": True}
+                    )
+
+        parts = repo_full_name.split("/")
+        owner = parts[0] if len(parts) >= 2 else "gitlab"
+        repo = parts[1] if len(parts) >= 2 else parts[0]
+
+        try:
+            issue_data = gitlab_adapter.get_issue(owner, repo, issue_number)
+            if issue_data is None:
+                res = VerificationResult(
+                    is_valid=False,
+                    status="excluded",
+                    reason="GitLab issue not found or deleted (HTTP 404)",
+                    canonical_repo=repo_full_name,
+                    canonical_url=candidate.get("canonical_url") or candidate.get("issue_url")
+                )
+                self._cache_result(cache_key, res)
+                return res
+
+            state = (issue_data.get("state") or "opened").lower()
+            if state in ("closed", "close"):
+                res = VerificationResult(
+                    is_valid=False,
+                    status="excluded",
+                    reason="Issue closed on GitLab",
+                    canonical_repo=repo_full_name,
+                    canonical_url=issue_data.get("web_url")
+                )
+                self._cache_result(cache_key, res)
+                return res
+
+            raw_assignees = issue_data.get("assignees", [])
+            if raw_assignees or issue_data.get("assignee"):
+                res = VerificationResult(
+                    is_valid=False,
+                    status="excluded",
+                    reason="Issue is already assigned to a contributor on GitLab",
+                    canonical_repo=repo_full_name,
+                    canonical_url=issue_data.get("web_url")
+                )
+                self._cache_result(cache_key, res)
+                return res
+
+            res = VerificationResult(
+                is_valid=True,
+                status="live_verified",
+                reason="Confirmed open and eligible via GitLab API",
+                canonical_repo=repo_full_name,
+                canonical_url=issue_data.get("web_url")
+            )
+            self._cache_result(cache_key, res)
+            return res
+
+        except RateLimitExceededError as e:
+            return VerificationResult(
+                is_valid=False,
+                status="inconclusive",
+                reason=f"GitLab rate limit budget exhausted; verification inconclusive: {str(e)}",
+                canonical_repo=repo_full_name,
+                is_operational_failure=True,
+                is_inconclusive=True
+            )
+        except Exception as e:
+            return VerificationResult(
+                is_valid=False,
+                status="inconclusive",
+                reason=f"GitLab verification operational failure: {str(e)}",
+                canonical_repo=repo_full_name,
+                is_operational_failure=True,
+                is_inconclusive=True
+            )
+
+    def verify_codeberg_issue(
+        self,
+        candidate: Dict[str, Any],
+        timeout: Optional[int] = None,
+        max_retries: Optional[int] = None
+    ) -> VerificationResult:
+        from app.adapters import codeberg_adapter
+        repo_full_name = candidate.get("repository_full_name", "")
+        issue_number = int(candidate.get("issue_number", 0))
+        cache_key = ("codeberg", repo_full_name.lower(), issue_number)
+
+        now_ts = time.time()
+        with self._lock:
+            if cache_key in self._cache:
+                entry = self._cache[cache_key]
+                if now_ts - entry.get("cached_at", 0) < self.cache_ttl_seconds:
+                    return VerificationResult(
+                        is_valid=entry["is_valid"],
+                        status=entry["status"],
+                        reason=f"{entry['reason']} (cached)",
+                        canonical_repo=entry.get("canonical_repo", repo_full_name),
+                        canonical_url=entry.get("canonical_url"),
+                        is_operational_failure=entry.get("is_operational_failure", False),
+                        is_inconclusive=entry.get("is_inconclusive", False),
+                        response_metadata={"cached": True}
+                    )
+
+        parts = repo_full_name.split("/")
+        owner = parts[0] if len(parts) >= 2 else "codeberg"
+        repo = parts[1] if len(parts) >= 2 else parts[0]
+
+        try:
+            issue_data = codeberg_adapter.get_issue(owner, repo, issue_number)
+            if issue_data is None:
+                res = VerificationResult(
+                    is_valid=False,
+                    status="excluded",
+                    reason="Codeberg issue not found or deleted (HTTP 404)",
+                    canonical_repo=repo_full_name,
+                    canonical_url=candidate.get("canonical_url") or candidate.get("issue_url")
+                )
+                self._cache_result(cache_key, res)
+                return res
+
+            if issue_data.get("pull_request") is not None:
+                res = VerificationResult(
+                    is_valid=False,
+                    status="excluded",
+                    reason="Pull requests are excluded from candidate recommendations",
+                    canonical_repo=repo_full_name
+                )
+                self._cache_result(cache_key, res)
+                return res
+
+            state = (issue_data.get("state") or "open").lower()
+            if state == "closed":
+                res = VerificationResult(
+                    is_valid=False,
+                    status="excluded",
+                    reason="Issue closed on Codeberg",
+                    canonical_repo=repo_full_name,
+                    canonical_url=issue_data.get("html_url")
+                )
+                self._cache_result(cache_key, res)
+                return res
+
+            assignees = issue_data.get("assignees", []) or ([issue_data.get("assignee")] if issue_data.get("assignee") else [])
+            if assignees:
+                res = VerificationResult(
+                    is_valid=False,
+                    status="excluded",
+                    reason="Issue is already assigned to a contributor on Codeberg",
+                    canonical_repo=repo_full_name,
+                    canonical_url=issue_data.get("html_url")
+                )
+                self._cache_result(cache_key, res)
+                return res
+
+            res = VerificationResult(
+                is_valid=True,
+                status="live_verified",
+                reason="Confirmed open and eligible via Codeberg API",
+                canonical_repo=repo_full_name,
+                canonical_url=issue_data.get("html_url")
+            )
+            self._cache_result(cache_key, res)
+            return res
+
+        except RateLimitExceededError as e:
+            return VerificationResult(
+                is_valid=False,
+                status="inconclusive",
+                reason=f"Codeberg rate limit budget exhausted; verification inconclusive: {str(e)}",
+                canonical_repo=repo_full_name,
+                is_operational_failure=True,
+                is_inconclusive=True
+            )
+        except Exception as e:
+            return VerificationResult(
+                is_valid=False,
+                status="inconclusive",
+                reason=f"Codeberg verification operational failure: {str(e)}",
+                canonical_repo=repo_full_name,
+                is_operational_failure=True,
+                is_inconclusive=True
+            )
+
+    def verify_bugzilla_issue(
+        self,
+        candidate: Dict[str, Any],
+        timeout: Optional[int] = None,
+        max_retries: Optional[int] = None
+    ) -> VerificationResult:
+        from app.adapters import bugzilla_adapter
+        issue_number = int(candidate.get("issue_number", 0))
+        source_instance = candidate.get("source_instance", "bugzilla")
+        cache_key = ("bugzilla", source_instance, issue_number)
+
+        now_ts = time.time()
+        with self._lock:
+            if cache_key in self._cache:
+                entry = self._cache[cache_key]
+                if now_ts - entry.get("cached_at", 0) < self.cache_ttl_seconds:
+                    return VerificationResult(
+                        is_valid=entry["is_valid"],
+                        status=entry["status"],
+                        reason=f"{entry['reason']} (cached)",
+                        canonical_repo=candidate.get("repository_full_name"),
+                        canonical_url=entry.get("canonical_url"),
+                        is_operational_failure=entry.get("is_operational_failure", False),
+                        is_inconclusive=entry.get("is_inconclusive", False),
+                        response_metadata={"cached": True}
+                    )
+
+        try:
+            bug_data = bugzilla_adapter.get_issue("", "", issue_number)
+            if bug_data is None:
+                res = VerificationResult(
+                    is_valid=False,
+                    status="excluded",
+                    reason="Bugzilla bug not found or inaccessible (HTTP 404)",
+                    canonical_repo=candidate.get("repository_full_name"),
+                    canonical_url=candidate.get("canonical_url") or candidate.get("issue_url")
+                )
+                self._cache_result(cache_key, res)
+                return res
+
+            bz_status = (bug_data.get("status") or "NEW").upper()
+            resolution = (bug_data.get("resolution") or "").upper()
+            open_statuses = {"NEW", "UNCONFIRMED", "ASSIGNED", "CONFIRMED", "IN_PROGRESS", "REOPENED"}
+
+            if bz_status not in open_statuses or resolution:
+                res = VerificationResult(
+                    is_valid=False,
+                    status="excluded",
+                    reason=f"Bug resolved or closed on Bugzilla (status: {bz_status}, resolution: {resolution or 'None'})",
+                    canonical_repo=candidate.get("repository_full_name")
+                )
+                self._cache_result(cache_key, res)
+                return res
+
+            assigned_to = bug_data.get("assigned_to", "")
+            if assigned_to and "nobody@" not in assigned_to.lower():
+                res = VerificationResult(
+                    is_valid=False,
+                    status="excluded",
+                    reason=f"Bug is already assigned to {assigned_to} on Bugzilla",
+                    canonical_repo=candidate.get("repository_full_name")
+                )
+                self._cache_result(cache_key, res)
+                return res
+
+            canonical_url = f"{bugzilla_adapter._base_url.replace('/rest', '').rstrip('/')}/show_bug.cgi?id={issue_number}"
+            res = VerificationResult(
+                is_valid=True,
+                status="live_verified",
+                reason="Confirmed open and eligible via Bugzilla REST API",
+                canonical_repo=candidate.get("repository_full_name"),
+                canonical_url=canonical_url
+            )
+            self._cache_result(cache_key, res)
+            return res
+
+        except RateLimitExceededError as e:
+            return VerificationResult(
+                is_valid=False,
+                status="inconclusive",
+                reason=f"Bugzilla request budget exhausted: {str(e)}",
+                canonical_repo=candidate.get("repository_full_name"),
+                is_operational_failure=True,
+                is_inconclusive=True
+            )
+        except Exception as e:
+            return VerificationResult(
+                is_valid=False,
+                status="inconclusive",
+                reason=f"Bugzilla verification operational failure: {str(e)}",
+                canonical_repo=candidate.get("repository_full_name"),
+                is_operational_failure=True,
+                is_inconclusive=True
+            )
+
+    def verify_candidate(
+        self,
+        candidate: Dict[str, Any],
+        timeout: Optional[int] = None,
+        max_retries: Optional[int] = None
+    ) -> VerificationResult:
+        """Source-aware verification dispatcher across GitHub, GitLab, Codeberg, and Bugzilla."""
+        source = (candidate.get("source") or "github").lower()
+        if source == "gitlab":
+            return self.verify_gitlab_issue(candidate, timeout=timeout, max_retries=max_retries)
+        elif source == "codeberg":
+            return self.verify_codeberg_issue(candidate, timeout=timeout, max_retries=max_retries)
+        elif source == "bugzilla":
+            return self.verify_bugzilla_issue(candidate, timeout=timeout, max_retries=max_retries)
+        else:
+            repo_full_name = candidate.get("repository_full_name", "")
+            issue_number = int(candidate.get("issue_number", 0))
+            return self.verify_issue(repo_full_name, issue_number, timeout=timeout, max_retries=max_retries)
 
     def verify_and_backfill(
         self,
@@ -448,13 +766,7 @@ class LiveVerifier:
         Verify candidates in descending rank order until target_count valid recommendations
         have been collected or max_budget is exhausted.
         Backfills lower-ranked candidates when higher-ranked ones are excluded.
-        Applies bounded concurrency while strictly preserving rank-order priority.
-
-        Returns:
-            Tuple of:
-            1. delivered_recommendations: List[Dict[str, Any]] (at most target_count valid candidates)
-            2. audited_candidates: List[Dict[str, Any]] (all evaluated candidates with decisions and reasons)
-            3. summary_metrics: Dict[str, Any]
+        Applies bounded concurrency while strictly preserving rank-order priority across all platforms.
         """
         start_time = time.time()
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -496,20 +808,20 @@ class LiveVerifier:
             tasks_to_run = []
             for idx_in_chunk, candidate in enumerate(chunk):
                 global_idx = i + idx_in_chunk
+                source = (candidate.get("source") or "github").lower()
                 repo_full_name = candidate.get("repository_full_name", "")
                 issue_number = candidate.get("issue_number", 0)
                 is_sample = (
                     demo_mode
                     or candidate.get("id", "").startswith("sample-")
-                    or not repo_full_name
-                    or "/" not in repo_full_name
+                    or (source != "bugzilla" and (not repo_full_name or "/" not in repo_full_name))
                 )
                 if is_sample:
                     if candidate.get("is_closed_simulated"):
                         results_map[global_idx] = VerificationResult(
                             is_valid=False,
                             status="excluded",
-                            reason="Issue closed on GitHub (simulated demo exclusion)",
+                            reason=f"Issue closed on {source.capitalize()} (simulated demo exclusion)",
                             canonical_repo=repo_full_name,
                             response_metadata={"state": "closed"}
                         )
@@ -523,18 +835,18 @@ class LiveVerifier:
                             canonical_repo=repo_full_name
                         )
                 else:
-                    tasks_to_run.append((global_idx, repo_full_name, issue_number))
+                    tasks_to_run.append((global_idx, candidate))
 
-            # Concurrently verify live tasks for this chunk
+            # Concurrently verify live tasks for this chunk using source-aware verification
             if tasks_to_run:
                 if len(tasks_to_run) == 1:
-                    g_idx, r_name, i_num = tasks_to_run[0]
-                    results_map[g_idx] = self.verify_issue(r_name, i_num, timeout=timeout, max_retries=max_retries)
+                    g_idx, cand = tasks_to_run[0]
+                    results_map[g_idx] = self.verify_candidate(cand, timeout=timeout, max_retries=max_retries)
                 else:
                     with ThreadPoolExecutor(max_workers=min(eff_concurrency, len(tasks_to_run))) as executor:
                         future_to_idx = {
-                            executor.submit(self.verify_issue, r_name, i_num, timeout, max_retries): g_idx
-                            for g_idx, r_name, i_num in tasks_to_run
+                            executor.submit(self.verify_candidate, cand, timeout, max_retries): g_idx
+                            for g_idx, cand in tasks_to_run
                         }
                         for future in future_to_idx:
                             g_idx = future_to_idx[future]
@@ -592,6 +904,8 @@ class LiveVerifier:
                     item["response_metadata"] = ver_res.response_metadata
 
                     # Update canonical repo / URL if redirected/renamed
+                    source = (candidate.get("source") or "github").lower()
+                    item["source"] = source
                     repo_full_name = candidate.get("repository_full_name", "")
                     issue_number = candidate.get("issue_number", 0)
                     if ver_res.canonical_repo and ver_res.canonical_repo != repo_full_name:
@@ -600,6 +914,14 @@ class LiveVerifier:
                     if ver_res.canonical_url:
                         item["canonical_url"] = ver_res.canonical_url
                         item["issue_url"] = ver_res.canonical_url
+                    else:
+                        item["canonical_url"] = candidate.get("canonical_url") or candidate.get("issue_url")
+
+                    # Ensure explanation includes source platform and canonical URL
+                    expl = item.get("explanation") or ""
+                    platform_tag = f"[{source.upper()}]"
+                    if platform_tag not in expl:
+                        item["explanation"] = f"{platform_tag} {expl}"
 
                     delivered_recommendations.append(item)
                     audited_candidates.append(item)
@@ -610,6 +932,7 @@ class LiveVerifier:
                             update_fields = {
                                 "verification_status": "live_verified",
                                 "last_verified_at": now_iso,
+                                "last_verified": now_iso,
                                 "state": "open",
                                 "is_assigned": False
                             }
@@ -617,10 +940,13 @@ class LiveVerifier:
                                 update_fields["repository_full_name"] = ver_res.canonical_repo
                             if ver_res.canonical_url:
                                 update_fields["issue_url"] = ver_res.canonical_url
-                            db.db.issues.update_one(
-                                {"repository_full_name": repo_full_name, "issue_number": issue_number},
-                                {"$set": update_fields}
-                            )
+                                update_fields["canonical_url"] = ver_res.canonical_url
+                            filt = {"id": candidate["id"]} if "id" in candidate else {
+                                "source": source,
+                                "repository_full_name": repo_full_name,
+                                "issue_number": issue_number
+                            }
+                            db.db.issues.update_one(filt, {"$set": update_fields})
                         except Exception as e:
                             logger.debug("Could not update candidate pool in Atlas: %s", str(e))
 

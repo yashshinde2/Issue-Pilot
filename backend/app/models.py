@@ -63,14 +63,21 @@ class FreshnessEvidence(BaseModel):
 class IssueRecord(BaseModel):
     id: str
     native_id: Optional[str] = None
-    repository_full_name: str
+    source_issue_id: Optional[str] = None
+    source: str = "github"
+    source_instance: Optional[str] = "api.github.com"
+    repository_id: Optional[str] = None
+    repository_full_name: Optional[str] = None
     repository_owner: Optional[str] = None
     repository_name: Optional[str] = None
     repository_url: Optional[str] = None
-    issue_number: int
+    issue_number: Optional[int] = 0
     title: str
     body: Optional[str] = ""
     issue_url: str
+    canonical_url: Optional[str] = None
+    product: Optional[str] = None
+    component: Optional[str] = None
     labels: List[str] = Field(default_factory=list)
     state: str = "open"
     is_assigned: bool = False
@@ -80,11 +87,11 @@ class IssueRecord(BaseModel):
     updated_at: Optional[str] = None
     technologies: List[TechnologyRelevance] = Field(default_factory=list)
     detected_technologies: List[str] = Field(default_factory=list)
+    technology_evidence: Optional[List[TechnologyRelevance]] = None
     difficulty_evidence: DifficultyEvidence = Field(default_factory=DifficultyEvidence)
     responsiveness_evidence: ResponsivenessEvidence = Field(default_factory=ResponsivenessEvidence)
     health_evidence: RepositoryHealthEvidence = Field(default_factory=RepositoryHealthEvidence)
     freshness_evidence: FreshnessEvidence = Field(default_factory=FreshnessEvidence)
-    source: str = "github"
     stale_status: str = "active"
     verified: bool = False
     verification_notes: Optional[str] = None
@@ -96,6 +103,9 @@ class IssueRecord(BaseModel):
     discovery_query: Optional[str] = None
     discovery_category: Optional[str] = None
     last_verified_at: Optional[str] = None
+    first_seen: Optional[str] = None
+    last_seen: Optional[str] = None
+    last_verified: Optional[str] = None
     refresh_status: Optional[str] = "active"
 
 class ComponentScores(BaseModel):
