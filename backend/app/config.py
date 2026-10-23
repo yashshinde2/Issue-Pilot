@@ -40,6 +40,34 @@ class Settings(BaseModel):
     github_rate_limit_buffer: int = int(os.getenv("GITHUB_RATE_LIMIT_BUFFER", "10"))
     github_request_timeout_seconds: int = int(os.getenv("GITHUB_REQUEST_TIMEOUT_SECONDS", "15"))
     github_max_retries: int = int(os.getenv("GITHUB_MAX_RETRIES", "3"))
+
+    # GitLab API Configuration
+    gitlab_token: str = os.getenv("GITLAB_TOKEN", "")
+    gitlab_api_base_url: str = os.getenv("GITLAB_API_BASE_URL", "https://gitlab.com/api/v4")
+    gitlab_rate_limit_buffer: int = int(os.getenv("GITLAB_RATE_LIMIT_BUFFER", "20"))
+    gitlab_request_timeout_seconds: int = int(os.getenv("GITLAB_REQUEST_TIMEOUT_SECONDS", "15"))
+    gitlab_max_retries: int = int(os.getenv("GITLAB_MAX_RETRIES", "3"))
+
+    # Codeberg / Forgejo API Configuration
+    codeberg_token: str = os.getenv("CODEBERG_TOKEN", "")
+    codeberg_api_base_url: str = os.getenv("CODEBERG_API_BASE_URL", "https://codeberg.org/api/v1")
+    codeberg_rate_limit_buffer: int = int(os.getenv("CODEBERG_RATE_LIMIT_BUFFER", "20"))
+    codeberg_request_timeout_seconds: int = int(os.getenv("CODEBERG_REQUEST_TIMEOUT_SECONDS", "15"))
+    codeberg_max_retries: int = int(os.getenv("CODEBERG_MAX_RETRIES", "3"))
+
+    # Bugzilla API Configuration
+    bugzilla_base_url: str = os.getenv("BUGZILLA_BASE_URL", "")
+    bugzilla_api_key: str = os.getenv("BUGZILLA_API_KEY", "")
+    bugzilla_local_request_budget: int = int(os.getenv("BUGZILLA_LOCAL_REQUEST_BUDGET", "100"))
+    bugzilla_request_timeout_seconds: int = int(os.getenv("BUGZILLA_REQUEST_TIMEOUT_SECONDS", "10"))
+    bugzilla_max_retries: int = int(os.getenv("BUGZILLA_MAX_RETRIES", "2"))
+
+    # Multi-Platform Candidate Pool Allocation Targets
+    source_allocation_github: float = float(os.getenv("SOURCE_ALLOCATION_GITHUB", "0.40"))
+    source_allocation_gitlab: float = float(os.getenv("SOURCE_ALLOCATION_GITLAB", "0.30"))
+    source_allocation_codeberg: float = float(os.getenv("SOURCE_ALLOCATION_CODEBERG", "0.15"))
+    source_allocation_bugzilla: float = float(os.getenv("SOURCE_ALLOCATION_BUGZILLA", "0.15"))
+
     scheduler_enabled: bool = os.getenv("SCHEDULER_ENABLED", "false").lower() in ("true", "1", "yes")
     redis_url: str = os.getenv("REDIS_URL", "")
     final_recommendation_count: int = int(os.getenv("FINAL_RECOMMENDATION_COUNT", "5"))

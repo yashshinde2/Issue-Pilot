@@ -49,6 +49,29 @@ class BaseIssueSourceAdapter(ABC):
         """Name of the issue source provider (e.g. 'github')."""
         pass
 
+    @property
+    def source_instance(self) -> str:
+        """Instance host or base identifier (e.g. 'api.github.com', 'gitlab.com')."""
+        return self.source_name
+
+    @abstractmethod
+    def check_health(self) -> Dict[str, Any]:
+        """
+        Execute independent, low-cost API health check.
+        Returns dictionary conforming to the unified health report schema:
+          - configured: bool
+          - reachable: bool
+          - auth_status: str ("valid", "invalid", "not_required", "not_verified")
+          - read_permission_status: str ("granted", "denied", "unknown")
+          - api_version: Optional[str]
+          - rate_limit_info: Dict[str, Any]
+          - last_successful_check_at: Optional[str]
+          - error_message: Optional[str]
+          - recommended_action: Optional[str]
+          - ingestion_enabled: bool
+        """
+        pass
+
     @abstractmethod
     def search_issues(
         self,
@@ -70,7 +93,7 @@ class BaseIssueSourceAdapter(ABC):
     @abstractmethod
     def get_issue(self, owner: str, repo: str, issue_number: int) -> Optional[Dict[str, Any]]:
         """
-        Retrieve individual issue details for candidate refresh.
+        Retrieve individual issue details for candidate refresh or verification.
         Returns raw issue dictionary or None if not found.
         """
         pass
@@ -79,7 +102,7 @@ class BaseIssueSourceAdapter(ABC):
     def get_rate_limit(self) -> Dict[str, Any]:
         """
         Query current rate limit status.
-        Returns dictionary with limit, remaining, reset, used.
+        Returns dictionary with limit, remaining, reset, used, or unknown.
         """
         pass
 
@@ -94,3 +117,4 @@ class BaseIssueSourceAdapter(ABC):
         Returns None if item should be excluded (e.g. pull requests).
         """
         pass
+

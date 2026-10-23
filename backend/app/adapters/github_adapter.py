@@ -62,10 +62,20 @@ class GitHubAdapter(BaseIssueSourceAdapter):
             "used": 0,
             "resource": "core"
         }
+        self._last_successful_check: Optional[str] = None
 
     @property
     def source_name(self) -> str:
         return "github"
+
+    @property
+    def source_instance(self) -> str:
+        try:
+            import urllib.parse
+            return urllib.parse.urlparse(self._base_url).netloc or "api.github.com"
+        except Exception:
+            return "api.github.com"
+
 
     def _update_rate_limit_from_headers(self, headers: Dict[str, str], resource: str = "core"):
         """Extract and store GitHub rate-limit headers."""
@@ -237,6 +247,109 @@ class GitHubAdapter(BaseIssueSourceAdapter):
         except Exception as e:
             logger.warning("Could not refresh GitHub rate limit: %s", str(e))
             return {"current_state": dict(self.rate_limit_state), "error": str(e)}
+
+    def check_health(self) -> Dict[str, Any]:
+        """
+        Validate GitHub API health:
+        1. Query /rate_limit endpoint
+        2. Authenticate against /user if token configured
+        3. Test search endpoint (/search/issues)
+        Distinguish: invalid token (401), insufficient permissions (403), exhausted rate limits, network failure, success.
+        """
+        configured = bool(self._token or self._base_url)
+        reachable = False
+        auth_status = "not_required" if not self._token else "not_verified"
+        read_permission = "unknown"
+        error_msg = None
+        recommended_action = None
+        api_version = "v3"
+        rate_limit_info = dict(self.rate_limit_state)
+
+        # 1. Test reachability & /rate_limit
+        try:
+            rl_data = self.get_rate_limit()
+            reachable = True
+            if "core" in rl_data:
+                rate_limit_info = rl_data
+        except Exception as e:
+            error_msg = f"Network or endpoint error connecting to GitHub: {str(e)}"
+            recommended_action = "Verify internet access and GitHub API base URL reachability."
+            return {
+                "source": self.source_name,
+                "source_instance": self.source_instance,
+                "configured": configured,
+                "reachable": False,
+                "auth_status": auth_status,
+                "read_permission_status": "denied",
+                "api_version": api_version,
+                "rate_limit_info": rate_limit_info,
+                "last_successful_check_at": self._last_successful_check,
+                "error_message": error_msg,
+                "recommended_action": recommended_action,
+                "ingestion_enabled": False
+            }
+
+        # 2. Check auth if token configured
+        if self._token:
+            try:
+                self._execute_request("GET", "user")
+                auth_status = "valid"
+                read_permission = "granted"
+            except AuthenticationError as e:
+                auth_status = "invalid"
+                read_permission = "denied"
+                error_msg = "Invalid GitHub personal access token (HTTP 401/403)."
+                recommended_action = "Check GITHUB_TOKEN in your environment configuration and ensure it is not expired."
+            except RateLimitExceededError as e:
+                auth_status = "valid"
+                read_permission = "unknown"
+                error_msg = f"GitHub API rate limit exhausted: {str(e)}"
+                recommended_action = "Wait for GitHub API rate limit reset before making further requests."
+            except Exception as e:
+                auth_status = "not_verified"
+                read_permission = "unknown"
+                error_msg = f"GitHub user validation failed: {str(e)}"
+                recommended_action = "Check network or GitHub service status."
+        else:
+            auth_status = "not_required"
+            read_permission = "granted"
+
+        # 3. Test issue reading / search operation
+        search_ok = False
+        if auth_status != "invalid":
+            try:
+                s_res = self.search_issues("type:issue state:open", page=1, per_page=1)
+                search_ok = bool(s_res.get("items") is not None)
+                if read_permission != "denied":
+                    read_permission = "granted"
+            except RateLimitExceededError as e:
+                error_msg = f"GitHub search rate limit reached: {str(e)}"
+                recommended_action = "Wait for search rate limit to reset."
+            except Exception as e:
+                if not error_msg:
+                    error_msg = f"GitHub search test error: {str(e)}"
+                    recommended_action = "Verify search permissions or query parameters."
+
+        ingestion_enabled = settings.ingestion_enabled and reachable and (auth_status in ("valid", "not_required")) and (read_permission == "granted") and search_ok
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        if ingestion_enabled:
+            self._last_successful_check = now_iso
+
+        return {
+            "source": self.source_name,
+            "source_instance": self.source_instance,
+            "configured": configured,
+            "reachable": reachable,
+            "auth_status": auth_status,
+            "read_permission_status": read_permission,
+            "api_version": api_version,
+            "rate_limit_info": rate_limit_info,
+            "last_successful_check_at": self._last_successful_check,
+            "error_message": error_msg,
+            "recommended_action": recommended_action,
+            "ingestion_enabled": ingestion_enabled
+        }
 
     def normalize_issue(
         self,
