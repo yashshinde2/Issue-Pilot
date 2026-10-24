@@ -90,7 +90,11 @@ public class MongoConfig {
         }
         MongoClient client = mongoClient();
         if (client != null) {
-            this.mongoTemplate = new MongoTemplate(new SimpleMongoClientDatabaseFactory(client, properties.getMongodbDatabase()));
+            String dbName = properties.getMongodbDatabase();
+            if (dbName == null || dbName.isBlank()) {
+                dbName = "issue_pilot";
+            }
+            this.mongoTemplate = new MongoTemplate(new SimpleMongoClientDatabaseFactory(client, dbName));
         }
         return this.mongoTemplate;
     }

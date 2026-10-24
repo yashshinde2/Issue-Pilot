@@ -3,8 +3,6 @@ package com.issuepilot.adapter;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.issuepilot.config.AppProperties;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
@@ -20,8 +18,6 @@ import java.util.*;
 
 @Component
 public class GitHubAdapter implements BaseIssueSourceAdapter {
-
-    private static final Logger logger = LoggerFactory.getLogger(GitHubAdapter.class);
 
     private final AppProperties properties;
     private final ObjectMapper objectMapper;
@@ -99,7 +95,6 @@ public class GitHubAdapter implements BaseIssueSourceAdapter {
 
             int status = response.statusCode();
             if (status == 200) {
-                Map<String, Object> body = objectMapper.readValue(response.body(), new TypeReference<>() {});
                 String authStatus = configured ? "valid" : "not_required";
                 String readPerm = "granted";
                 this.lastSuccessfulCheckAt = DateTimeFormatter.ISO_INSTANT.format(Instant.now());
@@ -214,7 +209,6 @@ public class GitHubAdapter implements BaseIssueSourceAdapter {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public Map<String, Object> normalizeIssue(Map<String, Object> rawItem, Map<String, Object> queryInfo) {
         if (rawItem == null) return null;
 

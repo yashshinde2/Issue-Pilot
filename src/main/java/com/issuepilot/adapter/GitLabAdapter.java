@@ -3,8 +3,6 @@ package com.issuepilot.adapter;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.issuepilot.config.AppProperties;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
@@ -20,8 +18,6 @@ import java.util.*;
 
 @Component
 public class GitLabAdapter implements BaseIssueSourceAdapter {
-
-    private static final Logger logger = LoggerFactory.getLogger(GitLabAdapter.class);
 
     private final AppProperties properties;
     private final ObjectMapper objectMapper;
@@ -218,7 +214,6 @@ public class GitLabAdapter implements BaseIssueSourceAdapter {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public Map<String, Object> normalizeIssue(Map<String, Object> rawItem, Map<String, Object> queryInfo) {
         if (rawItem == null) return null;
 

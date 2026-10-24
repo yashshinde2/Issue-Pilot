@@ -2,18 +2,13 @@ package com.issuepilot.cli;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.issuepilot.service.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 
-import java.util.Arrays;
 import java.util.Map;
 
 @Component
 public class IssuePilotCli implements CommandLineRunner {
-
-    private static final Logger logger = LoggerFactory.getLogger(IssuePilotCli.class);
 
     private final EvaluationService evaluationService;
     private final BenchmarkService benchmarkService;

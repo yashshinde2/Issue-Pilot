@@ -68,7 +68,6 @@ public final class TechnologyDetectionHelper {
     }
 
     public static Map<String, Object> estimateDifficulty(String title, String body, List<String> labels, int comments) {
-        String combined = ((title != null ? title : "") + " " + (body != null ? body : "")).toLowerCase();
         List<String> labelList = labels != null ? labels : Collections.emptyList();
 
         boolean isGoodFirst = labelList.stream().anyMatch(l -> {

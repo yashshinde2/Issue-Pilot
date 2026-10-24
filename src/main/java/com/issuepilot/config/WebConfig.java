@@ -1,12 +1,11 @@
 package com.issuepilot.config;
 
 import org.springframework.context.annotation.Configuration;
+import org.springframework.lang.NonNull;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.ViewControllerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
-
-import java.io.File;
 
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
@@ -18,7 +17,8 @@ public class WebConfig implements WebMvcConfigurer {
     }
 
     @Override
-    public void addCorsMappings(CorsRegistry registry) {
+    @SuppressWarnings("null")
+    public void addCorsMappings(@NonNull CorsRegistry registry) {
         String origins = properties.getCorsOrigins();
         String[] allowedOrigins = (origins == null || origins.trim().equals("*"))
                 ? new String[]{"*"}
@@ -32,13 +32,13 @@ public class WebConfig implements WebMvcConfigurer {
     }
 
     @Override
-    public void addResourceHandlers(ResourceHandlerRegistry registry) {
+    public void addResourceHandlers(@NonNull ResourceHandlerRegistry registry) {
         registry.addResourceHandler("/static/**")
                 .addResourceLocations("classpath:/static/");
     }
 
     @Override
-    public void addViewControllers(ViewControllerRegistry registry) {
+    public void addViewControllers(@NonNull ViewControllerRegistry registry) {
         registry.addViewController("/").setViewName("forward:/static/index.html");
         registry.addViewController("/demo").setViewName("forward:/static/index.html");
     }

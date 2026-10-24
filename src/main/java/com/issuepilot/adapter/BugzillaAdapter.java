@@ -3,8 +3,6 @@ package com.issuepilot.adapter;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.issuepilot.config.AppProperties;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
@@ -20,8 +18,6 @@ import java.util.*;
 
 @Component
 public class BugzillaAdapter implements BaseIssueSourceAdapter {
-
-    private static final Logger logger = LoggerFactory.getLogger(BugzillaAdapter.class);
 
     private final AppProperties properties;
     private final ObjectMapper objectMapper;
@@ -240,8 +236,10 @@ public class BugzillaAdapter implements BaseIssueSourceAdapter {
 
             Map<String, Object> body = objectMapper.readValue(response.body(), new TypeReference<>() {});
             List<?> bugs = (List<?>) body.get("bugs");
-            if (bugs != null && !bugs.isEmpty() && bugs.get(0) instanceof Map) {
-                return (Map<String, Object>) bugs.get(0);
+            if (bugs != null && !bugs.isEmpty() && bugs.get(0) instanceof Map<?, ?> m) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> casted = (Map<String, Object>) m;
+                return casted;
             }
             return body;
         } catch (SourceAPIException e) {

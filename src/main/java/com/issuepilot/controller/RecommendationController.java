@@ -4,7 +4,6 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.issuepilot.config.AppProperties;
 import com.issuepilot.config.MongoConfig;
-import com.issuepilot.model.ContributorProfile;
 import com.issuepilot.model.RankingWeights;
 import com.issuepilot.repository.IssueRepository;
 import com.issuepilot.repository.RecommendationRepository;

@@ -1,9 +1,6 @@
 package com.issuepilot.controller;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.issuepilot.config.MongoConfig;
-import com.issuepilot.model.IssueRecord;
 import com.issuepilot.repository.IssueRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -17,12 +14,10 @@ public class IssueController {
 
     private final IssueRepository issueRepository;
     private final MongoConfig mongoConfig;
-    private final ObjectMapper objectMapper;
 
-    public IssueController(IssueRepository issueRepository, MongoConfig mongoConfig, ObjectMapper objectMapper) {
+    public IssueController(IssueRepository issueRepository, MongoConfig mongoConfig) {
         this.issueRepository = issueRepository;
         this.mongoConfig = mongoConfig;
-        this.objectMapper = objectMapper;
     }
 
     private void ensureConnected() {

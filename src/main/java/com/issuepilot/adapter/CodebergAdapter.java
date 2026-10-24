@@ -257,7 +257,6 @@ public class CodebergAdapter implements BaseIssueSourceAdapter {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public Map<String, Object> normalizeIssue(Map<String, Object> rawItem, Map<String, Object> queryInfo) {
         if (rawItem == null) return null;
 
