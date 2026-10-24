@@ -16,8 +16,9 @@
     "freshness": 0.05,
     "formula": "FinalScore = 0.35S + 0.25D + 0.15R + 0.10H + 0.10F + 0.05N",
     "weights_sum": 1.00,
-    "unit_tests_count": 18,
-    "unit_tests_status": "ALL 18 PASSED (100% exact numerical match)"
+    "unit_test_scenarios_count": 18,
+    "unit_assertions_count": 24,
+    "unit_tests_status": "ALL 24 UNIT ASSERTIONS (ACROSS 18 TEST SCENARIOS) PASSED (100% exact numerical match)"
   },
   "database_audit": {
     "total_stored_issues": 804,
@@ -50,19 +51,28 @@
     }
   },
   "recommendation_quality_baseline": {
+    "status": "Preliminary Pilot Benchmark",
     "evaluation_dataset": "src/main/resources/fixtures/labeled_pilot_dataset.json",
     "evaluation_queries_count": 3,
-    "candidates_per_query": 10,
+    "total_candidate_issues": 17,
+    "candidates_breakdown": {
+      "query_1_backend_python": 8,
+      "query_2_frontend_beginner": 5,
+      "query_3_devops": 4
+    },
+    "relevance_scale": "0 to 3 (graded manually by expert criteria: 3=Highly Relevant, 2=Relevant, 1=Marginally Relevant, 0=Irrelevant)",
     "metrics": {
       "issue_pilot_macro_ndcg@5": 1.0000,
       "baseline_macro_ndcg@5": 0.8444,
       "macro_ndcg_lift": 0.1556,
-      "issue_pilot_precision@5": 1.0000,
-      "baseline_precision@5": 0.8667,
-      "macro_precision_lift": 0.1333,
+      "issue_pilot_precision@5": 0.5667,
+      "baseline_precision@5": 0.5000,
+      "macro_precision_lift": 0.0667,
       "issue_pilot_recall@5": 1.0000,
-      "baseline_recall@5": 0.8667
-    }
+      "baseline_recall@5": 0.8667,
+      "macro_recall_lift": 0.1333
+    },
+    "evaluation_notes": "Small-sample pilot evaluation fixture; serves as an operational correctness benchmark and regression test rather than statistical proof of broad generalization."
   },
   "multi_platform_ingestion_status": {
     "github": {
