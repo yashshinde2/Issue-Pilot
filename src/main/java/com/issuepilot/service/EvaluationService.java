@@ -133,7 +133,6 @@ public class EvaluationService {
             throw new IllegalStateException("Labeled benchmark dataset not found (fixtures/labeled_pilot_dataset.json)");
         }
 
-        @SuppressWarnings("unchecked")
         List<Map<String, Object>> queries = (List<Map<String, Object>>) dataset.get("queries");
         if (queries == null) {
             queries = (List<Map<String, Object>>) dataset.getOrDefault("evaluation_queries", Collections.emptyList());
@@ -151,15 +150,12 @@ public class EvaluationService {
 
         for (Map<String, Object> q : queries) {
             String queryId = (String) q.get("query_id");
-            @SuppressWarnings("unchecked")
             Map<String, Object> rawProf = (Map<String, Object>) q.get("contributor_profile");
             if (rawProf == null) {
                 rawProf = (Map<String, Object>) q.get("profile");
             }
             final Map<String, Object> profile = rawProf != null ? rawProf : Collections.emptyMap();
-            @SuppressWarnings("unchecked")
             Map<String, Object> weights = (Map<String, Object>) q.get("weights");
-            @SuppressWarnings("unchecked")
             List<Map<String, Object>> pool = (List<Map<String, Object>>) q.get("candidates");
 
             Map<String, Double> groundTruth = new HashMap<>();
@@ -180,7 +176,6 @@ public class EvaluationService {
             payload.put("candidates", pool);
 
             Map<String, Object> engineRes = cppRankingClient.executeRanking(payload);
-            @SuppressWarnings("unchecked")
             List<Map<String, Object>> rankedItems = (List<Map<String, Object>>) engineRes.getOrDefault("results", Collections.emptyList());
 
             List<Double> cppRankedRelevances = new ArrayList<>();

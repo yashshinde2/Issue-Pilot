@@ -2,7 +2,6 @@ package com.issuepilot;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.issuepilot.adapter.GitLabAdapter;
 import com.issuepilot.config.EnvLoader;
 import com.issuepilot.config.MongoConfig;
 import com.issuepilot.service.EvaluationService;

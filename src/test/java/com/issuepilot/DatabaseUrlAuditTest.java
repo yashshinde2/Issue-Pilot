@@ -13,8 +13,6 @@ import com.issuepilot.config.EnvLoader;
 
 import java.util.*;
 
-import static org.junit.jupiter.api.Assertions.*;
-
 @SpringBootTest
 public class DatabaseUrlAuditTest {
 
