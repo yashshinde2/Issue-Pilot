@@ -43,6 +43,9 @@ public class MongoConfig {
         logger.info("Initializing MongoDB Atlas connection to {}", maskedUri);
 
         try {
+            if (rawUri == null || rawUri.isBlank() || (!rawUri.startsWith("mongodb://") && !rawUri.startsWith("mongodb+srv://"))) {
+                rawUri = "mongodb://localhost:27017";
+            }
             ConnectionString connectionString = new ConnectionString(rawUri);
             MongoClientSettings settings = MongoClientSettings.builder()
                     .applyConnectionString(connectionString)

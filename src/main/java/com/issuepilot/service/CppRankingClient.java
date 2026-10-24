@@ -30,15 +30,29 @@ public class CppRankingClient {
 
     private void resolveExecutable() {
         String path = properties.getCppEnginePath();
-        File f = new File(path);
-        if (!f.isAbsolute()) {
-            File userDir = new File(System.getProperty("user.dir", "."));
-            f = new File(userDir, path);
-            if (!f.exists() && userDir.getParentFile() != null) {
-                f = new File(userDir.getParentFile(), path);
+        File userDir = new File(System.getProperty("user.dir", "."));
+        List<String> candidates = new ArrayList<>();
+        candidates.add(path);
+        if (path.endsWith(".exe")) {
+            candidates.add(path.substring(0, path.length() - 4));
+        } else {
+            candidates.add(path + ".exe");
+        }
+
+        for (String cand : candidates) {
+            File f = new File(cand);
+            if (!f.isAbsolute()) {
+                f = new File(userDir, cand);
+                if (!f.exists() && userDir.getParentFile() != null) {
+                    f = new File(userDir.getParentFile(), cand);
+                }
+            }
+            if (f.exists()) {
+                this.executableFile = f;
+                return;
             }
         }
-        this.executableFile = f;
+        this.executableFile = new File(path);
     }
 
     public boolean isAvailable() {

@@ -10,11 +10,18 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
 
+    services:
+      mongodb:
+        image: mongo:6.0
+        ports:
+          - 27017:27017
+
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout Repository
+      uses: actions/checkout@v4
 
     - name: Set up CMake and C++ Compiler
-      uses: jwlawson/actions-setup-cmake@v1.14
+      uses: jwlawson/actions-setup-cmake@v2
       with:
         cmake-version: '3.25.x'
 
@@ -22,22 +29,23 @@ jobs:
       run: |
         cmake -S ranking_engine -B ranking_engine/build -DCMAKE_BUILD_TYPE=Release
         cmake --build ranking_engine/build --config Release
-        cd ranking_engine/build && ctest --output-on-failure
+        ./ranking_engine/build/test_ranking
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
+    - name: Set up JDK 21
+      uses: actions/setup-java@v4
       with:
-        python-version: '3.8'
+        java-version: '21'
+        distribution: 'temurin'
+        cache: maven
 
-    - name: Install Python Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest pytest-cov
-
-    - name: Run Python Automated Test Suite
+    - name: Run Backend Java Test Suite
       env:
         CPP_ENGINE_PATH: ranking_engine/build/issue_pilot_ranking_engine
-        MONGODB_URI: ""
+        MONGODB_URI: "mongodb://localhost:27017"
+        SCHEDULER_ENABLED: "false"
       run: |
-        python -m pytest backend/tests/ -v
+        mvn test
+
+    - name: Package Spring Boot Executable JAR
+      run: |
+        mvn package -DskipTests
