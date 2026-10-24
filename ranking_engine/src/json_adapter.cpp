@@ -4,6 +4,9 @@
 #include <cctype>
 #include <stdexcept>
 #include <map>
+#include <cmath>
+#include <algorithm>
+#include <iostream>
 
 namespace issue_pilot {
 

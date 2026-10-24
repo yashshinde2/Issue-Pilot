@@ -2,13 +2,7 @@
 
 #include <string>
 #include <vector>
-#include <map>
 #include <unordered_map>
-#include <cmath>
-#include <algorithm>
-#include <iostream>
-#include <sstream>
-#include <iomanip>
 
 namespace issue_pilot {
 
