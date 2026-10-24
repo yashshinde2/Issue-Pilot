@@ -15,6 +15,11 @@ jobs:
         image: mongo:6.0
         ports:
           - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
     - name: Checkout Repository
@@ -29,6 +34,8 @@ jobs:
       run: |
         cmake -S ranking_engine -B ranking_engine/build -DCMAKE_BUILD_TYPE=Release
         cmake --build ranking_engine/build --config Release
+        chmod +x ranking_engine/build/issue_pilot_ranking_engine || true
+        chmod +x ranking_engine/build/test_ranking || true
         ./ranking_engine/build/test_ranking
 
     - name: Set up JDK 21
@@ -43,6 +50,7 @@ jobs:
         CPP_ENGINE_PATH: ranking_engine/build/issue_pilot_ranking_engine
         MONGODB_URI: "mongodb://localhost:27017"
         SCHEDULER_ENABLED: "false"
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         mvn test
 

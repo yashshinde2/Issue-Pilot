@@ -196,10 +196,21 @@ public class Phase1CloseoutVerificationTest {
 
         // Review Evaluation Dataset and Baseline Timing
         System.out.println("\n6. Review Evaluation Dataset and Recalculate Metrics:");
-        File datasetFile = new File("src/main/resources/fixtures/labeled_pilot_dataset.json");
-        assertTrue(datasetFile.exists(), "labeled_pilot_dataset.json must exist");
+        org.springframework.core.io.ClassPathResource dsResource = new org.springframework.core.io.ClassPathResource("fixtures/labeled_pilot_dataset.json");
+        Map<String, Object> dataset;
+        if (dsResource.exists()) {
+            try (java.io.InputStream is = dsResource.getInputStream()) {
+                dataset = objectMapper.readValue(is, new TypeReference<>() {});
+            }
+        } else {
+            File datasetFile = new File("src/main/resources/fixtures/labeled_pilot_dataset.json");
+            if (!datasetFile.exists()) {
+                datasetFile = new File(System.getProperty("user.dir", "."), "src/main/resources/fixtures/labeled_pilot_dataset.json");
+            }
+            assertTrue(datasetFile.exists(), "labeled_pilot_dataset.json must exist");
+            dataset = objectMapper.readValue(datasetFile, new TypeReference<>() {});
+        }
 
-        Map<String, Object> dataset = objectMapper.readValue(datasetFile, new TypeReference<>() {});
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> queries = (List<Map<String, Object>>) dataset.get("queries");
         assertNotNull(queries);
@@ -216,7 +227,7 @@ public class Phase1CloseoutVerificationTest {
             totalCandidates += cands.size();
             System.out.println("     Query #" + (q + 1) + " (Profile: " + profile.get("user_id") + ") - " + cands.size() + " candidates.");
             for (Map<String, Object> c : cands) {
-                Object rel = c.get("relevance_label");
+                Object rel = c.get("ground_truth_relevance");
                 if (rel != null) allRelevanceLabels.add(rel.toString());
             }
         }

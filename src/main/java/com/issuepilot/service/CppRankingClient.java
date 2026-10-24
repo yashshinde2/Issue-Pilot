@@ -42,6 +42,11 @@ public class CppRankingClient {
         } else {
             candidates.add(path + ".exe");
         }
+        // Also check Release folder for multi-config generators
+        candidates.add("ranking_engine/build/Release/issue_pilot_ranking_engine.exe");
+        candidates.add("ranking_engine/build/Release/issue_pilot_ranking_engine");
+        candidates.add("ranking_engine/build/issue_pilot_ranking_engine");
+        candidates.add("ranking_engine/build/issue_pilot_ranking_engine.exe");
 
         for (String cand : candidates) {
             File f = new File(cand);
@@ -52,6 +57,9 @@ public class CppRankingClient {
                 }
             }
             if (f.exists()) {
+                try {
+                    f.setExecutable(true);
+                } catch (Exception ignored) {}
                 this.executableFile = f;
                 return;
             }
