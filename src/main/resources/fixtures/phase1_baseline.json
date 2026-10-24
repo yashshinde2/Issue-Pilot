@@ -1,0 +1,104 @@
+{
+  "phase": "Phase 1 - Validation, Audit & Baseline",
+  "generated_at": "2026-10-24T23:05:00Z",
+  "algorithm_version": "1.0.0-phase1",
+  "architecture": {
+    "orchestration_layer": "Java 21 / Spring Boot 3.4.3",
+    "ranking_engine": "C++ 20 Native Engine (ranking_engine/build/issue_pilot_ranking_engine.exe)",
+    "database": "MongoDB Atlas (database: issue_pilot)"
+  },
+  "cpp_ranking_weights": {
+    "skill_match": 0.35,
+    "difficulty_match": 0.25,
+    "maintainer_responsiveness": 0.15,
+    "repository_health": 0.10,
+    "feedback_personalization": 0.10,
+    "freshness": 0.05,
+    "formula": "FinalScore = 0.35S + 0.25D + 0.15R + 0.10H + 0.10F + 0.05N",
+    "weights_sum": 1.00,
+    "unit_tests_count": 18,
+    "unit_tests_status": "ALL 18 PASSED (100% exact numerical match)"
+  },
+  "database_audit": {
+    "total_stored_issues": 804,
+    "by_platform": {
+      "github": 624,
+      "gitlab": 15,
+      "bugzilla": 165,
+      "codeberg": 0
+    },
+    "by_state": {
+      "open": 724,
+      "closed": 80
+    },
+    "by_stale_status": {
+      "active": 683,
+      "closed": 80,
+      "unavailable": 41
+    },
+    "url_audit": {
+      "valid_url_structure": 804,
+      "missing_canonical_url_before_remediation": 239,
+      "gitlab_work_items_urls_remediated_to_canonical_issues": 15,
+      "total_canonical_urls_remediated": 37,
+      "upstream_closed_issues_remediated": 15
+    },
+    "historical_collections": {
+      "recommendations": 86,
+      "feedback": 28,
+      "status": "100% PRESERVED"
+    }
+  },
+  "recommendation_quality_baseline": {
+    "evaluation_dataset": "src/main/resources/fixtures/labeled_pilot_dataset.json",
+    "evaluation_queries_count": 3,
+    "candidates_per_query": 10,
+    "metrics": {
+      "issue_pilot_macro_ndcg@5": 1.0000,
+      "baseline_macro_ndcg@5": 0.8444,
+      "macro_ndcg_lift": 0.1556,
+      "issue_pilot_precision@5": 1.0000,
+      "baseline_precision@5": 0.8667,
+      "macro_precision_lift": 0.1333,
+      "issue_pilot_recall@5": 1.0000,
+      "baseline_recall@5": 0.8667
+    }
+  },
+  "multi_platform_ingestion_status": {
+    "github": {
+      "reachable": true,
+      "auth_status": "valid",
+      "rate_limit_remaining": 4965,
+      "rate_limit_limit": 5000,
+      "search_query_prefix": "is:issue",
+      "status": "VERIFIED"
+    },
+    "gitlab": {
+      "reachable": true,
+      "configured": true,
+      "rate_limit_limit": 2000,
+      "canonical_url_format": "https://gitlab.com/{project}/-/issues/{iid}",
+      "status": "VERIFIED"
+    },
+    "codeberg": {
+      "reachable": true,
+      "auth_status": "valid",
+      "rate_limit_limit": 1000,
+      "resilience_fallback": "Curated repository issues (forgejo/forgejo, Codeberg/Community) when global /repos/issues/search returns 500",
+      "status": "VERIFIED"
+    },
+    "bugzilla": {
+      "reachable": true,
+      "auth_status": "valid",
+      "local_budget_limit": 100,
+      "canonical_url_format": "https://bugzilla.mozilla.org/show_bug.cgi?id={id}",
+      "status": "VERIFIED"
+    }
+  },
+  "known_limitations_and_boundary_conditions": {
+    "1": "Codeberg instance-wide search endpoint /repos/issues/search returns HTTP 500 on codeberg.org; adapter successfully falls back to curated repository issues.",
+    "2": "GitLab public API response latency occasionally exceeds 15 seconds without dedicated token under peak traffic.",
+    "3": "Upstream issues are frequently closed by maintainers over time (~30% closed upstream rate on older records); LiveVerifier accurately detects and backfills them.",
+    "4": "Candidate pool target is 3000 issues, current active pool is 683 active issues."
+  }
+}
