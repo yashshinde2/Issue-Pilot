@@ -67,9 +67,12 @@ public class IssueRepository {
                 .append("repository_full_name", repoFullName)
                 .append("issue_number", issueNum);
 
+        Object existingCreatedAt = map.remove("created_at");
+        Object existingFirstSeen = map.remove("first_seen_at");
+
         Document setDoc = new Document(map);
-        Document setOnInsert = new Document("created_at", nowIso)
-                .append("first_seen_at", nowIso);
+        Document setOnInsert = new Document("created_at", existingCreatedAt != null ? existingCreatedAt : nowIso)
+                .append("first_seen_at", existingFirstSeen != null ? existingFirstSeen : nowIso);
 
         Document updateDoc = new Document("$set", setDoc).append("$setOnInsert", setOnInsert);
 
