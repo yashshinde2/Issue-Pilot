@@ -172,20 +172,48 @@ public class CodebergAdapter implements BaseIssueSourceAdapter {
             if (response.statusCode() == 429) {
                 throw new RateLimitExceededException("Codeberg rate limit exceeded", (Long) rateLimitState.get("reset"), 0);
             }
-            if (response.statusCode() != 200) {
-                throw new SourceAPIException("Codeberg search issues returned " + response.statusCode(), response.statusCode());
+            if (response.statusCode() == 200) {
+                List<Map<String, Object>> items = objectMapper.readValue(response.body(), new TypeReference<>() {});
+                int total = items.size();
+                Optional<String> totalHeader = response.headers().firstValue("x-total-count");
+                if (totalHeader.isPresent()) {
+                    try { total = Integer.parseInt(totalHeader.get()); } catch (Exception ignored) {}
+                }
+                Map<String, Object> result = new LinkedHashMap<>();
+                result.put("total_count", total);
+                result.put("items", items);
+                result.put("rate_limit", rateLimitState);
+                return result;
             }
 
-            List<Map<String, Object>> items = objectMapper.readValue(response.body(), new TypeReference<>() {});
-            int total = items.size();
-            Optional<String> totalHeader = response.headers().firstValue("x-total-count");
-            if (totalHeader.isPresent()) {
-                try { total = Integer.parseInt(totalHeader.get()); } catch (Exception ignored) {}
+            // Fallback when global fulltext search is disabled (Codeberg HTTP 500)
+            logger.info("Codeberg global search returned {}, falling back to curated repository issues", response.statusCode());
+            List<String> fallbackRepos = List.of("forgejo/forgejo", "Codeberg/Community");
+            List<Map<String, Object>> collectedItems = new ArrayList<>();
+
+            for (String repoPath : fallbackRepos) {
+                String repoIssuesUrl = String.format("%s/repos/%s/issues?state=open&page=%d&limit=%d",
+                        properties.getCodebergApiBaseUrl(), repoPath, page, perPage);
+                HttpRequest repoReq = newRequestBuilder(repoIssuesUrl).GET().build();
+                HttpResponse<String> repoResp = httpClient.send(repoReq, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                extractRateLimit(repoResp);
+                if (repoResp.statusCode() == 200) {
+                    List<Map<String, Object>> repoItems = objectMapper.readValue(repoResp.body(), new TypeReference<>() {});
+                    for (Map<String, Object> item : repoItems) {
+                        if (!item.containsKey("repository")) {
+                            String[] p = repoPath.split("/");
+                            item.put("repository", Map.of("full_name", repoPath, "owner", Map.of("username", p[0]), "name", p[1]));
+                        }
+                        collectedItems.add(item);
+                        if (collectedItems.size() >= perPage) break;
+                    }
+                }
+                if (collectedItems.size() >= perPage) break;
             }
 
             Map<String, Object> result = new LinkedHashMap<>();
-            result.put("total_count", total);
-            result.put("items", items);
+            result.put("total_count", collectedItems.size());
+            result.put("items", collectedItems);
             result.put("rate_limit", rateLimitState);
             return result;
         } catch (SourceAPIException e) {

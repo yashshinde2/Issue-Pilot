@@ -76,6 +76,8 @@ public class RefreshService {
             summary.put("status", "completed");
             summary.put("job_id", jobId);
             summary.put("job_type", "refresh");
+            summary.put("checked_count", 0);
+            summary.put("verified_count", 0);
             summary.put("issues_refreshed", 0);
             summary.put("issues_marked_closed", 0);
             summary.put("issues_marked_unavailable", 0);
@@ -153,6 +155,8 @@ public class RefreshService {
         summary.put("job_id", jobId);
         summary.put("job_type", "refresh");
         summary.put("status", errors.isEmpty() ? "completed" : "completed_with_errors");
+        summary.put("checked_count", candidates.size());
+        summary.put("verified_count", totalRefreshed);
         summary.put("issues_refreshed", totalRefreshed);
         summary.put("issues_marked_closed", totalClosed);
         summary.put("issues_marked_unavailable", totalUnavailable);

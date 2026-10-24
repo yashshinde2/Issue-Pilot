@@ -151,7 +151,11 @@ public class GitHubAdapter implements BaseIssueSourceAdapter {
     @Override
     public Map<String, Object> searchIssues(String query, int page, int perPage, String sort, String order) {
         try {
-            String encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8);
+            String fullQuery = query != null ? query.trim() : "";
+            if (!fullQuery.contains("is:issue") && !fullQuery.contains("is:pr") && !fullQuery.contains("type:issue")) {
+                fullQuery = "is:issue " + fullQuery;
+            }
+            String encodedQuery = URLEncoder.encode(fullQuery, StandardCharsets.UTF_8);
             String url = String.format("%s/search/issues?q=%s&page=%d&per_page=%d&sort=%s&order=%s",
                     properties.getGithubApiBaseUrl(), encodedQuery, page, perPage, sort, order);
 
