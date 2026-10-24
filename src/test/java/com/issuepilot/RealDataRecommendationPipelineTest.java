@@ -3,7 +3,6 @@ package com.issuepilot;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.issuepilot.config.EnvLoader;
 import com.issuepilot.config.MongoConfig;
-import com.issuepilot.controller.RecommendationController;
 import com.issuepilot.repository.IssueRepository;
 import com.issuepilot.repository.RecommendationRepository;
 import com.issuepilot.service.CppRankingClient;
@@ -12,7 +11,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.data.mongodb.core.MongoTemplate;
 
 import java.util.*;
 
