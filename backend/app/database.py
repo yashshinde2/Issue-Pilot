@@ -1,3 +1,4 @@
+import time
 import logging
 from typing import Optional
 from pymongo import MongoClient, ASCENDING, DESCENDING
@@ -29,40 +30,48 @@ class Database:
         target_db = self._database_name
 
         sanitized = sanitize_uri(target_uri)
-        try:
-            logger.info("Connecting to MongoDB Atlas at %s (db: %s)...", sanitized, target_db)
-            self.client = MongoClient(
-                target_uri,
-                maxPoolSize=settings.mongodb_max_pool_size,
-                minPoolSize=settings.mongodb_min_pool_size,
-                serverSelectionTimeoutMS=settings.mongodb_server_selection_timeout_ms,
-                connectTimeoutMS=settings.mongodb_connect_timeout_ms,
-                socketTimeoutMS=settings.mongodb_socket_timeout_ms,
-                maxIdleTimeMS=settings.mongodb_max_idle_time_ms,
-                retryWrites=True,
-                retryReads=True
-            )
-            # Verify connectivity via admin ping
-            self.client.admin.command("ping")
-            self.db = self.client[target_db]
-            logger.info("Connected successfully to MongoDB Atlas database '%s'", target_db)
-            self.init_indexes()
-            return True
-        except (ConnectionFailure, ServerSelectionTimeoutError) as e:
-            logger.warning("MongoDB connection timeout/failure: %s", sanitize_uri(str(e)))
-            self.client = None
-            self.db = None
-            return False
-        except PyMongoError as e:
-            logger.warning("MongoDB Atlas error: %s", sanitize_uri(str(e)))
-            self.client = None
-            self.db = None
-            return False
-        except Exception as e:
-            logger.warning("Unexpected error connecting to MongoDB Atlas: %s", sanitize_uri(str(e)))
-            self.client = None
-            self.db = None
-            return False
+        max_attempts = 2
+        for attempt in range(max_attempts):
+            try:
+                logger.info("Connecting to MongoDB Atlas at %s (db: %s, attempt %d/%d)...", sanitized, target_db, attempt + 1, max_attempts)
+                self.client = MongoClient(
+                    target_uri,
+                    maxPoolSize=settings.mongodb_max_pool_size,
+                    minPoolSize=settings.mongodb_min_pool_size,
+                    serverSelectionTimeoutMS=settings.mongodb_server_selection_timeout_ms,
+                    connectTimeoutMS=settings.mongodb_connect_timeout_ms,
+                    socketTimeoutMS=settings.mongodb_socket_timeout_ms,
+                    maxIdleTimeMS=settings.mongodb_max_idle_time_ms,
+                    retryWrites=True,
+                    retryReads=True
+                )
+                # Verify connectivity via admin ping
+                self.client.admin.command("ping")
+                self.db = self.client[target_db]
+                logger.info("Connected successfully to MongoDB Atlas database '%s'", target_db)
+                self.init_indexes()
+                return True
+            except (ConnectionFailure, ServerSelectionTimeoutError) as e:
+                logger.warning("MongoDB connection timeout/failure (attempt %d/%d): %s", attempt + 1, max_attempts, sanitize_uri(str(e)))
+                self.client = None
+                self.db = None
+                if attempt < max_attempts - 1:
+                    time.sleep(1.0)
+                    continue
+                return False
+            except PyMongoError as e:
+                logger.warning("MongoDB Atlas error: %s", sanitize_uri(str(e)))
+                self.client = None
+                self.db = None
+                if attempt < max_attempts - 1:
+                    time.sleep(1.0)
+                    continue
+                return False
+            except Exception as e:
+                logger.warning("Unexpected error connecting to MongoDB Atlas: %s", sanitize_uri(str(e)))
+                self.client = None
+                self.db = None
+                return False
 
     def disconnect(self):
         """Close connection pool and release resources."""

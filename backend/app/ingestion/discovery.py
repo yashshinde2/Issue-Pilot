@@ -27,12 +27,12 @@ ROTATING_TOPICS = [
     ("go", "Go", "language:Go"),
     ("rust", "Rust", "language:Rust"),
     ("java", "Java", "language:Java"),
-    ("good_first_issue", "Good First Issue", "label:\"good first issue\" OR label:good-first-issue"),
+    ("good_first_issue", "Good First Issue", "label:\"good first issue\""),
     ("help_wanted", "Help Wanted", "label:\"help wanted\""),
     ("bug", "Bugs", "label:bug"),
-    ("documentation", "Docs", "label:documentation OR label:docs"),
-    ("performance", "Performance", "label:performance OR performance in:title"),
-    ("security", "Security", "label:security OR vulnerability in:title")
+    ("documentation", "Docs", "label:documentation"),
+    ("performance", "Performance", "label:performance"),
+    ("security", "Security", "label:security")
 ]
 
 

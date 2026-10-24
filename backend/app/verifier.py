@@ -740,7 +740,19 @@ class LiveVerifier:
         max_retries: Optional[int] = None
     ) -> VerificationResult:
         """Source-aware verification dispatcher across GitHub, GitLab, Codeberg, and Bugzilla."""
-        source = (candidate.get("source") or "github").lower()
+        source = (candidate.get("source") or "").lower()
+        if not source:
+            c_id = candidate.get("id", "")
+            url = candidate.get("canonical_url") or candidate.get("issue_url") or ""
+            if c_id.startswith("gl_") or "gitlab.com" in url:
+                source = "gitlab"
+            elif c_id.startswith("cb_") or "codeberg.org" in url:
+                source = "codeberg"
+            elif c_id.startswith("bz_") or "bugzilla" in url:
+                source = "bugzilla"
+            else:
+                source = "github"
+
         if source == "gitlab":
             return self.verify_gitlab_issue(candidate, timeout=timeout, max_retries=max_retries)
         elif source == "codeberg":

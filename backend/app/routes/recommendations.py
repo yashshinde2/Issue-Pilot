@@ -143,6 +143,16 @@ def get_personalized_recommendations(req: RecommendationRequest):
     ranked_candidates = engine_response.get("results", [])
     model_version = engine_response.get("algorithm_version", "1.0.0-phase1")
 
+    # Preserve all candidate metadata (source, product, component, canonical_url, etc.)
+    candidate_lookup = {c["id"]: c for c in candidates if isinstance(c, dict) and "id" in c}
+    for item in ranked_candidates:
+        c_id = item.get("id")
+        if c_id in candidate_lookup:
+            orig = candidate_lookup[c_id]
+            for k, v in orig.items():
+                if k not in item:
+                    item[k] = v
+
     # 5. Live Verification & Shortlist Backfill
     effective_budget = req.shortlist_size if req.shortlist_size is not None else (
         req.verification_budget if req.verification_budget is not None else settings.verification_candidate_limit

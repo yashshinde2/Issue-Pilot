@@ -1,0 +1,191 @@
+[
+  {
+    "_id": "6adc65530d19cd72df9e9f43",
+    "repository_full_name": "issue-pilot-test-org/disposable-sandbox",
+    "source": "test_github",
+    "issue_number": 101,
+    "body": "Implement connection pooling and socket timeouts for high concurrency.",
+    "created_at": "2026-10-24T07:59:16.471996+00:00",
+    "detected_technologies": [
+      "Python",
+      "MongoDB"
+    ],
+    "difficulty_evidence": {
+      "scope_change_size": 45.0,
+      "technical_complexity": 55.0,
+      "historical_effort": 50.0,
+      "dependency_arch_impact": 60.0,
+      "coordination_complexity": 40.0
+    },
+    "first_seen": "2026-10-24T07:59:16.471996+00:00",
+    "first_seen_at": "2026-10-24T07:59:16.471996+00:00",
+    "id": "test_issue_101",
+    "is_assigned": false,
+    "issue_url": "https://github.com/issue-pilot-test-org/disposable-sandbox/issues/101",
+    "labels": [
+      "enhancement",
+      "database"
+    ],
+    "last_seen": "2026-10-24T07:59:16.471996+00:00",
+    "last_seen_at": "2026-10-24T07:59:16.471996+00:00",
+    "repository_name": "disposable-sandbox",
+    "repository_owner": "issue-pilot-test-org",
+    "source_instance": "test_github.com",
+    "state": "open",
+    "technologies": [
+      {
+        "technology": "Python",
+        "raw_relevance": 4.0
+      },
+      {
+        "technology": "MongoDB",
+        "raw_relevance": 5.0
+      }
+    ],
+    "title": "Add Atlas connection pool support",
+    "updated_at": "2026-10-24T07:59:16.471996+00:00"
+  },
+  {
+    "_id": "6adc65550d19cd72df9e9f45",
+    "issue_number": 102,
+    "repository_full_name": "issue-pilot-test-org/disposable-sandbox",
+    "source": "test_github",
+    "body": "Initial long description",
+    "comment_count": 7,
+    "created_at": "2026-10-24T07:59:18.520087+00:00",
+    "custom_metadata_tag": "preserve_this_value",
+    "first_seen": "2026-10-24T07:59:18.520087+00:00",
+    "first_seen_at": "2026-10-24T07:59:18.520087+00:00",
+    "id": "test_github_issue-pilot-test-org_disposable-sandbox_102",
+    "is_assigned": false,
+    "issue_url": "https://github.com/issue-pilot-test-org/disposable-sandbox/issues/102",
+    "last_seen": "2026-10-24T07:59:18.752737+00:00",
+    "last_seen_at": "2026-10-24T07:59:18.752737+00:00",
+    "source_instance": "test_github.com",
+    "state": "open",
+    "title": "Updated Issue Title - Second Pass",
+    "updated_at": "2026-10-24T07:59:18.752737+00:00"
+  },
+  {
+    "_id": "6adc655b0d19cd72df9e9f4c",
+    "repository_full_name": "issue-pilot-test-org/disposable-sandbox",
+    "source": "test_github",
+    "issue_number": 201,
+    "created_at": "2026-10-24T07:59:25.100499+00:00",
+    "detected_technologies": [
+      "Python"
+    ],
+    "difficulty_evidence": {
+      "technical_complexity": 30.0
+    },
+    "first_seen": "2026-10-24T07:59:25.100499+00:00",
+    "first_seen_at": "2026-10-24T07:59:25.100499+00:00",
+    "id": "filter_issue_1",
+    "is_assigned": false,
+    "issue_url": "https://github.com/issue-pilot-test-org/disposable-sandbox/issues/201",
+    "last_seen": "2026-10-24T07:59:25.100499+00:00",
+    "last_seen_at": "2026-10-24T07:59:25.100499+00:00",
+    "source_instance": "test_github.com",
+    "state": "open",
+    "title": "Python Open Unassigned Easy",
+    "updated_at": "2026-10-24T07:59:25.100499+00:00"
+  },
+  {
+    "_id": "6adc655c0d19cd72df9e9f4d",
+    "issue_number": 202,
+    "source": "test_github",
+    "repository_full_name": "issue-pilot-test-org/disposable-sandbox",
+    "created_at": "2026-10-24T07:59:25.459551+00:00",
+    "detected_technologies": [
+      "C++"
+    ],
+    "difficulty_evidence": {
+      "technical_complexity": 85.0
+    },
+    "first_seen": "2026-10-24T07:59:25.459551+00:00",
+    "first_seen_at": "2026-10-24T07:59:25.459551+00:00",
+    "id": "filter_issue_2",
+    "is_assigned": false,
+    "issue_url": "https://github.com/issue-pilot-test-org/disposable-sandbox/issues/202",
+    "last_seen": "2026-10-24T07:59:25.459551+00:00",
+    "last_seen_at": "2026-10-24T07:59:25.459551+00:00",
+    "source_instance": "test_github.com",
+    "state": "open",
+    "title": "Cpp Open Unassigned Hard",
+    "updated_at": "2026-10-24T07:59:25.459551+00:00"
+  },
+  {
+    "_id": "6adc655d0d19cd72df9e9f4e",
+    "issue_number": 203,
+    "source": "test_github",
+    "repository_full_name": "issue-pilot-test-org/disposable-sandbox",
+    "created_at": "2026-10-24T07:59:26.220930+00:00",
+    "detected_technologies": [
+      "Python"
+    ],
+    "difficulty_evidence": {
+      "technical_complexity": 30.0
+    },
+    "first_seen": "2026-10-24T07:59:26.220930+00:00",
+    "first_seen_at": "2026-10-24T07:59:26.220930+00:00",
+    "id": "filter_issue_3",
+    "is_assigned": false,
+    "issue_url": "https://github.com/issue-pilot-test-org/disposable-sandbox/issues/203",
+    "last_seen": "2026-10-24T07:59:26.220930+00:00",
+    "last_seen_at": "2026-10-24T07:59:26.220930+00:00",
+    "source_instance": "test_github.com",
+    "state": "closed",
+    "title": "Python Closed Issue",
+    "updated_at": "2026-10-24T07:59:26.220930+00:00"
+  },
+  {
+    "_id": "6adc65610d19cd72df9e9f50",
+    "repository_full_name": "issue-pilot-test-org/disposable-sandbox",
+    "source": "test_github",
+    "issue_number": 204,
+    "created_at": "2026-10-24T07:59:27.998224+00:00",
+    "detected_technologies": [
+      "Python"
+    ],
+    "difficulty_evidence": {
+      "technical_complexity": 30.0
+    },
+    "first_seen": "2026-10-24T07:59:27.998224+00:00",
+    "first_seen_at": "2026-10-24T07:59:27.998224+00:00",
+    "id": "filter_issue_4",
+    "is_assigned": true,
+    "issue_url": "https://github.com/issue-pilot-test-org/disposable-sandbox/issues/204",
+    "last_seen": "2026-10-24T07:59:27.998224+00:00",
+    "last_seen_at": "2026-10-24T07:59:27.998224+00:00",
+    "source_instance": "test_github.com",
+    "state": "open",
+    "title": "Python Assigned Issue",
+    "updated_at": "2026-10-24T07:59:27.998224+00:00"
+  },
+  {
+    "_id": "6adc6566add7ca55be42c380",
+    "source": "test_github",
+    "repository_full_name": "issue-pilot-test-org/disposable-sandbox",
+    "issue_number": 301,
+    "title": "Original Document",
+    "issue_url": "https://github.com/issue-pilot-test-org/disposable-sandbox/issues/301"
+  },
+  {
+    "_id": "6adc656a0d19cd72df9e9f57",
+    "repository_full_name": "issue-pilot-test-org/disposable-sandbox",
+    "issue_number": 401,
+    "source": "test_github",
+    "created_at": "2026-10-24T07:59:38.905499+00:00",
+    "first_seen": "2026-10-24T07:59:38.905499+00:00",
+    "first_seen_at": "2026-10-24T07:59:38.905499+00:00",
+    "id": "restart_issue_401",
+    "is_assigned": false,
+    "issue_url": "https://github.com/issue-pilot-test-org/disposable-sandbox/issues/401",
+    "last_seen": "2026-10-24T07:59:38.905499+00:00",
+    "last_seen_at": "2026-10-24T07:59:38.905499+00:00",
+    "source_instance": "test_github.com",
+    "state": "open",
+    "title": "Persistence across restart test issue",
+    "updated_at": "2026-10-24T07:59:38.905499+00:00"
+  }
+]
