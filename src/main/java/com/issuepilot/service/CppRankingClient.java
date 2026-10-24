@@ -13,6 +13,10 @@ import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.io.File;
+
 @Service
 public class CppRankingClient {
 
@@ -69,7 +73,8 @@ public class CppRankingClient {
                     .start();
 
             String output;
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
                 StringBuilder sb = new StringBuilder();
                 String line;
                 while ((line = reader.readLine()) != null) {
@@ -80,7 +85,8 @@ public class CppRankingClient {
 
             boolean finished = process.waitFor(5, TimeUnit.SECONDS);
             if (finished && process.exitValue() == 0) {
-                Map<String, Object> map = objectMapper.readValue(output, new TypeReference<>() {});
+                Map<String, Object> map = objectMapper.readValue(output, new TypeReference<>() {
+                });
                 Object ver = map.get("algorithm_version");
                 return ver != null ? ver.toString() : "1.0.0-phase1";
             }
@@ -106,7 +112,8 @@ public class CppRankingClient {
             }
 
             String stdout;
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
                 StringBuilder sb = new StringBuilder();
                 String line;
                 while ((line = reader.readLine()) != null) {
@@ -116,7 +123,8 @@ public class CppRankingClient {
             }
 
             String stderr;
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
                 StringBuilder sb = new StringBuilder();
                 String line;
                 while ((line = reader.readLine()) != null) {
@@ -133,10 +141,12 @@ public class CppRankingClient {
 
             if (process.exitValue() != 0) {
                 logger.error("C++ engine error: {}", stderr);
-                throw new RuntimeException("C++ ranking engine failed with code " + process.exitValue() + ": " + stderr);
+                throw new RuntimeException(
+                        "C++ ranking engine failed with code " + process.exitValue() + ": " + stderr);
             }
 
-            return objectMapper.readValue(stdout, new TypeReference<>() {});
+            return objectMapper.readValue(stdout, new TypeReference<>() {
+            });
         } catch (Exception e) {
             logger.error("C++ ranking engine execution failed: {}", e.getMessage(), e);
             throw new RuntimeException("Ranking execution failed: " + e.getMessage(), e);
@@ -153,7 +163,8 @@ public class CppRankingClient {
                     .start();
 
             String stdout;
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
                 StringBuilder sb = new StringBuilder();
                 String line;
                 while ((line = reader.readLine()) != null) {
@@ -164,7 +175,8 @@ public class CppRankingClient {
 
             boolean finished = process.waitFor(10, TimeUnit.SECONDS);
             if (finished && process.exitValue() == 0) {
-                return objectMapper.readValue(stdout, new TypeReference<>() {});
+                return objectMapper.readValue(stdout, new TypeReference<>() {
+                });
             }
             throw new RuntimeException("C++ engine experiments returned exit code " + process.exitValue());
         } catch (Exception e) {
@@ -183,7 +195,8 @@ public class CppRankingClient {
                     .start();
 
             String stdout;
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
                 StringBuilder sb = new StringBuilder();
                 String line;
                 while ((line = reader.readLine()) != null) {
@@ -194,7 +207,8 @@ public class CppRankingClient {
 
             boolean finished = process.waitFor(10, TimeUnit.SECONDS);
             if (finished && process.exitValue() == 0) {
-                return objectMapper.readValue(stdout, new TypeReference<>() {});
+                return objectMapper.readValue(stdout, new TypeReference<>() {
+                });
             }
             throw new RuntimeException("C++ engine eval returned exit code " + process.exitValue());
         } catch (Exception e) {

@@ -6,7 +6,12 @@
 #include <cmath>
 #include <vector>
 
+static int total_assertions = 0;
+static int passed_assertions = 0;
+
 void report_test(const std::string& name, bool pass, double expected, double actual) {
+    total_assertions++;
+    if (pass) passed_assertions++;
     std::cout << "[TEST] " << (pass ? "PASS" : "FAIL") << " | " << name 
               << " | Expected: " << expected << " | Actual: " << actual << "\n";
     if (!pass) {
