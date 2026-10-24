@@ -414,14 +414,14 @@ class BugzillaAdapter(BaseIssueSourceAdapter):
                 assignees = [assigned_to]
 
             # Keywords and labels
-            keywords = raw_item.get("keywords", [])
+            keywords = raw_item.get("keywords") or []
             labels = list(keywords)
             if product:
                 labels.append(product)
             if component:
                 labels.append(component)
 
-            comments = int(raw_item.get("comments_count", raw_item.get("comment_count", 0)))
+            comments = int(raw_item.get("comments_count") or raw_item.get("comment_count") or 0)
             created_at = raw_item.get("creation_time") or raw_item.get("created_at")
             updated_at = raw_item.get("last_change_time") or raw_item.get("updated_at")
 

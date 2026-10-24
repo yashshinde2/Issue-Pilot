@@ -191,14 +191,15 @@ class GitLabAdapter(BaseIssueSourceAdapter):
 
         # Rotate through projects based on page
         proj_idx = (page - 1) % len(target_projects)
+        proj_page = ((page - 1) // len(target_projects)) + 1
         target_proj = target_projects[proj_idx]
         encoded_proj = urllib.parse.quote(target_proj, safe="")
 
         params = {
             "state": "opened",
             "per_page": per_page,
-            "page": 1,
-            "order_by": "updated",
+            "page": proj_page,
+            "order_by": "updated_at",
             "sort": "desc"
         }
         if query and not query.startswith("type:") and not query.startswith("label:"):
@@ -397,16 +398,17 @@ class GitLabAdapter(BaseIssueSourceAdapter):
             state = "open" if gl_state in ("opened", "open") else "closed"
 
             # Assignees
-            raw_assignees = raw_item.get("assignees", [])
+            raw_assignees = raw_item.get("assignees") or []
             assignees = [a.get("username") for a in raw_assignees if isinstance(a, dict) and a.get("username")]
             if not assignees and isinstance(raw_item.get("assignee"), dict) and raw_item["assignee"].get("username"):
                 assignees = [raw_item["assignee"]["username"]]
             is_assigned = len(assignees) > 0
 
-            comments = int(raw_item.get("user_notes_count", 0))
+            comments = int(raw_item.get("user_notes_count") or 0)
 
             # Labels (GitLab returns strings for labels)
-            labels = [lbl if isinstance(lbl, str) else lbl.get("name", "") for lbl in raw_item.get("labels", [])]
+            raw_labels = raw_item.get("labels") or []
+            labels = [lbl if isinstance(lbl, str) else lbl.get("name", "") for lbl in raw_labels]
 
             created_at = raw_item.get("created_at")
             updated_at = raw_item.get("updated_at")

@@ -402,14 +402,15 @@ class CodebergAdapter(BaseIssueSourceAdapter):
             state = (raw_item.get("state") or "open").lower()
 
             # Assignees
-            raw_assignees = raw_item.get("assignees", [])
+            raw_assignees = raw_item.get("assignees") or []
             assignees = [a.get("username") for a in raw_assignees if isinstance(a, dict) and a.get("username")]
             if not assignees and isinstance(raw_item.get("assignee"), dict) and raw_item["assignee"].get("username"):
                 assignees = [raw_item["assignee"]["username"]]
             is_assigned = len(assignees) > 0
 
-            comments = int(raw_item.get("comments", 0))
-            labels = [lbl.get("name", "") if isinstance(lbl, dict) else str(lbl) for lbl in raw_item.get("labels", [])]
+            comments = int(raw_item.get("comments") or 0)
+            raw_labels = raw_item.get("labels") or []
+            labels = [lbl.get("name", "") if isinstance(lbl, dict) else str(lbl) for lbl in raw_labels]
 
             created_at = raw_item.get("created_at")
             updated_at = raw_item.get("updated_at")
