@@ -68,36 +68,33 @@ d:/Issue Pilot/
 │   ├── CMakeLists.txt            # CMake configuration
 │   └── build/                    # Compiled binaries (issue_pilot_ranking_engine.exe)
 │
-├── backend/                      # FastAPI Backend & Orchestration Service
-│   ├── app/
-│   │   ├── main.py               # FastAPI application with CORS and health checks
-│   │   ├── config.py             # Environment configuration (.env / atlas-credentials.env)
-│   │   ├── database.py           # MongoDB Atlas connection pooling & 5 collection indexes
-│   │   ├── crud.py               # Repository layer for issues, users, recs, feedback, jobs
-│   │   ├── models.py             # Pydantic request/response schemas
-│   │   ├── cpp_engine_client.py  # Subprocess JSON IPC client to C++ engine
-│   │   ├── github_worker.py      # Bounded GitHub Ingestion & Refresh Worker
-│   │   ├── verifier.py           # GitHub Live Verification & Shortlist Backfill
-│   │   └── routes/
-│   │       ├── users.py          # Persistent Contributor Profiles CRUD
-│   │       ├── issues.py         # Candidate Pool CRUD with eligibility & tech filters
-│   │       ├── simulator.py      # Ranking Simulator & What-If endpoints
-│   │       ├── recommendations.py# Personalized recommendations & audit snapshots
-│   │       ├── ingestion.py      # Candidate pool status & manual ingestion trigger
-│   │       ├── feedback.py       # User feedback recording (accepted/rejected/completed)
-│   │       └── validation.py     # Automated validation & benchmark runner
-│   └── tests/
-│       ├── test_e2e_pipeline.py      # End-to-end API pipeline tests
-│       └── test_atlas_persistence.py # 9-point MongoDB Atlas persistence integration tests
+├── src/                          # Java 21 + Spring Boot 3.4.3 Backend Service
+│   ├── main/
+│   │   ├── java/com/issuepilot/
+│   │   │   ├── IssuePilotApplication.java # Spring Boot application entry-point
+│   │   │   ├── adapter/                   # Multi-platform adapters (GitHub, GitLab, Codeberg, Bugzilla)
+│   │   │   ├── cli/                       # IssuePilotCli CommandLineRunner (--eval, --benchmark, etc.)
+│   │   │   ├── config/                    # MongoConfig, AppProperties, WebConfig, EnvLoader
+│   │   │   ├── controller/                # Recommendation, Ingestion, Issue, User, Feedback, Simulator, Validation
+│   │   │   ├── model/                     # Document models and request/response DTOs
+│   │   │   ├── repository/                # Spring Data MongoDB & MongoTemplate repositories
+│   │   │   └── service/                   # CppRankingClient, LiveVerifier, Discovery, Refresh, Lifecycle, Evaluation
+│   │   └── resources/
+│   │       ├── application.properties     # Spring Boot application configuration
+│   │       ├── static/index.html          # Interactive demonstration and analytics UI
+│   │       └── fixtures/                  # Benchmark and labeled evaluation datasets
+│   └── test/
+│       └── java/com/issuepilot/           # JUnit 5 integration & end-to-end test suites
 │
-├── test_algorithm_interactive.py # CLI runner to test and inspect the C++ algorithm
-├── requirements.txt              # Python dependencies for backend
+├── pom.xml                       # Maven build and dependency configuration
+├── mvn.cmd                       # Maven wrapper launcher
 ├── .gitignore                    # Git ignore file protecting credentials and binaries
 ├── .env.example                  # Template configuration without credentials
 ├── .env                          # Local active configuration (ignored by Git)
 ├── atlas-credentials.env         # Live MongoDB Atlas connection string (ignored by Git)
 └── issue_pilot_ranking_algo.md   # System technical design document
 ```
+
 
 ---
 
@@ -217,30 +214,32 @@ GITHUB_MAX_RETRIES=3                # Exponential backoff retry count on 5xx/429
 SCHEDULER_ENABLED=false             # Set to true to auto-start scheduler on server startup
 ```
 
-#### 2. Manual CLI Commands (`cli.py`)
-Run jobs manually with real-time logging, checkpointing, and metrics:
+#### 2. Running the Spring Boot Server & CLI Commands
+Run the backend web application or operator CLI commands using Maven or the packaged JAR:
 ```bash
-# Inspect pool metrics, repository diversity, scheduler status, and rate-limits
-python cli.py status
+# Start the Spring Boot backend server (Port 8000, serving Demo Dashboard at http://localhost:8000)
+.\mvn.cmd spring-boot:run
 
-# Run candidate discovery across rotating topics (resumable)
-python cli.py discover --max-issues 100 --pages 3
+# Run recommendation-quality evaluation suite (NDCG@5, Precision@5, Recall@5)
+.\mvn.cmd spring-boot:run -Dspring-boot.run.arguments="--eval"
 
-# Refresh active stored candidates (verifies open/closed status against GitHub)
-python cli.py refresh --batch-size 50
+# Run C++ ranking performance & latency benchmark suite
+.\mvn.cmd spring-boot:run -Dspring-boot.run.arguments="--benchmark"
 
-# Stale lifecycle cleanup (marks candidates older than 90 days as stale)
-python cli.py cleanup --older-than-days 90
+# Run MongoDB Atlas database integrity & schema audit
+.\mvn.cmd spring-boot:run -Dspring-boot.run.arguments="--audit"
 
-# Run full ingestion pipeline sequentially (Discovery -> Refresh -> Cleanup)
-python cli.py run-all
+# Trigger multi-platform candidate discovery across rotating topics
+.\mvn.cmd spring-boot:run -Dspring-boot.run.arguments="--discover"
 
-# Run the background scheduler continuously
-python cli.py scheduler --daemon
+# Refresh active stored candidates from upstream APIs
+.\mvn.cmd spring-boot:run -Dspring-boot.run.arguments="--refresh"
 
-# Inspect ingestion jobs history or a specific job ID
-python cli.py jobs --limit 10
-python cli.py jobs --job-id discovery_1234567890
+# Stale candidate lifecycle evaluation
+.\mvn.cmd spring-boot:run -Dspring-boot.run.arguments="--cleanup"
+
+# Run all automated tests (Stage 2, Stage 3, Stage 4)
+.\mvn.cmd test
 ```
 
 #### 3. REST API Endpoints for Ingestion & Observability
@@ -297,11 +296,10 @@ The test suite in `backend/tests/test_atlas_persistence.py` automatically valida
    }'
    ```
 3. **Stop the Backend**:
-   Press `Ctrl+C` in the backend terminal to stop `uvicorn`.
+   Press `Ctrl+C` in the backend terminal to stop the Spring Boot server.
 4. **Restart the Backend**:
    ```bash
-   $env:PYTHONPATH="backend"
-   python -m uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8000
+   .\mvn.cmd spring-boot:run
    ```
 5. **Verify Data Remains Available**:
    ```bash

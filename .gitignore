@@ -8,18 +8,13 @@ atlas-credentials.env
 *.env
 !*.env.example
 
-# --- Python ---
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-env/
-venv/
-.venv/
-.pytest_cache/
-.coverage
-htmlcov/
+# --- Java & Maven Build Artifacts ---
+target/
+*.class
+*.jar
+*.war
+*.ear
+.mvn/wrapper/maven-wrapper.jar
 
 # --- C++ & CMake Build Artifacts ---
 ranking_engine/build/
