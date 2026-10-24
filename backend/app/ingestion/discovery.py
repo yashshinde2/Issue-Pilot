@@ -154,7 +154,9 @@ class DiscoveryWorker:
                     "updated": 0,
                     "skipped": 0
                 }
-                errors.append(f"[{src_name}] {err_text}")
+                is_rl = "rate limit" in err_text.lower() or "ratelimit" in err_text.lower()
+                prefix = f"[{src_name}] RateLimitExceeded: " if is_rl else f"[{src_name}] "
+                errors.append(f"{prefix}{err_text}")
                 continue
 
             # 2. Checkpoint resolution for this source
@@ -319,8 +321,11 @@ class DiscoveryWorker:
 
         finish_time = datetime.now(timezone.utc)
         active_completed = any(v.get("status") == "completed" for v in per_source_summary.values())
+        any_rate_limited = any("rate limit" in str(e).lower() or "ratelimit" in str(e).lower() for e in errors)
         if errors and total_inserted > 0:
             job_status = "partial_success"
+        elif any_rate_limited and not active_completed:
+            job_status = "rate_limited"
         elif errors and active_completed:
             job_status = "partial_success"
         elif errors and not active_completed:
