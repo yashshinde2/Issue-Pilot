@@ -211,8 +211,13 @@ class BugzillaAdapter(BaseIssueSourceAdapter):
             "order": f"{sort} {order}"
         }
 
-        if query and not query.startswith("type:") and not query.startswith("label:"):
-            params["quicksearch"] = query
+        clean_query = query.strip() if query else ""
+        if clean_query.startswith("label:"):
+            clean_query = clean_query.replace("label:", "").strip(' "')
+        elif clean_query.startswith("type:"):
+            clean_query = clean_query.replace("type:", "").strip(' "')
+
+        params["quicksearch"] = clean_query if clean_query else "open"
 
         try:
             resp = self._execute_request("GET", "bug", params=params)
@@ -338,7 +343,7 @@ class BugzillaAdapter(BaseIssueSourceAdapter):
         bug_reading_ok = False
         if auth_status != "invalid" and reachable:
             try:
-                resp_bugs = self._execute_request("GET", "bug", params={"limit": 1})
+                resp_bugs = self._execute_request("GET", "bug", params={"quicksearch": "open", "limit": 1})
                 if resp_bugs.status_code == 200:
                     bug_reading_ok = True
                     if read_permission != "denied":

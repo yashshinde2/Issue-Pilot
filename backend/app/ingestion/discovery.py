@@ -161,10 +161,11 @@ class DiscoveryWorker:
             start_topic_idx = 0
             start_page = 1
             if resume and db.is_connected():
-                checkpoint = job_repo.get_latest_checkpoint("discovery")
-                if checkpoint and checkpoint.get("source") == src_name:
-                    start_topic_idx = checkpoint.get("topic_index", 0) % len(ROTATING_TOPICS)
-                    start_page = checkpoint.get("next_page", 1)
+                checkpoint = job_repo.get_latest_checkpoint("discovery", source=src_name)
+                if checkpoint and (checkpoint.get("source") == src_name or src_name in checkpoint):
+                    src_chk = checkpoint.get(src_name) if src_name in checkpoint and isinstance(checkpoint[src_name], dict) else checkpoint
+                    start_topic_idx = src_chk.get("topic_index", 0) % len(ROTATING_TOPICS)
+                    start_page = src_chk.get("next_page", 1)
 
             src_discovered = 0
             src_inserted = 0
@@ -178,7 +179,7 @@ class DiscoveryWorker:
 
             for topic_idx, (topic_key, topic_label, qualifier) in topics_to_run:
                 if src_name == "github":
-                    query = f"is:issue is:open no:assignee updated:>={recent_date} {qualifier}"
+                    query = f"is:issue is:open updated:>={recent_date} {qualifier}"
                 elif src_name == "gitlab":
                     query = topic_key
                 elif src_name == "codeberg":
@@ -236,6 +237,15 @@ class DiscoveryWorker:
                             query_info={"query": query, "category": topic_label}
                         )
                         if not normalized:
+                            src_skipped += 1
+                            total_skipped += 1
+                            continue
+
+                        # Quality filter: reject malformed, non-open, or unusable records
+                        title = (normalized.get("title") or "").strip()
+                        state = (normalized.get("state") or "").lower()
+                        issue_url = normalized.get("canonical_url") or normalized.get("issue_url") or ""
+                        if state != "open" or len(title) < 3 or not (issue_url.startswith("http://") or issue_url.startswith("https://")):
                             src_skipped += 1
                             total_skipped += 1
                             continue

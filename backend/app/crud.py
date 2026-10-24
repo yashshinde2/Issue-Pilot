@@ -781,15 +781,24 @@ class JobRepository:
         )
         return res.modified_count > 0
 
-    def get_latest_checkpoint(self, job_type: str) -> Optional[Dict[str, Any]]:
+    def get_latest_checkpoint(self, job_type: str, source: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Retrieve checkpoint from the most recent job to support resume operations."""
         database = self._get_db()
+        filter_q = {"job_type": job_type, "checkpoints": {"$exists": True, "$ne": {}}}
+        if source:
+            filter_q["$or"] = [
+                {"checkpoints.source": source},
+                {f"checkpoints.{source}": {"$exists": True}}
+            ]
         doc = database.jobs.find_one(
-            {"job_type": job_type, "checkpoints": {"$exists": True, "$ne": {}}},
+            filter_q,
             sort=[("start_time", -1)]
         )
         if doc and "checkpoints" in doc:
-            return doc["checkpoints"]
+            chk = doc["checkpoints"]
+            if source and isinstance(chk, dict) and source in chk and isinstance(chk[source], dict):
+                return chk[source]
+            return chk
         return None
 
     def list_jobs(self, limit: int = 20, skip: int = 0, job_type: Optional[str] = None) -> List[Dict[str, Any]]:

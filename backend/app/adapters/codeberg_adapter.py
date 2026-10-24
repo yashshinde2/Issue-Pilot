@@ -213,12 +213,14 @@ class CodebergAdapter(BaseIssueSourceAdapter):
 
         # Rotate through curated repos based on page
         repo_idx = (page - 1) % len(target_repos)
+        repo_page = ((page - 1) // len(target_repos)) + 1
         target_repo = target_repos[repo_idx]
         owner, repo_name = target_repo.split("/")
 
         params = {
             "state": "open",
-            "page": 1,
+            "type": "issues",
+            "page": repo_page,
             "limit": per_page
         }
         if query and not query.startswith("type:") and not query.startswith("label:"):

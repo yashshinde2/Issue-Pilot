@@ -22,7 +22,7 @@ class Settings(BaseModel):
     mongodb_database: str = os.getenv("MONGODB_DATABASE", "issue_pilot")
     mongodb_max_pool_size: int = int(os.getenv("MONGODB_MAX_POOL_SIZE", "50"))
     mongodb_min_pool_size: int = int(os.getenv("MONGODB_MIN_POOL_SIZE", "5"))
-    mongodb_server_selection_timeout_ms: int = int(os.getenv("MONGODB_SERVER_SELECTION_TIMEOUT_MS", "5000"))
+    mongodb_server_selection_timeout_ms: int = int(os.getenv("MONGODB_SERVER_SELECTION_TIMEOUT_MS", "15000"))
     mongodb_connect_timeout_ms: int = int(os.getenv("MONGODB_CONNECT_TIMEOUT_MS", "10000"))
     mongodb_socket_timeout_ms: int = int(os.getenv("MONGODB_SOCKET_TIMEOUT_MS", "10000"))
     mongodb_max_idle_time_ms: int = int(os.getenv("MONGODB_MAX_IDLE_TIME_MS", "45000"))

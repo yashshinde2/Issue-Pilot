@@ -104,20 +104,13 @@ class RefreshWorker:
                     total_unavailable += 1
                     continue
 
-                fresh_state = (fresh_data.get("state") or "open").lower()
-                if fresh_state == "closed":
-                    # Mark closed with timestamp (kept for history, excluded from recommendations)
-                    closed_at = fresh_data.get("closed_at")
+                # Normalize fresh data
+                normalized = cur_adapter.normalize_issue(fresh_data)
+                if not normalized or normalized.get("state") == "closed":
+                    closed_at = (normalized.get("closed_at") if normalized else None) or fresh_data.get("closed_at")
                     issue_repo.mark_issue_closed(candidate["id"], closed_at=closed_at)
                     total_closed += 1
-                else:
-                    # Normalize fresh data
-                    normalized = cur_adapter.normalize_issue(fresh_data)
-                    if not normalized:
-                        # e.g., converted to PR
-                        issue_repo.mark_issue_closed(candidate["id"])
-                        total_closed += 1
-                        continue
+                    continue
 
                     # Preserve ranking evidence from existing record if fresh data omitted them
                     for evidence_field in ["difficulty_evidence", "responsiveness_evidence", "health_evidence", "freshness_evidence"]:

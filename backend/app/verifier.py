@@ -985,10 +985,12 @@ class LiveVerifier:
                                 pool_updates["state"] = "closed"
                             elif "assigned" in ver_res.reason.lower():
                                 pool_updates["is_assigned"] = True
-                            db.db.issues.update_one(
-                                {"repository_full_name": repo_full_name, "issue_number": issue_number},
-                                {"$set": pool_updates}
-                            )
+                            filt = {"id": candidate["id"]} if "id" in candidate else {
+                                "source": (candidate.get("source") or "github").lower(),
+                                "repository_full_name": repo_full_name,
+                                "issue_number": issue_number
+                            }
+                            db.db.issues.update_one(filt, {"$set": pool_updates})
                         except Exception as e:
                             logger.debug("Could not update candidate exclusion in Atlas: %s", str(e))
 
