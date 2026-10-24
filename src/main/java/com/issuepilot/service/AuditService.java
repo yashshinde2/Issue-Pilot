@@ -2,8 +2,6 @@ package com.issuepilot.service;
 
 import com.issuepilot.config.MongoConfig;
 import org.bson.Document;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.stereotype.Service;
 
@@ -13,8 +11,6 @@ import java.util.*;
 
 @Service
 public class AuditService {
-
-    private static final Logger logger = LoggerFactory.getLogger(AuditService.class);
 
     private final MongoConfig mongoConfig;
     private final MongoTemplate mongoTemplate;

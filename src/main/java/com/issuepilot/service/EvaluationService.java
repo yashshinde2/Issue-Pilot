@@ -126,6 +126,7 @@ public class EvaluationService {
         return runEvaluation(null);
     }
 
+    @SuppressWarnings({"unchecked", "null"})
     public Map<String, Object> runEvaluation(String customDatasetPath) {
         Map<String, Object> dataset = loadDataset(customDatasetPath);
         if (dataset == null) {

@@ -1,8 +1,6 @@
 package com.issuepilot;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.issuepilot.adapter.*;
-import com.issuepilot.config.AppProperties;
 import com.issuepilot.config.EnvLoader;
 import com.issuepilot.config.MongoConfig;
 import com.issuepilot.repository.IssueRepository;
@@ -25,9 +23,6 @@ public class MultiPlatformIngestionTest {
     static {
         EnvLoader.loadEnv();
     }
-
-    @Autowired
-    private AdapterRegistry adapterRegistry;
 
     @Autowired
     private GitHubAdapter gitHubAdapter;

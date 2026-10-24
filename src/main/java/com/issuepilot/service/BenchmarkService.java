@@ -6,11 +6,6 @@ import com.issuepilot.config.AppProperties;
 import com.issuepilot.config.MongoConfig;
 import com.issuepilot.controller.SimulatorController;
 import com.issuepilot.model.RankingWeights;
-import com.issuepilot.repository.IssueRepository;
-import com.issuepilot.repository.RecommendationRepository;
-import com.issuepilot.repository.UserRepository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
@@ -21,16 +16,10 @@ import java.util.*;
 @Service
 public class BenchmarkService {
 
-    private static final Logger logger = LoggerFactory.getLogger(BenchmarkService.class);
-
     private final MongoConfig mongoConfig;
     private final AppProperties properties;
     private final CppRankingClient cppRankingClient;
     private final SimulatorController simulatorController;
-    private final IssueRepository issueRepository;
-    private final UserRepository userRepository;
-    private final RecommendationRepository recommendationRepository;
-    private final LiveVerifier liveVerifier;
     private final ObjectMapper objectMapper;
 
     public BenchmarkService(
@@ -38,20 +27,12 @@ public class BenchmarkService {
             AppProperties properties,
             CppRankingClient cppRankingClient,
             SimulatorController simulatorController,
-            IssueRepository issueRepository,
-            UserRepository userRepository,
-            RecommendationRepository recommendationRepository,
-            LiveVerifier liveVerifier,
             ObjectMapper objectMapper
     ) {
         this.mongoConfig = mongoConfig;
         this.properties = properties;
         this.cppRankingClient = cppRankingClient;
         this.simulatorController = simulatorController;
-        this.issueRepository = issueRepository;
-        this.userRepository = userRepository;
-        this.recommendationRepository = recommendationRepository;
-        this.liveVerifier = liveVerifier;
         this.objectMapper = objectMapper;
     }
 
@@ -82,6 +63,7 @@ public class BenchmarkService {
         return result;
     }
 
+    @SuppressWarnings("null")
     public Map<String, Object> benchmarkCppEngine(List<Integer> batchSizes, int runsPerBatch) {
         Map<String, Object> profile = simulatorController.getSampleProfiles().get(0);
         Map<String, Object> weights = objectMapper.convertValue(new RankingWeights(), new TypeReference<Map<String, Object>>() {});

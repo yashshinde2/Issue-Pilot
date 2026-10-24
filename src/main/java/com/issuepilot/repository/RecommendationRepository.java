@@ -1,6 +1,5 @@
 package com.issuepilot.repository;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.stereotype.Repository;
@@ -13,11 +12,9 @@ import java.util.*;
 public class RecommendationRepository {
 
     private final MongoTemplate mongoTemplate;
-    private final ObjectMapper objectMapper;
 
-    public RecommendationRepository(MongoTemplate mongoTemplate, ObjectMapper objectMapper) {
+    public RecommendationRepository(MongoTemplate mongoTemplate) {
         this.mongoTemplate = mongoTemplate;
-        this.objectMapper = objectMapper;
     }
 
     private Document cleanDoc(Document doc) {

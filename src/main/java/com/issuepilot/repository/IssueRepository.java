@@ -1,7 +1,5 @@
 package com.issuepilot.repository;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.stereotype.Repository;
@@ -16,11 +14,9 @@ import java.util.regex.Pattern;
 public class IssueRepository {
 
     private final MongoTemplate mongoTemplate;
-    private final ObjectMapper objectMapper;
 
-    public IssueRepository(MongoTemplate mongoTemplate, ObjectMapper objectMapper) {
+    public IssueRepository(MongoTemplate mongoTemplate) {
         this.mongoTemplate = mongoTemplate;
-        this.objectMapper = objectMapper;
     }
 
     private Document cleanDoc(Document doc) {

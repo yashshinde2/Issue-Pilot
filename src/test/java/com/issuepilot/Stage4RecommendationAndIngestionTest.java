@@ -1,6 +1,5 @@
 package com.issuepilot;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.issuepilot.controller.IngestionController;
 import com.issuepilot.controller.RecommendationController;
 import com.issuepilot.service.AuditService;
@@ -36,9 +35,6 @@ public class Stage4RecommendationAndIngestionTest {
 
     @Autowired
     private AuditService auditService;
-
-    @Autowired
-    private ObjectMapper objectMapper;
 
     @Test
     @DisplayName("Verify LiveVerifier Backfill with simulated exclusions")

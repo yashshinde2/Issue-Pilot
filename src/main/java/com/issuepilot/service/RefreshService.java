@@ -7,8 +7,6 @@ import com.issuepilot.config.AppProperties;
 import com.issuepilot.config.MongoConfig;
 import com.issuepilot.repository.IssueRepository;
 import com.issuepilot.repository.JobRepository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -17,8 +15,6 @@ import java.util.*;
 
 @Service
 public class RefreshService {
-
-    private static final Logger logger = LoggerFactory.getLogger(RefreshService.class);
 
     private final MongoConfig mongoConfig;
     private final AppProperties properties;

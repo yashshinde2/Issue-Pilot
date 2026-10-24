@@ -1,11 +1,6 @@
 package com.issuepilot;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.issuepilot.adapter.AdapterRegistry;
-import com.issuepilot.adapter.BaseIssueSourceAdapter;
-import com.issuepilot.config.AppProperties;
 import com.issuepilot.config.MongoConfig;
-import com.issuepilot.repository.IssueRepository;
 import com.issuepilot.service.LiveVerifier;
 import org.bson.Document;
 import org.junit.jupiter.api.DisplayName;
@@ -16,11 +11,6 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 
 import com.issuepilot.config.EnvLoader;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -39,16 +29,7 @@ public class DatabaseUrlAuditTest {
     private MongoConfig mongoConfig;
 
     @Autowired
-    private AppProperties properties;
-
-    @Autowired
-    private AdapterRegistry adapterRegistry;
-
-    @Autowired
     private LiveVerifier liveVerifier;
-
-    @Autowired
-    private ObjectMapper objectMapper;
 
     @Test
     @DisplayName("Audit MongoDB Atlas Issue URLs and Source Identities")
@@ -75,7 +56,6 @@ public class DatabaseUrlAuditTest {
         Map<String, Integer> mismatchedIdentities = new LinkedHashMap<>();
         Map<String, Integer> validUrlStructure = new LinkedHashMap<>();
 
-        List<Document> sampleIssuesForLiveVerification = new ArrayList<>();
         Map<String, List<Document>> bySourceDocs = new LinkedHashMap<>();
 
         for (Document doc : collection.find()) {

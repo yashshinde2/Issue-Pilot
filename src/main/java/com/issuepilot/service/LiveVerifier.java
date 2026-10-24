@@ -4,8 +4,6 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.issuepilot.adapter.*;
 import com.issuepilot.config.AppProperties;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
@@ -19,8 +17,6 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class LiveVerifier {
-
-    private static final Logger logger = LoggerFactory.getLogger(LiveVerifier.class);
 
     private final AppProperties properties;
     private final ObjectMapper objectMapper;

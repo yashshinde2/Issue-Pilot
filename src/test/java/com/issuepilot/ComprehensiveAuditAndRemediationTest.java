@@ -13,11 +13,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -38,16 +33,7 @@ public class ComprehensiveAuditAndRemediationTest {
     private MongoConfig mongoConfig;
 
     @Autowired
-    private AppProperties properties;
-
-    @Autowired
-    private AdapterRegistry adapterRegistry;
-
-    @Autowired
     private LiveVerifier liveVerifier;
-
-    @Autowired
-    private ObjectMapper objectMapper;
 
     @Test
     @DisplayName("Audit all 804 records, analyze manual failure causes, and perform remediation")
@@ -76,8 +62,6 @@ public class ComprehensiveAuditAndRemediationTest {
         // Analyze root causes of URL failures
         AtomicInteger countMissingCanonical = new AtomicInteger(0);
         AtomicInteger countWorkItemUrls = new AtomicInteger(0);
-        AtomicInteger countNonStandardUrls = new AtomicInteger(0);
-        AtomicInteger countMismatchedRepo = new AtomicInteger(0);
         AtomicInteger countAlreadyMarkedUnavailable = new AtomicInteger(0);
         AtomicInteger countAlreadyMarkedClosed = new AtomicInteger(0);
 

@@ -14,7 +14,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
 import java.io.File;
-import java.io.InputStream;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -38,9 +37,6 @@ public class Phase1CloseoutVerificationTest {
 
     @Autowired
     private MongoConfig mongoConfig;
-
-    @Autowired
-    private GitLabAdapter gitLabAdapter;
 
     @Autowired
     private EvaluationService evaluationService;
@@ -124,7 +120,6 @@ public class Phase1CloseoutVerificationTest {
             String id = gd.getString("id");
             String repo = gd.getString("repository_full_name");
             Integer issueNumber = gd.getInteger("issue_number");
-            String issueUrl = gd.getString("issue_url");
             String canonicalUrl = gd.getString("canonical_url");
             String state = gd.getString("state");
 

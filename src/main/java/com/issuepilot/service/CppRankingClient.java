@@ -9,13 +9,10 @@ import org.springframework.stereotype.Service;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
-import java.util.Collections;
-import java.util.Map;
-import java.util.concurrent.TimeUnit;
-
 import java.util.ArrayList;
 import java.util.List;
-import java.io.File;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class CppRankingClient {

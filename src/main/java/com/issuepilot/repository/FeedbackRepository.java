@@ -4,8 +4,6 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.issuepilot.model.FeedbackEvent;
 import org.bson.Document;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -15,8 +13,6 @@ import java.util.*;
 
 @Repository
 public class FeedbackRepository {
-
-    private static final Logger logger = LoggerFactory.getLogger(FeedbackRepository.class);
 
     private final MongoTemplate mongoTemplate;
     private final ObjectMapper objectMapper;

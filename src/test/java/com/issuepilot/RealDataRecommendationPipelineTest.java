@@ -8,7 +8,6 @@ import com.issuepilot.repository.IssueRepository;
 import com.issuepilot.repository.RecommendationRepository;
 import com.issuepilot.service.CppRankingClient;
 import com.issuepilot.service.LiveVerifier;
-import org.bson.Document;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,9 +26,6 @@ public class RealDataRecommendationPipelineTest {
     }
 
     @Autowired
-    private RecommendationController recommendationController;
-
-    @Autowired
     private IssueRepository issueRepository;
 
     @Autowired
@@ -40,9 +36,6 @@ public class RealDataRecommendationPipelineTest {
 
     @Autowired
     private LiveVerifier liveVerifier;
-
-    @Autowired
-    private MongoTemplate mongoTemplate;
 
     @Autowired
     private MongoConfig mongoConfig;

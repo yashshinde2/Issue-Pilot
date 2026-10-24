@@ -5,9 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.issuepilot.model.ContributorProfile;
 import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Criteria;
-import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
@@ -36,7 +33,6 @@ public class UserRepository {
 
     public Map<String, Object> getUser(String userId) {
         if (mongoTemplate == null) return null;
-        Query q = new Query(Criteria.where("user_id").is(userId));
         Document doc = mongoTemplate.getCollection("users").find(new Document("user_id", userId)).first();
         return cleanDoc(doc);
     }
