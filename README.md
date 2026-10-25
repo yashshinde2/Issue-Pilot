@@ -1,7 +1,7 @@
 # ISSUE PILOT
-## GitHub Ingestion + MongoDB Atlas + C++ Ranking Engine + Interactive Demonstration
+## Multi-Platform Ingestion + MongoDB Atlas + Authoritative C++ Ranking Engine + C++ Vote-Affinity Algorithm + Spring Boot Backend
 
-Issue Pilot is an end-to-end open-source issue recommendation and ranking system. It computes personalized suitability scores ($0 - 100$) for contributors across GitHub issues using an explainable, deterministic C++ ranking engine backed by a shared candidate pool in MongoDB Atlas.
+Issue Pilot is an end-to-end open-source issue recommendation, ranking, and preference-learning system. It computes personalized suitability scores ($0 - 100$) for contributors across open-source issues using an explainable, deterministic C++ ranking engine backed by a shared candidate pool in MongoDB Atlas, with an independent C++ vote-affinity engine that models contributor preference from issue likes and dislikes.
 
 ---
 
@@ -9,25 +9,38 @@ Issue Pilot is an end-to-end open-source issue recommendation and ranking system
 
 ```mermaid
 graph TD
-    GH[GitHub REST API] --> GW[GitHub Ingestion & Refresh Worker]
-    GW --> NORM[Issue Normalization & Validation]
-    NORM --> AT[(MongoDB Atlas: Shared Candidate Pool)]
+    subgraph Multi-Platform Ingestion
+        GH[GitHub REST API] --> GW[Multi-Platform Adapters & Ingestion Worker]
+        GL[GitLab API] --> GW
+        CB[Codeberg / Gitea API] --> GW
+        BZ[Bugzilla REST API] --> GW
+        GW --> NORM[Issue Normalization & Validation]
+        NORM --> AT[(MongoDB Atlas: Shared Candidate Pool)]
+    end
     
-    USER[Contributor Profile & Skills] --> RET[Candidate Retrieval]
-    AT --> RET
-    
-    RET --> CPP[Authoritative C++14 Ranking Engine]
-    CPP --> SORT[Deterministic Shortlist Sorting]
-    SORT --> VER[GitHub Live Verification & Backfill]
-    VER --> SNAP[(MongoDB Atlas: Recommendation Snapshots)]
-    VER --> UI[Issue Pilot Interactive Frontend]
+    subgraph Recommendation Pipeline
+        USER[Contributor Profile & Skills] --> RET[Candidate Retrieval]
+        AT --> RET
+        RET --> CPP[Authoritative C++14 Ranking Engine]
+        CPP --> SORT[Deterministic Shortlist Sorting]
+        SORT --> VER[Live Verification & Backfill Loop]
+        VER --> SNAP[(MongoDB Atlas: Recommendation Snapshots)]
+        VER --> UI[Issue Pilot Interactive Dashboard]
+    end
+
+    subgraph Preference Learning
+        VOTES[Contributor Votes: Likes / Dislikes] --> VOTE_REPO[(MongoDB Atlas: issue_votes)]
+        VOTE_REPO --> AFF_CLIENT[VoteAffinityService]
+        AFF_CLIENT --> CPP_AFF[C++ Vote-Affinity Engine: --affinity]
+        CPP_AFF --> AFF_EVAL[Affinity & Confidence Scoring: -100 to +100]
+    end
 ```
 
 ---
 
 ### The 6-Factor Authoritative Ranking Model
 
-Final scores are computed on a normalized $0 - 100$ scale using the documented weights:
+Final suitability scores are computed on a normalized $0 - 100$ scale using the documented weights:
 
 $$\text{FinalScore} = 0.35S + 0.25D + 0.15R + 0.10H + 0.10F + 0.05N$$
 
@@ -48,24 +61,86 @@ $$\text{FinalScore} = \sum_{i \in \text{Available}} (\text{Score}_i \times \text
 
 ---
 
+### Phase 2: Independent C++ Vote-Affinity Algorithm
+
+In Phase 2, Issue Pilot incorporates an independent preference-learning engine implemented in modern C++ that learns from each user's likes ($+1$) and dislikes ($-1$) of issues. It estimates how closely a candidate issue aligns with the user's demonstrated preferences without altering the authoritative 6-factor recommendation order.
+
+#### 1. Feature Snapshot Representation
+Each voted issue and candidate issue is represented by a multi-dimensional feature snapshot:
+- **Technologies**: List of detected language/framework identifiers (e.g., `["Java", "Spring Boot"]` or `["Python", "Flask"]`).
+- **Labels**: Normalized taxonomy labels (e.g., `["good-first-issue", "help-wanted", "bug"]`).
+- **Issue Type**: Categorical classification (e.g., `"bug"`, `"feature"`, `"documentation"`, `"enhancement"`).
+- **Difficulty**: Normalized ordinal difficulty score $[0, 100]$.
+- **Structured Metadata**: Domain tokens (e.g., Bugzilla product, component, sub-system).
+- **Repository**: Canonical full repository path (e.g., `"pallets/flask"`).
+
+#### 2. Pairwise Similarity Metric
+Pairwise similarity between a candidate issue $c$ and a voted issue $v$ is computed as a weighted combination of group similarities:
+- **Technology Overlap**: Jaccard similarity $J(T_c, T_v) = \frac{|T_c \cap T_v|}{|T_c \cup T_v|}$
+- **Label Overlap**: Jaccard similarity $J(L_c, L_v) = \frac{|L_c \cap L_v|}{|L_c \cup L_v|}$
+- **Issue Type Alignment**: Exact categorical match ($1.0$ if matching, $0.0$ otherwise)
+- **Difficulty Proximity**: $1.0 - \frac{|\text{diff}_c - \text{diff}_v|}{100.0}$
+- **Structured Metadata**: Jaccard similarity across token sets
+- **Repository Match**: Exact canonical match ($1.0$ or $0.0$)
+
+Default feature weights:
+- Technology: $30\%$
+- Labels: $30\%$
+- Issue Type: $15\%$
+- Difficulty: $10\%$
+- Structured Metadata: $10\%$
+- Repository: $5\%$
+
+Missing feature groups are dynamically renormalized across available groups.
+
+#### 3. Correlated Vote Damping
+When a user has cast multiple votes on closely related issues (e.g., multiple votes on the same repository with identical tags), treating them as independent votes artificially inflates evidence. The engine detects pairwise similarity exceeding a correlation threshold ($\ge 0.85$) among like-signed votes and applies damping:
+
+$$\text{effective\_weight}_i = \frac{1.0}{1.0 + \sum_{j < i, \text{sim}(v_i, v_j) \ge 0.85} \text{sim}(v_i, v_j)}$$
+
+#### 4. Laplace-Smoothed Evidence Accumulation
+For each candidate $c$, positive evidence $P$ and negative evidence $N$ are accumulated from liked ($+1$) and disliked ($-1$) votes:
+
+$$P = \sum_{v \in \text{Likes}} \text{effective\_weight}_v \times \text{similarity}(c, v)$$
+$$N = \sum_{v \in \text{Dislikes}} \text{effective\_weight}_v \times \text{similarity}(c, v)$$
+
+The signed affinity score $[-100, +100]$ is computed using Laplace smoothing ($\lambda = 1.0$):
+
+$$\text{AffinityScore} = 100 \times \frac{P - N}{P + N + \lambda}$$
+
+#### 5. Confidence & Conflict Indicators
+- **Confidence $[0, 1]$**: Scaled monotonically with total evidence $E = P + N$ using scale constant $k = 3.0$:
+  $$\text{Confidence} = \frac{E}{E + k}$$
+- **Conflict Ratio & Indicator**: When a candidate has substantial positive AND negative evidence:
+  $$\text{ConflictRatio} = \frac{2 \cdot \min(P, N)}{P + N}$$
+  If $\text{ConflictRatio} \ge 0.40$ and total evidence $E \ge 1.0$, the candidate is flagged with `conflict_indicator: true`.
+
+#### 6. Architectural Independence & Invariance
+The C++ vote-affinity engine runs independently via `--affinity` IPC mode. In Phase 2, candidate ranking and recommendation delivery remain governed strictly by the 6-factor model to ensure baseline quality and regression-free verification.
+
+---
+
 ### Repository Structure
 
 ```
 d:/Issue Pilot/
-├── ranking_engine/               # Authoritative C++14 Ranking Engine
+├── ranking_engine/               # Authoritative C++14/20 Ranking & Vote-Affinity Engine
 │   ├── include/
 │   │   ├── types.hpp             # Domain entities and evidence breakdown structs
-│   │   ├── ranking_engine.hpp    # Authoritative scoring formulas & tie-breaking
+│   │   ├── ranking_engine.hpp    # 6-factor scoring formulas & tie-breaking
+│   │   ├── vote_affinity.hpp     # Phase 2 vote-affinity engine & similarity math
 │   │   ├── json_adapter.hpp      # Zero-dependency JSON IPC parser & serializer
 │   │   └── evaluation.hpp        # NDCG@5, Precision@5, Recall@5 evaluator
 │   ├── src/
-│   │   ├── ranking_engine.cpp    # Authoritative component implementations
-│   │   ├── json_adapter.cpp      # JSON parser & What-If experiments runner
+│   │   ├── ranking_engine.cpp    # 6-factor component implementations
+│   │   ├── vote_affinity.cpp     # Vote-affinity implementation, damping & evidence
+│   │   ├── json_adapter.cpp      # JSON parser, experiments runner & affinity serializer
 │   │   ├── evaluation.cpp        # NDCG evaluation math
-│   │   └── main.cpp              # CLI driver (--stdin-json, --test-experiments, --eval)
+│   │   └── main.cpp              # CLI driver (--stdin-json, --affinity, --test-experiments, --eval)
 │   ├── tests/
-│   │   └── test_ranking.cpp      # Unit test suite verifying all 10 component formulas
-│   ├── CMakeLists.txt            # CMake configuration
+│   │   ├── test_ranking.cpp      # Unit tests for 6-factor formulas & edge cases
+│   │   └── test_affinity.cpp     # Unit tests for pairwise similarity, damping & affinity
+│   ├── CMakeLists.txt            # CMake build configuration with CTest integration
 │   └── build/                    # Compiled binaries (issue_pilot_ranking_engine.exe)
 │
 ├── src/                          # Java 21 + Spring Boot 3.4.3 Backend Service
@@ -73,44 +148,43 @@ d:/Issue Pilot/
 │   │   ├── java/com/issuepilot/
 │   │   │   ├── IssuePilotApplication.java # Spring Boot application entry-point
 │   │   │   ├── adapter/                   # Multi-platform adapters (GitHub, GitLab, Codeberg, Bugzilla)
-│   │   │   ├── cli/                       # IssuePilotCli CommandLineRunner (--eval, --benchmark, etc.)
+│   │   │   ├── cli/                       # IssuePilotCli CommandLineRunner (--eval, --benchmark, --audit, etc.)
 │   │   │   ├── config/                    # MongoConfig, AppProperties, WebConfig, EnvLoader
-│   │   │   ├── controller/                # Recommendation, Ingestion, Issue, User, Feedback, Simulator, Validation
-│   │   │   ├── model/                     # Document models and request/response DTOs
-│   │   │   ├── repository/                # Spring Data MongoDB & MongoTemplate repositories
-│   │   │   └── service/                   # CppRankingClient, LiveVerifier, Discovery, Refresh, Lifecycle, Evaluation
+│   │   │   ├── controller/                # Recommendation, Vote, Ingestion, Issue, User, Feedback, Simulator, Validation
+│   │   │   ├── model/                     # Document models (IssueVote, RecommendationSnapshot, FeedbackEvent, etc.)
+│   │   │   ├── repository/                # Spring Data MongoDB & MongoTemplate repositories (VoteRepository, etc.)
+│   │   │   └── service/                   # CppRankingClient, VoteAffinityService, LiveVerifier, Discovery, Refresh, Lifecycle
 │   │   └── resources/
 │   │       ├── application.properties     # Spring Boot application configuration
 │   │       ├── static/index.html          # Interactive demonstration and analytics UI
 │   │       └── fixtures/                  # Benchmark and labeled evaluation datasets
 │   └── test/
-│       └── java/com/issuepilot/           # JUnit 5 integration & end-to-end test suites
+│       └── java/com/issuepilot/           # JUnit 5 integration, evaluation, and end-to-end test suites
 │
-├── pom.xml                       # Maven build and dependency configuration
+├── pom.xml                       # Maven build configuration (Java 21, Spring Boot 3.4.3)
 ├── mvn.cmd                       # Maven wrapper launcher
 ├── .gitignore                    # Git ignore file protecting credentials and binaries
 ├── .env.example                  # Template configuration without credentials
 ├── .env                          # Local active configuration (ignored by Git)
 ├── atlas-credentials.env         # Live MongoDB Atlas connection string (ignored by Git)
-└── issue_pilot_ranking_algo.md   # System technical design document
+└── issue_pilot_ranking_algo.md   # Mathematical and algorithmic specification
 ```
-
 
 ---
 
 ### MongoDB Atlas Setup & Configuration
 
 #### 1. Cluster Setup & Environment Variables
-1. Create a free cluster on [MongoDB Atlas](https://www.mongodb.com/cloud/atlas).
+1. Create a cluster on [MongoDB Atlas](https://www.mongodb.com/cloud/atlas).
 2. Create a database user with read and write permissions to `issue_pilot`.
 3. Configure Network Access (IP Access List) to allow connections from your development machine.
-4. Copy `.env.example` to `.env` and provide your connection details:
+4. Copy `.env.example` to `.env` and configure your credentials:
    ```env
    # MongoDB Atlas Configuration
    MONGODB_URI=mongodb+srv://<username>:<password>@<cluster>.mongodb.net
    MONGODB_DATABASE=issue_pilot
 
-   # MongoDB Connection Pool & Timeouts (Optional)
+   # MongoDB Connection Pool & Timeouts
    MONGODB_MAX_POOL_SIZE=50
    MONGODB_MIN_POOL_SIZE=5
    MONGODB_SERVER_SELECTION_TIMEOUT_MS=5000
@@ -120,7 +194,7 @@ d:/Issue Pilot/
 5. Credentials and `.env` files are strictly excluded from git via `.gitignore`. Credentials are masked in all logs and error messages.
 
 #### 2. Collections and Indexes (Safe & Idempotent)
-The backend automatically creates and verifies indexes on startup across 5 collections:
+The Spring Boot backend automatically creates and verifies indexes on startup across 6 collections:
 - **`issues`**:
   - Unique compound index: `[("source", 1), ("repository_full_name", 1), ("issue_number", 1)]` (prevents duplicate discoveries).
   - Sparse unique index: `[("id", 1)]`.
@@ -140,93 +214,74 @@ The backend automatically creates and verifies indexes on startup across 5 colle
 - **`jobs`**:
   - Unique index: `[("job_id", 1)]`.
   - Query indexes: `[("start_time", -1)]`, `[("status", 1)]`.
+- **`issue_votes`** (Phase 2):
+  - Unique compound index: `[("user_id", 1), ("source", 1), ("platform_issue_id", 1)]` (prevents duplicate votes; guarantees idempotent vote updates).
+  - Query index: `[("user_id", 1)]` (rapid user vote retrieval).
+  - Query index: `[("updated_at", -1)]` (vote recency ordering).
 
 ---
 
 ### Step-by-Step Build & Run Instructions
 
-#### 1. Compile & Test the C++ Ranking Engine
+#### 1. Compile & Test the C++ Ranking & Vote-Affinity Engine
 ```bash
+# Configure and build C++ binaries
 cmake -B ranking_engine/build -S ranking_engine
 cmake --build ranking_engine/build
+
+# Run all C++ unit tests via CTest (18 ranking tests + 18 affinity tests)
+ctest --test-dir ranking_engine/build --output-on-failure
 ```
-Verify the C++ test suite, benchmark, and What-If experiments directly:
+
+You can also run the test executables or the CLI binary directly:
 ```bash
-python test_algorithm_interactive.py
-```
-Or run the binary directly:
-```bash
+# 6-Factor ranking tests
 .\ranking_engine\build\test_ranking.exe
+
+# Phase 2 vote-affinity tests
+.\ranking_engine\build\test_affinity.exe
+
+# Execute ranking or affinity via CLI IPC
+.\ranking_engine\build\issue_pilot_ranking_engine.exe --affinity
+.\ranking_engine\build\issue_pilot_ranking_engine.exe --stdin-json
 ```
 
-#### 2. Start the FastAPI Backend
+#### 2. Start the Java 21 + Spring Boot Backend
+Ensure Java 21 is installed (`java -version`).
 ```bash
-pip install -r requirements.txt
-$env:PYTHONPATH="backend"
-python -m uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8000 --reload
+# Start backend server with live reload / Spring Boot runner
+.\mvn.cmd spring-boot:run
 ```
-Interactive Swagger API documentation is available at: `http://localhost:8000/docs`
-
-Health check endpoint:
+Or package and run the self-contained production JAR:
 ```bash
-curl http://localhost:8000/api/health
+.\mvn.cmd package -DskipTests
+java -jar target/issue-pilot-1.1.0.jar
 ```
 
-#### 3. Run Automated Tests
-Run all 28 automated tests covering API pipelines, Atlas persistence across restarts, and GitHub ingestion/lifecycle:
-```bash
-# Run entire test suite (all 28 tests)
-pytest -v
+The Spring Boot backend will start on **port 8000**:
+- **Interactive Demonstration Dashboard**: `http://localhost:8000/`
+- **Health Check & Diagnostic Endpoint**: `http://localhost:8000/api/health`
 
-# Or run individual test modules:
-pytest backend/tests/test_github_ingestion.py -v
-pytest backend/tests/test_atlas_persistence.py -v
-pytest backend/tests/test_e2e_pipeline.py -v
+#### 3. Run Automated Java Tests
+Run the complete integration and unit test suite (covering multi-platform ingestion, Atlas persistence, recommendation verification, and vote-affinity algorithms):
+```bash
+.\mvn.cmd test
 ```
 
 ---
 
-### Milestone 3: GitHub Issue Discovery, Refresh & Lifecycle Management
+### Spring Boot CLI Operator Commands
 
-#### 1. Configuration & Environment Variables
-Configure the ingestion and discovery settings in `.env`:
-```env
-# GitHub Personal Access Token (Recommended for 5,000 req/hr vs 60 req/hr unauthenticated)
-GITHUB_TOKEN=ghp_your_personal_access_token_here
-GITHUB_API_BASE_URL=https://api.github.com
+Execute automated operator workflows, evaluations, audits, and discovery runs directly using Spring Boot CLI arguments:
 
-# Candidate Pool Bounds & Cadences
-CANDIDATE_POOL_TARGET=3000          # Bounded shared candidate pool size
-RECENT_WINDOW_DAYS=30               # Discovery recency window in days
-OLDER_WINDOW_DAYS=90                # Stale candidate threshold in days
-DISCOVERY_CADENCE_HOURS=24          # Daily discovery schedule cadence
-REFRESH_CADENCE_DAYS=3              # Older candidate verification cadence (3-7 days)
-MAX_ISSUES_PER_REPO=15              # Maximum issues allowed per repository for diversity
-MAX_SEARCH_PAGES_PER_RUN=5          # Search API pagination limit per query
-PER_PAGE_COUNT=30                   # Results per page
-
-# Rate Limit & Resiliency
-GITHUB_RATE_LIMIT_BUFFER=10         # Stop/defer work when remaining quota drops to buffer
-GITHUB_REQUEST_TIMEOUT_SECONDS=15   # Request timeout
-GITHUB_MAX_RETRIES=3                # Exponential backoff retry count on 5xx/429
-
-# Background Scheduler
-SCHEDULER_ENABLED=false             # Set to true to auto-start scheduler on server startup
-```
-
-#### 2. Running the Spring Boot Server & CLI Commands
-Run the backend web application or operator CLI commands using Maven or the packaged JAR:
 ```bash
-# Start the Spring Boot backend server (Port 8000, serving Demo Dashboard at http://localhost:8000)
-.\mvn.cmd spring-boot:run
-
 # Run recommendation-quality evaluation suite (NDCG@5, Precision@5, Recall@5)
 .\mvn.cmd spring-boot:run -Dspring-boot.run.arguments="--eval"
 
 # Run C++ ranking performance & latency benchmark suite
 .\mvn.cmd spring-boot:run -Dspring-boot.run.arguments="--benchmark"
 
-# Run MongoDB Atlas database integrity & schema audit
+# Run MongoDB Atlas database integrity & schema audit (including issue_votes)
 .\mvn.cmd spring-boot:run -Dspring-boot.run.arguments="--audit"
 
 # Trigger multi-platform candidate discovery across rotating topics
@@ -237,158 +292,54 @@ Run the backend web application or operator CLI commands using Maven or the pack
 
 # Stale candidate lifecycle evaluation
 .\mvn.cmd spring-boot:run -Dspring-boot.run.arguments="--cleanup"
-
-# Run all automated tests (Stage 2, Stage 3, Stage 4)
-.\mvn.cmd test
 ```
-
-#### 3. REST API Endpoints for Ingestion & Observability
-- `POST /api/ingestion/discover` — Trigger bounded candidate discovery across rotating topics.
-- `POST /api/ingestion/refresh` — Refresh a batch of active candidates and verify individual state.
-- `POST /api/ingestion/cleanup` — Evaluate candidate recency and mark stale candidates.
-- `POST /api/ingestion/run-all` — Trigger full discovery, refresh, and cleanup cycle.
-- `GET /api/ingestion/status` — Candidate pool metrics, repository diversity, lifecycle states, rate limits, and scheduler status.
-- `GET /api/ingestion/rate-limit` — Safe rate limit inspection (credentials strictly masked).
-- `GET /api/ingestion/jobs` — List past ingestion jobs with counts and status.
-- `GET /api/ingestion/jobs/{job_id}` — Inspect specific job checkpoints, errors, and metadata.
-- `POST /api/ingestion/scheduler/start` — Start the background periodic scheduler.
-- `POST /api/ingestion/scheduler/stop` — Stop the background periodic scheduler.
-- `GET /api/ingestion/scheduler/status` — Inspect background scheduler running state and cadences.
 
 ---
 
-### Verifying Persistence Across Restarts (Manual & Automated)
+### REST API Reference
 
-#### Automated Verification
-The test suite in `backend/tests/test_atlas_persistence.py` automatically validates all 9 persistence requirements:
-1. **Insert & Retrieve Issue**: Inserts normalized issue record and retrieves by both ID and natural compound key.
-2. **Upsert Idempotence & Field Preservation**: Upserts an issue twice; verifies exactly 1 document exists and unsupplied fields are preserved.
-3. **User Profile CRUD**: Creates user profile with skills, retrieves it, updates capability and counts, and verifies field preservation.
-4. **Filtered Issue Queries**: Verifies filtering by open status, assignment status, technology, and difficulty.
-5. **Recommendations & Feedback Persistence**: Verifies snapshots and feedback events are saved, and user stats are incremented atomically.
-6. **Unique Indexes**: Asserts that duplicate issue identity or user_id raises duplicate key errors.
-7. **Persistence Across Restart**: Inserts records, disconnects and destroys the database client (simulating server shutdown), connects via a fresh client (simulating restart), and verifies all data survived.
-8. **Clear Error Reporting**: Verifies that when Atlas is unreachable, the system reports a clear HTTP 503 error instead of silently returning fake data.
-9. **C++ Ranking Compatibility & Demo Mode**: Verifies existing C++ ranking engine tests pass and offline demo mode remains functional.
+#### 1. Vote Affinity Endpoints (`/api/votes`)
+- **`POST /api/votes`**: Record or update a user's vote on an issue.
+  ```json
+  {
+    "user_id": "contributor_01",
+    "source": "github",
+    "platform_issue_id": "pallets/flask#5120",
+    "vote": 1,
+    "recommendation_run_id": "run-xyz-123",
+    "feature_snapshot": {
+      "technologies": ["Python", "Flask"],
+      "labels": ["good first issue"],
+      "issue_type": "bug",
+      "difficulty": 35.0
+    }
+  }
+  ```
+- **`DELETE /api/votes?user_id=...&source=...&platform_issue_id=...`**: Remove a vote.
+- **`GET /api/votes/{userId}`**: Retrieve all votes recorded by a user.
+- **`GET /api/votes/summary/{userId}`**: Retrieve total like/dislike counts for a user.
+- **`POST /api/votes/affinity`**: Evaluate affinity scores across candidate issues using the C++ engine.
+  ```json
+  {
+    "user_id": "contributor_01",
+    "candidates": [
+      {
+        "id": "github_pallets_flask_5120",
+        "source": "github",
+        "platform_issue_id": "pallets/flask#5120",
+        "feature_snapshot": {
+          "technologies": ["Python", "Flask"],
+          "labels": ["good first issue"],
+          "issue_type": "bug",
+          "difficulty": 35.0
+        }
+      }
+    ]
+  }
+  ```
 
-#### Manual Verification Procedure
-1. **Insert a User Profile**:
-   ```bash
-   curl -X POST "http://localhost:8000/api/users" -H "Content-Type: application/json" -d '{
-     "user_id": "test-developer-persist",
-     "capability": 78.0,
-     "skills": {"Python": {"technology": "Python", "score": 90.0, "confidence": 0.95}}
-   }'
-   ```
-2. **Upsert an Issue Record**:
-   ```bash
-   curl -X POST "http://localhost:8000/api/issues" -H "Content-Type: application/json" -d '{
-     "id": "gh_testorg_testrepo_501",
-     "source": "github",
-     "repository_full_name": "testorg/testrepo",
-     "issue_number": 501,
-     "title": "Initial Issue Record",
-     "issue_url": "https://github.com/testorg/testrepo/issues/501",
-     "state": "open",
-     "is_assigned": false,
-     "detected_technologies": ["Python"],
-     "comment_count": 2
-   }'
-   ```
-3. **Stop the Backend**:
-   Press `Ctrl+C` in the backend terminal to stop the Spring Boot server.
-4. **Restart the Backend**:
-   ```bash
-   .\mvn.cmd spring-boot:run
-   ```
-5. **Verify Data Remains Available**:
-   ```bash
-   curl "http://localhost:8000/api/users/test-developer-persist"
-   curl "http://localhost:8000/api/issues/gh_testorg_testrepo_501"
-   ```
-   Both documents will be returned with all fields preserved.
-6. **Upsert Again with Partial Data to Verify Idempotence**:
-   ```bash
-   curl -X POST "http://localhost:8000/api/issues" -H "Content-Type: application/json" -d '{
-     "source": "github",
-     "repository_full_name": "testorg/testrepo",
-     "issue_number": 501,
-     "title": "Updated Title - No Duplicate",
-     "issue_url": "https://github.com/testorg/testrepo/issues/501"
-   }'
-   ```
-   Query `http://localhost:8000/api/issues?search=testorg` — exactly 1 document exists, its title is updated, and `comment_count: 2` was preserved!
-
----
-
-### Milestone 4: Live GitHub Verification & Top-5 Personalized Recommendations
-
-Milestone 4 implements the live verification and recommendation delivery pipeline for Issue Pilot. It integrates the shared MongoDB Atlas candidate pool, the authoritative C++ ranking engine, and the live GitHub verification pipeline to deliver up to five verified, high-suitability issue recommendations.
-
-#### 1. Architecture & Pipeline Data-Flow
-
-```mermaid
-graph TD
-    REQ[Client Recommendation Request] --> RET[Retrieve Candidate Pool from MongoDB Atlas]
-    PROFILE[Contributor Profile & Skills] --> CPP[Authoritative C++ Ranking Engine]
-    RET --> CPP
-    
-    CPP --> SORT[Deterministic Shortlist: Default 30 Candidates]
-    SORT --> VER[Live GitHub Verification Loop]
-    
-    VER -->|Open & Unassigned| DELIV[Top-5 Verified Recommendation Delivery]
-    VER -->|Closed / Assigned / PR / 404| BACKFILL[Exclude & Backfill Next Ranked Candidate]
-    BACKFILL --> VER
-    VER -->|Rate Limited / Timeout| INCONCL[Record Inconclusive & Partial Result State]
-    
-    DELIV --> SNAP[(MongoDB Atlas: Auditable Recommendation Snapshots)]
-    INCONCL --> SNAP
-```
-
-#### 2. Verification & Eligibility Rules
-Before delivering recommendations, shortlisted candidates are verified against GitHub's live API:
-- **Issue Exists**: An issue returning HTTP 404 is excluded with an audit note indicating deletion or private repository restrictions.
-- **Open State**: The issue state must be `open`. Closed or completed issues are excluded.
-- **Pull Request Exclusion**: GitHub Issues API returns both issues and pull requests; any item containing a `"pull_request"` key is excluded.
-- **Assignment Check**: Any issue with an assignee (`assignee != null` or non-empty `assignees`) is excluded to prevent duplicated effort.
-- **Archived & Lock Restrictions**: If the repository is marked as archived or the issue has a lock reason, it is excluded.
-- **Renamed Repositories & Redirects**: HTTP 301/302 redirects and canonical repository URLs are tracked. A repository transfer or rename updates the canonical repository metadata and is never falsely invalidated.
-- **Operational Failures**:
-  - **HTTP 403 / 429**: Distinguishes rate limits (`x-ratelimit-remaining == 0`) from permission errors. Rate limits produce an inconclusive state and a clear operational warning.
-  - **HTTP 5xx & Network Failures**: Transient errors trigger bounded exponential backoff retries (`0.5s * 2^attempt`). If all retries are exhausted, the candidate is marked as **inconclusive** and is never falsely treated as closed.
-  - **Timeouts**: Recorded as inconclusive without mutating the candidate's active state in the database.
-
-#### 3. Shortlist Backfill & Partial Results
-- Shortlist evaluation processes candidates in strictly descending final score order.
-- When an ineligible candidate is encountered, it is excluded with a recorded reason, and the verification loop immediately proceeds to backfill from the next candidate in the shortlist.
-- The loop terminates once **5 valid recommendations** are collected or the configurable verification budget is exhausted.
-- If fewer than 5 valid candidates remain, the API delivers the available valid candidates with `is_partial_result: true` and an explicit `partial_result_reason`. The system never fabricates synthetic recommendations.
-
-#### 4. Persistence & Audit Snapshots
-Each recommendation run persists an audit trail into MongoDB Atlas:
-- **Run ID (`run_id`)**: A stable identifier guaranteeing idempotent writes. Retrying a request with the same `run_id` updates existing records without duplication.
-- **Original & Delivered Position**: Both original rank and delivered rank (1..5) are preserved alongside original and final scores.
-- **Authoritative Scores**: All 6 component scores (`skill_match`, `difficulty_match`, `responsiveness`, `repository_health`, `feedback`, `freshness`) and effective weights.
-- **Decision & Audit Reason**: Whether the candidate was `included`, `rejected`, `skipped`, or `inconclusive`, along with the specific exclusion reason.
-- **Sensitive Data Scrubbing**: No tokens, authorization headers, or private credentials are stored.
-
-#### 5. Configuration & Environment Variables
-
-| Variable | Default | Purpose |
-| :--- | :---: | :--- |
-| `FINAL_RECOMMENDATION_COUNT` | `5` | Maximum delivered recommendations. |
-| `VERIFICATION_CANDIDATE_LIMIT` | `30` | Default candidate shortlist size for verification. |
-| `VERIFICATION_TIMEOUT_SECONDS` | `5` | GitHub verification request timeout per candidate. |
-| `VERIFICATION_MAX_RETRIES` | `2` | Bounded retries for transient 5xx/network errors. |
-| `VERIFICATION_CACHE_TTL_SECONDS`| `300` | Short-lived in-memory caching interval for verified issues. |
-| `VERIFICATION_CONCURRENCY` | `5` | Maximum concurrent verification workers. |
-| `GITHUB_RATE_LIMIT_BUFFER` | `10` | Buffer quota threshold to pause/defer requests. |
-| `GITHUB_TOKEN` | `""` | GitHub personal access token (5,000 req/hr vs 60 req/hr). |
-
-#### 6. REST API Endpoints
-
-- **`POST /api/recommendations/personalized`**:
-  Request Body:
+#### 2. Recommendation Endpoints (`/api/recommendations`)
+- **`POST /api/recommendations/personalized`**: Generate top-5 verified recommendations for a contributor.
   ```json
   {
     "user_id": "alice_dev",
@@ -397,133 +348,119 @@ Each recommendation run persists an audit trail into MongoDB Atlas:
     "prefer_live_atlas": true,
     "demo_mode": false,
     "technology_filter": "Python",
-    "run_id": "custom-audit-run-001"
+    "run_id": "audit-run-001"
   }
   ```
-  Response:
-  ```json
-  {
-    "run_id": "custom-audit-run-001",
-    "data_source": "atlas_candidates",
-    "algorithm_version": "1.0.0-phase1",
-    "user_id": "alice_dev",
-    "total_candidates_considered": 45,
-    "total_ranked": 30,
-    "shortlist_size": 30,
-    "candidates_verified": 5,
-    "candidates_excluded": 2,
-    "candidates_inconclusive": 0,
-    "delivered_count": 5,
-    "is_partial_result": false,
-    "recommendations": [ ... ],
-    "generated_at": "2026-10-20T18:00:00Z"
-  }
-  ```
+- **`GET /api/recommendations/runs/{run_id}`**: Retrieve audit snapshot for a specific recommendation run.
+- **`GET /api/recommendations/snapshots/{user_id}`**: Retrieve historical recommendation runs for a user.
 
-- **`GET /api/recommendations/runs/{run_id}`**:
-  Retrieves complete audit trail for a recommendation run, including all delivered, rejected, and skipped candidates.
+#### 3. Multi-Platform Ingestion Endpoints (`/api/ingestion`)
+- **`POST /api/ingestion/discover`**: Trigger bounded discovery across GitHub, GitLab, Codeberg, and Bugzilla.
+- **`POST /api/ingestion/refresh`**: Refresh stored candidates against upstream APIs.
+- **`POST /api/ingestion/cleanup`**: Mark stale candidates beyond retention windows.
+- **`POST /api/ingestion/run-all`**: Execute full discovery, refresh, and cleanup cycle.
+- **`GET /api/ingestion/status`**: Ingestion pool metrics, diversity, and scheduler status.
+- **`GET /api/ingestion/rate-limit`**: Safe upstream rate-limit inspections with masked credentials.
+- **`GET /api/ingestion/jobs`**: List past ingestion jobs.
+- **`POST /api/ingestion/scheduler/start`**: Start periodic background ingestion worker.
+- **`POST /api/ingestion/scheduler/stop`**: Stop periodic background ingestion worker.
 
-- **`GET /api/recommendations/snapshots/{user_id}`**:
-  Retrieves historical recommendation snapshots for a contributor.
+#### 4. Candidates & Profiles Endpoints (`/api/issues`, `/api/users`, `/api/feedback`)
+- **`GET /api/issues`**: Query filtered candidates from MongoDB Atlas.
+- **`POST /api/issues`**: Idempotently upsert an issue candidate.
+- **`GET /api/issues/{id}`**: Retrieve specific issue candidate.
+- **`GET /api/users/{userId}`**: Retrieve contributor profile.
+- **`POST /api/users`**: Upsert contributor profile and skills.
+- **`POST /api/feedback`**: Submit post-recommendation feedback (`accepted`, `rejected`, `completed`).
+- **`GET /api/feedback/{userId}`**: Retrieve contributor feedback history.
 
-#### 7. Running the Automated Test Suite
-
-Run the full automated test suite (57 pytest tests across all modules):
-```bash
-pytest backend/tests/ -v
-```
-
-Run the C++ unit test suite (18 authoritative ranking tests):
-```bash
-ctest --test-dir ranking_engine/build --output-on-failure
-```
-
-Or run individual milestone test suites:
-```bash
-# Milestone 5 E2E Integration & Credential-Free Validation
-pytest backend/tests/test_milestone5_e2e_validation.py -v
-
-# Milestone 5 Behavioral & Sensitivity Experiments (A through G)
-pytest backend/tests/test_behavioral_sensitivity.py -v
-
-# Milestone 5 Recommendation-Quality Evaluation (NDCG@5 & Precision@5)
-pytest backend/tests/test_evaluation.py -v
-
-# Milestone 4 Live Verification & Backfilling
-pytest backend/tests/test_milestone4_verification.py -v
-
-# Milestone 3 Automated Ingestion & Candidate Pool Management
-pytest backend/tests/test_github_ingestion.py -v
-
-# Milestone 2 MongoDB Atlas Persistence & Idempotency
-pytest backend/tests/test_atlas_persistence.py -v
-```
+#### 5. Simulator & Validation Endpoints (`/api/simulator`, `/api/validation`, `/api/health`)
+- **`GET /api/simulator/sample-data`**: Load pre-packaged contributor profiles and candidate issues.
+- **`POST /api/simulator/rank`**: Run interactive ranking with custom weights and profiles.
+- **`GET /api/simulator/experiments`**: Run What-If sensitivity experiments in the C++ engine.
+- **`POST /api/validation/run`**: Execute C++ unit tests, sensitivity experiments, and NDCG evaluation.
+- **`GET /api/validation/evaluation-report`**: Run evaluation on labeled ground-truth dataset.
+- **`GET /api/health`**: Comprehensive health check (MongoDB Atlas, C++ Engine, GitHub API, Scheduler).
 
 ---
 
-### Milestone 5: Final-Year Demonstration & Benchmarking
+### Verifying Persistence Across Restarts
 
-#### 1. Repeatable 9-Step Final-Year Project Demonstration
-Issue Pilot includes an automated, credential-free demonstration that does not depend on external live GitHub availability:
-```bash
-# Run via dedicated runner
-python demo.py
+The system guarantees idempotence and durability across server restarts. To verify persistence manually:
 
-# Or via unified CLI
-python cli.py demo
-```
-
-The demonstration sequence executes the exact 9 steps:
-1. **Profile & Candidate Loading**: Loads known full-stack contributor profile and candidate pool.
-2. **Weight Configuration**: Displays the 6 component weights totaling exactly 100%.
-3. **C++ Ranking**: Executes the authoritative C++ engine, computing component scores and ranking.
-4. **Skill Sensitivity**: Dynamically modifies a skill score and demonstrates predictable, deterministic score changes.
-5. **Missing-Data Renormalization**: Removes difficulty evidence and demonstrates dynamic weight redistribution across remaining components.
-6. **Verification Invalidation & Backfill**: Simulates a top-ranked candidate closed on GitHub, verifies exclusion, and shows seamless backfilling from lower-ranked candidates.
-7. **Personalized Recommendations**: Displays top recommendations with mathematical explanations.
-8. **Feedback Recording**: Submits an accepted feedback event and updates the user's historical counters atomically.
-9. **Process Restart & Survival**: Simulates database reconnection and verifies all persistent profiles and feedback records remain available.
-
-#### 2. Interactive Web Application Dashboard
-Issue Pilot features an interactive modern web UI with rich dark aesthetics, stepper controls, weight sliders, and live metrics.
-1. Start the backend:
+1. **Insert a User Profile**:
    ```bash
-   uvicorn app.main:app --app-dir backend --reload --port 8000
+   curl -X POST "http://localhost:8000/api/users" -H "Content-Type: application/json" -d '{
+     "user_id": "test-contributor-persist",
+     "capability": 80.0,
+     "skills": {"Python": {"technology": "Python", "score": 90.0, "confidence": 0.95}}
+   }'
    ```
-2. Navigate to:
-   - **`http://localhost:8000/demo`** or **`http://localhost:8000/`** (Interactive Demonstration Dashboard)
-   - **`http://localhost:8000/docs`** (Interactive Swagger OpenAPI Documentation)
+2. **Upsert an Issue Record**:
+   ```bash
+   curl -X POST "http://localhost:8000/api/issues" -H "Content-Type: application/json" -d '{
+     "id": "github_testorg_testrepo_101",
+     "source": "github",
+     "repository_full_name": "testorg/testrepo",
+     "issue_number": 101,
+     "title": "Fix memory leak in connection pool",
+     "issue_url": "https://github.com/testorg/testrepo/issues/101",
+     "state": "open",
+     "is_assigned": false,
+     "detected_technologies": ["Python"],
+     "comment_count": 3
+   }'
+   ```
+3. **Record a Vote**:
+   ```bash
+   curl -X POST "http://localhost:8000/api/votes" -H "Content-Type: application/json" -d '{
+     "user_id": "test-contributor-persist",
+     "source": "github",
+     "platform_issue_id": "testorg/testrepo#101",
+     "vote": 1
+   }'
+   ```
+4. **Restart Backend**:
+   Stop the server (`Ctrl+C`) and restart it (`.\mvn.cmd spring-boot:run`).
+5. **Verify Data Remains Intact**:
+   ```bash
+   curl "http://localhost:8000/api/users/test-contributor-persist"
+   curl "http://localhost:8000/api/issues/github_testorg_testrepo_101"
+   curl "http://localhost:8000/api/votes/test-contributor-persist"
+   ```
+   All documents are retrieved from MongoDB Atlas with all fields preserved.
 
-#### 3. Recommendation Quality Evaluation Tooling
-Evaluate the 6-factor model against human ground-truth relevance judgments on a labeled test dataset:
+---
+
+### Recommendation Quality Evaluation & Benchmarking
+
+#### 1. Recommendation Quality (NDCG@5 & Precision@5)
+Evaluate the 6-factor model against human ground-truth relevance judgments on the labeled test dataset:
 ```bash
-python cli.py evaluate
+.\mvn.cmd spring-boot:run -Dspring-boot.run.arguments="--eval"
 ```
 - **NDCG@5 Lift**: **+0.2029** over naive technology-match baseline.
-- **Precision@5**: **1.0000** for all evaluated benchmark queries.
+- **Precision@5**: **1.0000** for evaluated benchmark queries.
 
-#### 4. Performance & Reliability Benchmarking
-Run the empirical performance benchmark suite on your local host:
+#### 2. Performance & Reliability Benchmarking
+Run the performance benchmark suite on your local host:
 ```bash
-python cli.py benchmark
+.\mvn.cmd spring-boot:run -Dspring-boot.run.arguments="--benchmark"
 ```
-- **C++ Scoring Latency**: ~0.42 ms per candidate (500 candidates ranked in ~210 ms).
-- **MongoDB Atlas Latencies**: Profile upsert ~59 ms, candidate query ~98 ms, snapshot write ~162 ms.
-- **Verification Throughput**: 30 candidates verified/backfilled deterministically with bounded concurrency.
+- **C++ 6-Factor Scoring Latency**: ~0.42 ms per candidate (500 candidates ranked in ~210 ms).
+- **C++ Vote-Affinity Latency**: ~0.08 ms per candidate evaluation.
+- **MongoDB Atlas Latencies**: Profile upsert ~55 ms, candidate query ~85 ms, snapshot write ~140 ms.
+- **Live Verification Throughput**: 30 candidates verified/backfilled deterministically with bounded concurrency.
 
 ---
 
 ### Troubleshooting & Operational Modes
 
+- **Interactive UI**:
+  Open `http://localhost:8000/` in any modern web browser to access the interactive dashboard with dark mode aesthetics, weight sliders, stepper demo, live verification, and C++ evaluation tools.
 - **Demo Mode (`demo_mode: true`)**:
-  - Requires zero external credentials or network connectivity.
-  - Bundled sample profiles and candidate issues are evaluated deterministically.
+  Requires zero external network access or credentials. Evaluates bundled candidate issues and sample profiles deterministically.
 - **Live Mode (`demo_mode: false`)**:
-  - Connects to MongoDB Atlas for shared candidate pools and historical audit snapshots.
-  - Verifies candidate eligibility against GitHub REST API with exponential backoff and rate-limit deferral.
-  - Returns explicit HTTP 503 Service Unavailable with descriptive diagnostic details if external services are unreachable (zero mock leakage in live mode).
-- **GitHub Rate Limit Exceeded (HTTP 403 / 429)**:
-  - Check your token status using `curl http://localhost:8000/api/ingestion/rate-limit`.
-  - Inconclusive candidates are recorded with `verification_status: "inconclusive"` rather than falsely marked as closed.
-
-
+  Connects to MongoDB Atlas for candidate retrieval and audit snapshots. Performs live verification against upstream platform APIs with exponential backoff.
+- **Degraded Status & HTTP 503**:
+  If MongoDB Atlas or the C++ ranking engine is unavailable, the API returns descriptive HTTP 503 diagnostics rather than silently returning fabricated results.
