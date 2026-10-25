@@ -161,7 +161,16 @@ public class CodebergAdapter implements BaseIssueSourceAdapter {
     @Override
     public Map<String, Object> searchIssues(String query, int page, int perPage, String sort, String order) {
         try {
-            String encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8);
+            String cleanQuery = query != null ? query.trim() : "";
+            if (cleanQuery.contains("created_after:")) {
+                int idx = cleanQuery.indexOf("created_after:");
+                String rest = cleanQuery.substring(idx + 14).trim();
+                String datePart = rest.split("\\s+")[0];
+                cleanQuery = cleanQuery.replace("created_after:" + datePart, "").trim();
+            }
+            cleanQuery = cleanQuery.replaceAll("(?i)(is:issue|is:open|language:|in:title,body|label:\"[^\"]+\"|label:[^\\s]+)", "").trim();
+
+            String encodedQuery = URLEncoder.encode(cleanQuery, StandardCharsets.UTF_8);
             String url = String.format("%s/repos/issues/search?q=%s&page=%d&limit=%d&state=open&type=issues",
                     properties.getCodebergApiBaseUrl(), encodedQuery, page, perPage);
 

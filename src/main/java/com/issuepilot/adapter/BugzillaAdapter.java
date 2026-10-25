@@ -186,8 +186,20 @@ public class BugzillaAdapter implements BaseIssueSourceAdapter {
         checkLocalBudget();
         try {
             int offset = Math.max(0, (page - 1) * perPage);
-            String encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8);
-            String url = resolveEndpoint(String.format("bug?quicksearch=%s&limit=%d&offset=%d", encodedQuery, perPage, offset));
+            String cleanQuery = query != null ? query.trim() : "";
+            String creationTimeParam = "";
+            if (cleanQuery.contains("created_after:")) {
+                int idx = cleanQuery.indexOf("created_after:");
+                String rest = cleanQuery.substring(idx + 14).trim();
+                String datePart = rest.split("\\s+")[0];
+                creationTimeParam = "&creation_time=" + URLEncoder.encode(datePart, StandardCharsets.UTF_8);
+                cleanQuery = cleanQuery.replace("created_after:" + datePart, "").trim();
+            }
+            cleanQuery = cleanQuery.replaceAll("(?i)(is:issue|is:open|language:|in:title,body|label:\"[^\"]+\"|label:[^\\s]+)", "").trim();
+
+            String encodedQuery = URLEncoder.encode(cleanQuery, StandardCharsets.UTF_8);
+            String url = resolveEndpoint(String.format("bug?quicksearch=%s&bug_status=__open__%s&limit=%d&offset=%d",
+                    encodedQuery, creationTimeParam, perPage, offset));
 
             localRequestsUsed++;
             HttpRequest request = newRequestBuilder(url).GET().build();

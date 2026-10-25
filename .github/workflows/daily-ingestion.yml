@@ -1,0 +1,104 @@
+name: Issue Pilot Daily Ingestion
+
+on:
+  schedule:
+    # Run daily at 03:00 UTC
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      creation_age_days:
+        description: 'Creation age window in days (7 or 30)'
+        required: false
+        default: '30'
+        type: choice
+        options:
+          - '7'
+          - '30'
+      source:
+        description: 'Target platform source'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - 'all'
+          - 'github'
+          - 'gitlab'
+          - 'codeberg'
+          - 'bugzilla'
+      max_pages:
+        description: 'Max search pages per stack'
+        required: false
+        default: '2'
+      per_page:
+        description: 'Issues per page'
+        required: false
+        default: '15'
+      refresh_batch:
+        description: 'Batch size for refreshing open issues'
+        required: false
+        default: '50'
+
+jobs:
+  daily-ingestion:
+    name: Run Multi-Platform Daily Ingestion
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build Executable JAR
+        run: |
+          mvn clean package -DskipTests
+
+      - name: Run Standalone Ingestion Batch
+        env:
+          # Required database connection secret
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          # Platform credentials (token/apiKey optional or recommended depending on rate-limit needs)
+          GITHUB_TOKEN: ${{ secrets.PAT_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+          CODEBERG_TOKEN: ${{ secrets.CODEBERG_TOKEN }}
+          BUGZILLA_API_KEY: ${{ secrets.BUGZILLA_API_KEY }}
+          # Ingestion settings: disable internal recurring scheduler in CLI batch mode
+          SCHEDULER_ENABLED: "false"
+          INGESTION_ENABLED: "true"
+        run: |
+          DAYS="${{ inputs.creation_age_days || '30' }}"
+          SRC="${{ inputs.source || 'all' }}"
+          PAGES="${{ inputs.max_pages || '2' }}"
+          PER_PAGE="${{ inputs.per_page || '15' }}"
+          BATCH="${{ inputs.refresh_batch || '50' }}"
+
+          echo "Starting Issue Pilot daily ingestion batch (days=${DAYS}, source=${SRC}, pages=${PAGES}, per_page=${PER_PAGE}, refresh_batch=${BATCH})..."
+
+          java -Dspring.main.web-application-type=none \
+            -jar target/issue-pilot-*.jar \
+            --daily-ingestion \
+            --days="${DAYS}" \
+            --source="${SRC}" \
+            --pages="${PAGES}" \
+            --per-page="${PER_PAGE}" \
+            --refresh-batch="${BATCH}" | tee ingestion_output.txt
+
+      - name: Generate Summary Report
+        if: always()
+        run: |
+          echo "###  Issue Pilot Daily Ingestion Run" >> $GITHUB_STEP_SUMMARY
+          echo "- **Execution Mode**: Standalone CLI runner (non-web)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Platforms Targeted**: ${{ inputs.source || 'all' }} (GitHub, GitLab, Codeberg, Bugzilla)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Creation-Age Window**: ${{ inputs.creation_age_days || '30' }} days" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f ingestion_output.txt ]; then
+            echo "#### Execution Log Tail" >> $GITHUB_STEP_SUMMARY
+            echo '```json' >> $GITHUB_STEP_SUMMARY
+            grep -A 50 "DAILY INGESTION COMPLETE" ingestion_output.txt || tail -n 40 ingestion_output.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi

@@ -4,7 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.issuepilot.model.ContributorProfile;
 import org.bson.Document;
-import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.MongoOperations;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
@@ -14,10 +14,10 @@ import java.util.*;
 @Repository
 public class UserRepository {
 
-    private final MongoTemplate mongoTemplate;
+    private final MongoOperations mongoTemplate;
     private final ObjectMapper objectMapper;
 
-    public UserRepository(MongoTemplate mongoTemplate, ObjectMapper objectMapper) {
+    public UserRepository(MongoOperations mongoTemplate, ObjectMapper objectMapper) {
         this.mongoTemplate = mongoTemplate;
         this.objectMapper = objectMapper;
     }
@@ -122,5 +122,46 @@ public class UserRepository {
         if (mongoTemplate == null) return false;
         var res = mongoTemplate.getCollection("users").deleteOne(new Document("user_id", userId));
         return res.getDeletedCount() > 0;
+    }
+
+    public List<ContributorProfile> findActiveUsers(Instant since, int limit) {
+        if (mongoTemplate == null) return Collections.emptyList();
+        String sinceIso = DateTimeFormatter.ISO_INSTANT.format(since);
+
+        Document filter = new Document("$or", List.of(
+                new Document("last_active_at", new Document("$gte", sinceIso)),
+                new Document("$and", List.of(
+                        new Document("last_active_at", null),
+                        new Document("updated_at", new Document("$gte", sinceIso))
+                ))
+        ));
+
+        List<ContributorProfile> activeProfiles = new ArrayList<>();
+        var cursor = mongoTemplate.getCollection("users")
+                .find(filter)
+                .sort(new Document("updated_at", -1))
+                .limit(limit);
+
+        for (Document d : cursor) {
+            Map<String, Object> clean = cleanDoc(d);
+            if (clean != null) {
+                try {
+                    ContributorProfile p = objectMapper.convertValue(clean, ContributorProfile.class);
+                    activeProfiles.add(p);
+                } catch (Exception ignored) {}
+            }
+        }
+        return activeProfiles;
+    }
+
+    public Set<String> getActiveTechnologyPreferences(Instant since, int limit) {
+        List<ContributorProfile> users = findActiveUsers(since, limit);
+        Set<String> aggregated = new LinkedHashSet<>();
+        for (ContributorProfile user : users) {
+            if (user != null) {
+                aggregated.addAll(user.getNormalizedTechnologyPreferences());
+            }
+        }
+        return Collections.unmodifiableSet(aggregated);
     }
 }

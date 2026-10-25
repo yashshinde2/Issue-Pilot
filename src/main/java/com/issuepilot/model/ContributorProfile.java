@@ -4,8 +4,13 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import com.issuepilot.adapter.TechnologyDetectionHelper;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -141,5 +146,41 @@ public class ContributorProfile {
 
     public void setLastActiveAt(String lastActiveAt) {
         this.lastActiveAt = lastActiveAt;
+    }
+
+    public Set<String> getNormalizedTechnologyPreferences() {
+        Set<String> result = new LinkedHashSet<>();
+        if (skills != null) {
+            for (String s : skills.keySet()) {
+                String norm = TechnologyDetectionHelper.normalizeTechnology(s);
+                if (norm != null) result.add(norm);
+            }
+            for (ContributorSkill skill : skills.values()) {
+                if (skill != null && skill.getTechnology() != null) {
+                    String norm = TechnologyDetectionHelper.normalizeTechnology(skill.getTechnology());
+                    if (norm != null) result.add(norm);
+                }
+            }
+        }
+        if (preferences != null) {
+            List<String> prefKeys = List.of("technologies", "tech_stack", "preferred_technologies", "languages", "preferred_languages");
+            for (String key : prefKeys) {
+                Object val = preferences.get(key);
+                if (val instanceof List<?> list) {
+                    for (Object item : list) {
+                        if (item != null) {
+                            String norm = TechnologyDetectionHelper.normalizeTechnology(item.toString());
+                            if (norm != null) result.add(norm);
+                        }
+                    }
+                } else if (val instanceof String str) {
+                    for (String token : str.split("[,; ]+")) {
+                        String norm = TechnologyDetectionHelper.normalizeTechnology(token);
+                        if (norm != null) result.add(norm);
+                    }
+                }
+            }
+        }
+        return Collections.unmodifiableSet(result);
     }
 }

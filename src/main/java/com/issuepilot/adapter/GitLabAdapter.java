@@ -144,9 +144,20 @@ public class GitLabAdapter implements BaseIssueSourceAdapter {
     @Override
     public Map<String, Object> searchIssues(String query, int page, int perPage, String sort, String order) {
         try {
-            String encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8);
-            String url = String.format("%s/issues?scope=all&search=%s&page=%d&per_page=%d&order_by=updated_at&sort=%s",
-                    properties.getGitlabApiBaseUrl(), encodedQuery, page, perPage, order);
+            String cleanQuery = query != null ? query.trim() : "";
+            String createdAfterParam = "";
+            if (cleanQuery.contains("created_after:")) {
+                int idx = cleanQuery.indexOf("created_after:");
+                String rest = cleanQuery.substring(idx + 14).trim();
+                String datePart = rest.split("\\s+")[0];
+                createdAfterParam = "&created_after=" + URLEncoder.encode(datePart, StandardCharsets.UTF_8);
+                cleanQuery = cleanQuery.replace("created_after:" + datePart, "").trim();
+            }
+            cleanQuery = cleanQuery.replaceAll("(?i)(is:issue|is:open|language:|in:title,body|label:\"[^\"]+\"|label:[^\\s]+)", "").trim();
+
+            String encodedQuery = URLEncoder.encode(cleanQuery, StandardCharsets.UTF_8);
+            String url = String.format("%s/issues?scope=all&state=opened%s&search=%s&page=%d&per_page=%d&order_by=updated_at&sort=%s",
+                    properties.getGitlabApiBaseUrl(), createdAfterParam, encodedQuery, page, perPage, order);
 
             HttpRequest request = newRequestBuilder(url).GET().build();
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));

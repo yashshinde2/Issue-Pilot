@@ -1,7 +1,7 @@
 package com.issuepilot.repository;
 
 import org.bson.Document;
-import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.MongoOperations;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
@@ -13,9 +13,9 @@ import java.util.regex.Pattern;
 @Repository
 public class IssueRepository {
 
-    private final MongoTemplate mongoTemplate;
+    private final MongoOperations mongoTemplate;
 
-    public IssueRepository(MongoTemplate mongoTemplate) {
+    public IssueRepository(MongoOperations mongoTemplate) {
         this.mongoTemplate = mongoTemplate;
     }
 
@@ -78,7 +78,7 @@ public class IssueRepository {
         String source = map.getOrDefault("source", "github").toString().toLowerCase().trim();
         map.put("source", source);
 
-        String repoFullName = map.getOrDefault("repository_full_name", "").toString();
+        String repoFullName = map.get("repository_full_name") != null ? map.get("repository_full_name").toString().trim() : "";
         Object issueNumObj = map.get("issue_number");
         int issueNum = issueNumObj instanceof Number ? ((Number) issueNumObj).intValue() : 0;
 
@@ -88,13 +88,25 @@ public class IssueRepository {
 
         String issueId = (String) map.get("id");
         if (issueId == null || issueId.isBlank()) {
-            issueId = source + "_" + repoFullName.replace("/", "_") + "_" + issueNum;
-            map.put("id", issueId);
+            if ("bugzilla".equalsIgnoreCase(source)) {
+                String sourceInstance = map.getOrDefault("source_instance", "bugzilla").toString()
+                        .replace("/", "_").replace(":", "_").replace(".", "_");
+                if (issueNum > 0) {
+                    issueId = "bz_" + sourceInstance + "_" + issueNum;
+                }
+            } else if (!repoFullName.isBlank() && issueNum > 0) {
+                issueId = source + "_" + repoFullName.replace("/", "_") + "_" + issueNum;
+            }
+            if (issueId != null && !issueId.isBlank()) {
+                map.put("id", issueId);
+            }
         }
 
-        Document filter = new Document("source", source)
-                .append("repository_full_name", repoFullName)
-                .append("issue_number", issueNum);
+        if (issueId == null || issueId.isBlank()) {
+            throw new IllegalArgumentException("Cannot upsert issue without verified canonical identity (missing id/source/number).");
+        }
+
+        Document filter = new Document("id", issueId);
 
         Object existingCreatedAt = map.remove("created_at");
         Object existingFirstSeen = map.remove("first_seen_at");

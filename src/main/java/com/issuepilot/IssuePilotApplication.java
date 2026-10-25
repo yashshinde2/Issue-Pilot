@@ -17,6 +17,10 @@ public class IssuePilotApplication {
         // Load .env and atlas-credentials.env before Spring Boot initializes
         EnvLoader.loadEnv();
         logger.info("Starting Issue Pilot Spring Boot application...");
-        SpringApplication.run(IssuePilotApplication.class, args);
+        org.springframework.context.ConfigurableApplicationContext context = SpringApplication.run(IssuePilotApplication.class, args);
+        if (args != null && args.length > 0) {
+            int exitCode = SpringApplication.exit(context);
+            System.exit(exitCode);
+        }
     }
 }

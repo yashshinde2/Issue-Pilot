@@ -147,6 +147,9 @@ public class GitHubAdapter implements BaseIssueSourceAdapter {
     public Map<String, Object> searchIssues(String query, int page, int perPage, String sort, String order) {
         try {
             String fullQuery = query != null ? query.trim() : "";
+            if (!fullQuery.contains("is:open") && !fullQuery.contains("is:closed") && !fullQuery.contains("state:")) {
+                fullQuery = "is:open " + fullQuery;
+            }
             if (!fullQuery.contains("is:issue") && !fullQuery.contains("is:pr") && !fullQuery.contains("type:issue")) {
                 fullQuery = "is:issue " + fullQuery;
             }

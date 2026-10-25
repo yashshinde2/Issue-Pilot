@@ -128,6 +128,34 @@ public final class TechnologyDetectionHelper {
         return m;
     }
 
+    public static String normalizeTechnology(String input) {
+        if (input == null || input.isBlank()) return null;
+        String clean = input.trim().toLowerCase();
+        return switch (clean) {
+            case "py", "python", "python3" -> "Python";
+            case "ts", "typescript" -> "TypeScript";
+            case "js", "javascript", "node", "nodejs" -> "JavaScript";
+            case "react", "reactjs", "react.js" -> "React";
+            case "cpp", "c++", "cxx" -> "C++";
+            case "c" -> "C";
+            case "go", "golang" -> "Go";
+            case "rust", "rustlang" -> "Rust";
+            case "java", "jvm", "jdk" -> "Java";
+            case "spring", "springboot", "spring-boot" -> "Spring";
+            case "fastapi" -> "FastAPI";
+            case "flask" -> "Flask";
+            case "django" -> "Django";
+            case "mongodb", "mongo" -> "MongoDB";
+            case "postgres", "postgresql" -> "PostgreSQL";
+            case "docker" -> "Docker";
+            case "kubernetes", "k8s" -> "Kubernetes";
+            case "cmake" -> "CMake";
+            case "linux" -> "Linux";
+            case "docs", "documentation" -> "Documentation";
+            default -> capitalize(clean);
+        };
+    }
+
     public static String capitalize(String str) {
         if (str == null || str.isEmpty()) return str;
         if (str.equalsIgnoreCase("c++") || str.equalsIgnoreCase("cpp")) return "C++";

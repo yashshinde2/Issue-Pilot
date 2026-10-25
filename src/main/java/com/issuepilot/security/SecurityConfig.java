@@ -14,6 +14,8 @@ import org.springframework.security.oauth2.jwt.BadJwtException;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.web.SecurityFilterChain;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
+
 /**
  * Spring Security & OAuth2 Resource Server configuration for Issue Pilot.
  *
@@ -25,6 +27,7 @@ import org.springframework.security.web.SecurityFilterChain;
  * - Custom JSON responses for 401 Unauthorized and 403 Forbidden
  */
 @Configuration
+@ConditionalOnWebApplication
 @EnableWebSecurity
 @EnableMethodSecurity
 public class SecurityConfig {

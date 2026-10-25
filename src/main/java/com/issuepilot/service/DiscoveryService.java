@@ -2,36 +2,36 @@ package com.issuepilot.service;
 
 import com.issuepilot.adapter.AdapterRegistry;
 import com.issuepilot.adapter.BaseIssueSourceAdapter;
+import com.issuepilot.adapter.TechnologyDetectionHelper;
 import com.issuepilot.config.AppProperties;
 import com.issuepilot.config.MongoConfig;
 import com.issuepilot.repository.IssueRepository;
 import com.issuepilot.repository.JobRepository;
+import com.issuepilot.repository.UserRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 @Service
 public class DiscoveryService {
 
-    public record Topic(String id, String label, String query) {}
+    private static final Logger logger = LoggerFactory.getLogger(DiscoveryService.class);
 
-    public static final List<Topic> ROTATING_TOPICS = List.of(
-            new Topic("python", "Python", "language:Python"),
-            new Topic("typescript", "TypeScript", "language:TypeScript"),
-            new Topic("javascript", "JavaScript", "language:JavaScript"),
-            new Topic("react", "React", "react in:title,body"),
-            new Topic("cpp", "C++", "language:C++"),
-            new Topic("go", "Go", "language:Go"),
-            new Topic("rust", "Rust", "language:Rust"),
-            new Topic("java", "Java", "language:Java"),
-            new Topic("good_first_issue", "Good First Issue", "label:\"good first issue\""),
-            new Topic("help_wanted", "Help Wanted", "label:\"help wanted\""),
-            new Topic("bug", "Bugs", "label:bug"),
-            new Topic("documentation", "Docs", "label:documentation"),
-            new Topic("performance", "Performance", "label:performance"),
-            new Topic("security", "Security", "label:security")
+    public static final List<String> BASELINE_STACKS = List.of(
+            "Python",
+            "TypeScript",
+            "JavaScript",
+            "React",
+            "C++",
+            "Go",
+            "Rust",
+            "Java"
     );
 
     private final MongoConfig mongoConfig;
@@ -39,19 +39,22 @@ public class DiscoveryService {
     private final IssueRepository issueRepository;
     private final JobRepository jobRepository;
     private final AdapterRegistry adapterRegistry;
+    private final UserRepository userRepository;
 
     public DiscoveryService(
             MongoConfig mongoConfig,
             AppProperties properties,
             IssueRepository issueRepository,
             JobRepository jobRepository,
-            AdapterRegistry adapterRegistry
+            AdapterRegistry adapterRegistry,
+            UserRepository userRepository
     ) {
         this.mongoConfig = mongoConfig;
         this.properties = properties;
         this.issueRepository = issueRepository;
         this.jobRepository = jobRepository;
         this.adapterRegistry = adapterRegistry;
+        this.userRepository = userRepository;
     }
 
     public Map<String, Object> runDiscovery(
@@ -61,6 +64,18 @@ public class DiscoveryService {
             boolean resume,
             boolean force,
             String sourceFilter
+    ) {
+        return runDiscovery(maxIssuesToDiscover, maxPagesPerQuery, perPage, resume, force, sourceFilter, 30);
+    }
+
+    public Map<String, Object> runDiscovery(
+            Integer maxIssuesToDiscover,
+            Integer maxPagesPerQuery,
+            Integer perPage,
+            boolean resume,
+            boolean force,
+            String sourceFilter,
+            Integer creationAgeDays
     ) {
         String jobType = "discovery";
         String jobId = null;
@@ -86,6 +101,11 @@ public class DiscoveryService {
         int pagesPerQuery = (maxPagesPerQuery != null && maxPagesPerQuery > 0) ? maxPagesPerQuery : properties.getMaxSearchPagesPerRun();
         int itemsPerPage = (perPage != null && perPage > 0) ? perPage : properties.getPerPageCount();
 
+        int ageDays = (creationAgeDays != null && (creationAgeDays == 7 || creationAgeDays == 30)) ? creationAgeDays : 30;
+        Instant cutoffInstant = Instant.now().minus(Duration.ofDays(ageDays));
+        String cutoffIso = DateTimeFormatter.ISO_INSTANT.format(cutoffInstant);
+        String cutoffDate = DateTimeFormatter.ISO_LOCAL_DATE.format(cutoffInstant.atZone(ZoneOffset.UTC));
+
         long currentActivePool = 0;
         if (mongoConfig.isConnected()) {
             try {
@@ -104,11 +124,25 @@ public class DiscoveryService {
             summary.put("skipped_count", 0);
             summary.put("active_pool_size", currentActivePool);
             summary.put("target_pool_size", targetPoolSize);
+            summary.put("creation_age_days", ageDays);
             summary.put("note", "Candidate pool target reached; discovery halted.");
             if (mongoConfig.isConnected()) {
                 jobRepository.releaseJobLock(jobId, "completed", summary);
             }
             return summary;
+        }
+
+        // Deduplicate Baseline and Active-User Stack preferences
+        Set<String> targetStacks = new LinkedHashSet<>(BASELINE_STACKS);
+        if (mongoConfig.isConnected()) {
+            try {
+                Set<String> activeUserTechs = userRepository.getActiveTechnologyPreferences(Instant.now().minus(Duration.ofDays(30)), 100);
+                if (activeUserTechs != null) {
+                    targetStacks.addAll(activeUserTechs);
+                }
+            } catch (Exception e) {
+                logger.warn("Could not retrieve active-user technology preferences: {}", e.getMessage());
+            }
         }
 
         List<String> targetSources = new ArrayList<>();
@@ -122,6 +156,10 @@ public class DiscoveryService {
         int totalInserted = 0;
         int totalUpdated = 0;
         int totalSkipped = 0;
+        int totalFilteredState = 0;
+        int totalFilteredAge = 0;
+        int totalFilteredTech = 0;
+        int totalFilteredIdentity = 0;
         int totalSkippedDiversity = 0;
         List<String> errors = new ArrayList<>();
         Map<String, Map<String, Object>> perSourceSummary = new LinkedHashMap<>();
@@ -139,11 +177,18 @@ public class DiscoveryService {
             int srcInserted = 0;
             int srcUpdated = 0;
             int srcSkipped = 0;
+            int srcFilteredState = 0;
+            int srcFilteredAge = 0;
+            int srcFilteredTech = 0;
+            int srcFilteredIdentity = 0;
+            List<String> srcErrors = new ArrayList<>();
 
-            for (Topic topic : ROTATING_TOPICS) {
+            for (String stack : targetStacks) {
                 if (maxIssuesToDiscover != null && totalDiscovered >= maxIssuesToDiscover) {
                     break;
                 }
+
+                String query = buildPlatformQuery(src, stack, cutoffDate, cutoffIso);
 
                 for (int page = 1; page <= pagesPerQuery; page++) {
                     if (maxIssuesToDiscover != null && totalDiscovered >= maxIssuesToDiscover) {
@@ -151,7 +196,7 @@ public class DiscoveryService {
                     }
 
                     try {
-                        Map<String, Object> searchResult = adapter.searchIssues(topic.query(), page, itemsPerPage, "updated", "desc");
+                        Map<String, Object> searchResult = adapter.searchIssues(query, page, itemsPerPage, "updated", "desc");
                         @SuppressWarnings("unchecked")
                         List<Map<String, Object>> items = (List<Map<String, Object>>) searchResult.getOrDefault("items", Collections.emptyList());
 
@@ -167,7 +212,7 @@ public class DiscoveryService {
                             srcDiscovered++;
                             totalDiscovered++;
 
-                            Map<String, Object> queryInfo = Map.of("topic", topic.id(), "technology", topic.label());
+                            Map<String, Object> queryInfo = Map.of("topic", stack.toLowerCase(), "technology", stack);
                             Map<String, Object> normalized = adapter.normalizeIssue(item, queryInfo);
 
                             if (normalized == null) {
@@ -176,8 +221,53 @@ public class DiscoveryService {
                                 continue;
                             }
 
+                            // 1. Post-Retrieval Validation: Canonical Identity check
+                            String issueId = (String) normalized.get("id");
+                            if (issueId == null || issueId.isBlank()) {
+                                srcFilteredIdentity++;
+                                totalFilteredIdentity++;
+                                srcSkipped++;
+                                totalSkipped++;
+                                continue;
+                            }
+
+                            // 2. Post-Retrieval Validation: Open state check
+                            String state = (String) normalized.getOrDefault("state", "open");
+                            if (!"open".equalsIgnoreCase(state)) {
+                                srcFilteredState++;
+                                totalFilteredState++;
+                                srcSkipped++;
+                                totalSkipped++;
+                                continue;
+                            }
+
+                            // 3. Post-Retrieval Validation: Creation-age window check
+                            String createdAt = (String) normalized.get("created_at");
+                            if (createdAt != null && !createdAt.isBlank()) {
+                                try {
+                                    Instant createdInstant = Instant.parse(createdAt);
+                                    if (createdInstant.isBefore(cutoffInstant)) {
+                                        srcFilteredAge++;
+                                        totalFilteredAge++;
+                                        srcSkipped++;
+                                        totalSkipped++;
+                                        continue;
+                                    }
+                                } catch (Exception ignored) {}
+                            }
+
+                            // 4. Post-Retrieval Validation: Technology relevance check
+                            if (!isRelevanceMatch(normalized, stack)) {
+                                srcFilteredTech++;
+                                totalFilteredTech++;
+                                srcSkipped++;
+                                totalSkipped++;
+                                continue;
+                            }
+
+                            // Diversity check (max issues per repository)
                             String repoFullName = (String) normalized.get("repository_full_name");
-                            if (repoFullName != null && mongoConfig.isConnected()) {
+                            if (repoFullName != null && !repoFullName.isBlank() && mongoConfig.isConnected()) {
                                 long repoCount = issueRepository.countByRepository(repoFullName);
                                 if (repoCount >= maxPerRepo) {
                                     totalSkippedDiversity++;
@@ -187,6 +277,7 @@ public class DiscoveryService {
                                 }
                             }
 
+                            // Idempotent upsert
                             if (mongoConfig.isConnected()) {
                                 try {
                                     Map<String, Object> upserted = issueRepository.upsertIssue(normalized, true);
@@ -200,6 +291,7 @@ public class DiscoveryService {
                                 } catch (Exception e) {
                                     srcSkipped++;
                                     totalSkipped++;
+                                    srcErrors.add("Upsert failed for " + issueId + ": " + e.getMessage());
                                 }
                             } else {
                                 srcInserted++;
@@ -208,7 +300,9 @@ public class DiscoveryService {
                         }
 
                     } catch (Exception e) {
-                        errors.add(src + " query '" + topic.id() + "' page " + page + " failed: " + e.getMessage());
+                        String errMsg = src + " stack '" + stack + "' page " + page + " failed: " + e.getMessage();
+                        srcErrors.add(errMsg);
+                        errors.add(errMsg);
                         break;
                     }
                 }
@@ -219,21 +313,55 @@ public class DiscoveryService {
             srcStats.put("inserted", srcInserted);
             srcStats.put("updated", srcUpdated);
             srcStats.put("skipped", srcSkipped);
-            srcStats.put("status", srcDiscovered > 0 ? "completed" : "idle");
+            srcStats.put("filtered_state", srcFilteredState);
+            srcStats.put("filtered_age", srcFilteredAge);
+            srcStats.put("filtered_tech", srcFilteredTech);
+            srcStats.put("filtered_identity", srcFilteredIdentity);
+            srcStats.put("errors", srcErrors);
+            srcStats.put("rate_limit", adapter.getRateLimitState());
+
+            String srcStatus = "completed";
+            if (!srcErrors.isEmpty()) {
+                srcStatus = srcDiscovered > 0 ? "completed_with_errors" : "failed";
+            } else if (srcDiscovered == 0) {
+                srcStatus = "idle";
+            }
+            srcStats.put("status", srcStatus);
             perSourceSummary.put(src, srcStats);
         }
 
         long elapsedSec = (System.currentTimeMillis() - t0) / 1000;
         String nowIso = DateTimeFormatter.ISO_INSTANT.format(Instant.now());
 
+        // Overall status: Do not mark successful if a platform fails
+        boolean hasSourceFailure = perSourceSummary.values().stream()
+                .anyMatch(s -> "failed".equals(s.get("status")));
+        boolean hasSourcePartial = perSourceSummary.values().stream()
+                .anyMatch(s -> "completed_with_errors".equals(s.get("status")));
+
+        String overallStatus = "completed";
+        if (hasSourceFailure) {
+            overallStatus = totalDiscovered > 0 ? "partial_failure" : "failed";
+        } else if (hasSourcePartial || !errors.isEmpty()) {
+            overallStatus = "completed_with_errors";
+        }
+
         Map<String, Object> summary = new LinkedHashMap<>();
         summary.put("job_id", jobId);
         summary.put("job_type", "discovery");
-        summary.put("status", errors.isEmpty() ? "completed" : (totalDiscovered > 0 ? "completed_with_errors" : "failed"));
+        summary.put("status", overallStatus);
+        summary.put("creation_age_days", ageDays);
+        summary.put("cutoff_date", cutoffDate);
+        summary.put("target_stacks_count", targetStacks.size());
+        summary.put("target_stacks", new ArrayList<>(targetStacks));
         summary.put("discovered_count", totalDiscovered);
         summary.put("inserted_count", totalInserted);
         summary.put("updated_count", totalUpdated);
         summary.put("skipped_count", totalSkipped);
+        summary.put("filtered_state_count", totalFilteredState);
+        summary.put("filtered_age_count", totalFilteredAge);
+        summary.put("filtered_tech_count", totalFilteredTech);
+        summary.put("filtered_identity_count", totalFilteredIdentity);
         summary.put("skipped_diversity_count", totalSkippedDiversity);
         summary.put("duration_seconds", elapsedSec);
         summary.put("per_source_summary", perSourceSummary);
@@ -241,9 +369,50 @@ public class DiscoveryService {
         summary.put("finished_at", nowIso);
 
         if (mongoConfig.isConnected()) {
-            jobRepository.releaseJobLock(jobId, (String) summary.get("status"), summary);
+            jobRepository.releaseJobLock(jobId, overallStatus, summary);
         }
 
         return summary;
+    }
+
+    private String buildPlatformQuery(String source, String stack, String cutoffDate, String cutoffIso) {
+        String s = source.toLowerCase();
+        if ("github".equals(s)) {
+            if ("react".equalsIgnoreCase(stack)) {
+                return "react in:title,body created:>=" + cutoffDate + " is:open is:issue";
+            } else if ("c++".equalsIgnoreCase(stack)) {
+                return "language:C++ created:>=" + cutoffDate + " is:open is:issue";
+            } else {
+                return "language:" + stack + " created:>=" + cutoffDate + " is:open is:issue";
+            }
+        } else if ("gitlab".equals(s)) {
+            return stack.toLowerCase() + " created_after:" + cutoffIso;
+        } else if ("bugzilla".equals(s)) {
+            return stack.toLowerCase() + " created_after:" + cutoffDate;
+        } else {
+            // Codeberg / Forgejo & default
+            return stack.toLowerCase() + " created_after:" + cutoffIso;
+        }
+    }
+
+    private boolean isRelevanceMatch(Map<String, Object> normalized, String targetStack) {
+        if (targetStack == null || targetStack.isBlank()) return true;
+        String normTarget = TechnologyDetectionHelper.normalizeTechnology(targetStack);
+
+        @SuppressWarnings("unchecked")
+        List<String> detected = (List<String>) normalized.get("detected_technologies");
+        if (detected != null) {
+            for (String d : detected) {
+                String normD = TechnologyDetectionHelper.normalizeTechnology(d);
+                if (normTarget != null && normTarget.equalsIgnoreCase(normD)) {
+                    return true;
+                }
+            }
+        }
+
+        String title = (String) normalized.getOrDefault("title", "");
+        String body = (String) normalized.getOrDefault("body", "");
+        String combined = (title + " " + body).toLowerCase();
+        return combined.contains(targetStack.toLowerCase());
     }
 }

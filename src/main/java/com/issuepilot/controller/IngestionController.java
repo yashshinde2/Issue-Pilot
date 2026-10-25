@@ -70,10 +70,11 @@ public class IngestionController {
             @RequestParam(defaultValue = "15", name = "per_page") int perPage,
             @RequestParam(defaultValue = "true") boolean resume,
             @RequestParam(defaultValue = "false") boolean force,
-            @RequestParam(defaultValue = "all") String source
+            @RequestParam(defaultValue = "all") String source,
+            @RequestParam(required = false, name = "creation_age_days") Integer creationAgeDays
     ) {
         try {
-            Map<String, Object> result = discoveryService.runDiscovery(maxIssues, pagesPerQuery, perPage, resume, force, source);
+            Map<String, Object> result = discoveryService.runDiscovery(maxIssues, pagesPerQuery, perPage, resume, force, source, creationAgeDays);
             if ("locked".equals(result.get("status"))) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, (String) result.get("message"));
             }
