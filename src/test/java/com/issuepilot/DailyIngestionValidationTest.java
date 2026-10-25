@@ -3,12 +3,15 @@ package com.issuepilot;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.issuepilot.adapter.TechnologyDetectionHelper;
 import com.issuepilot.cli.IssuePilotCli;
+import com.issuepilot.config.AppProperties;
+import com.issuepilot.config.MongoConfig;
 import com.issuepilot.model.ContributorProfile;
 import com.issuepilot.model.ContributorSkill;
 import com.issuepilot.repository.IssueRepository;
 import com.issuepilot.repository.UserRepository;
 import com.issuepilot.service.DiscoveryService;
 import com.issuepilot.service.RefreshService;
+import com.issuepilot.service.StagingPreflightService;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
@@ -345,8 +348,12 @@ public class DailyIngestionValidationTest {
         refOk.put("status", "completed");
         RefreshService refService = new StubRefreshService(refOk);
 
-        IssuePilotCli cli = new IssuePilotCli(null, null, null, discService, refService, null, objectMapper);
-        cli.run("--daily-ingestion", "--days=30", "--source=all");
+        AppProperties testProps = new AppProperties();
+        MongoConfig mongoConfig = new MongoConfig(testProps);
+        StagingPreflightService preflightService = new StagingPreflightService(mongoConfig, testProps, objectMapper);
+
+        IssuePilotCli cli = new IssuePilotCli(null, null, null, discService, refService, null, preflightService, mongoConfig, objectMapper);
+        cli.run("--daily-ingestion", "--days=30", "--source=all", "--allow-production-write=true");
 
         assertEquals(1, cli.getExitCode(), "CLI exit code must be 1 on platform failure");
     }
@@ -363,11 +370,15 @@ public class DailyIngestionValidationTest {
         refOk.put("status", "completed");
         RefreshService refService = new StubRefreshService(refOk);
 
-        IssuePilotCli cli = new IssuePilotCli(null, null, null, discService, refService, null, objectMapper);
+        AppProperties testProps = new AppProperties();
+        MongoConfig mongoConfig = new MongoConfig(testProps);
+        StagingPreflightService preflightService = new StagingPreflightService(mongoConfig, testProps, objectMapper);
+
+        IssuePilotCli cli = new IssuePilotCli(null, null, null, discService, refService, null, preflightService, mongoConfig, objectMapper);
         cli.run("--help");
         assertEquals(0, cli.getExitCode());
 
-        cli.run("--daily-ingestion", "--days=7", "--source=github");
+        cli.run("--daily-ingestion", "--days=7", "--source=github", "--allow-production-write=true");
         assertEquals(0, cli.getExitCode());
     }
 }

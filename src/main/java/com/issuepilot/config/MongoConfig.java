@@ -70,7 +70,7 @@ public class MongoConfig {
             try {
                 this.mongoClient.getDatabase("admin").runCommand(new Document("ping", 1));
                 this.connected = true;
-                logger.info("Successfully connected to MongoDB Atlas database '{}'", properties.getMongodbDatabase());
+                logger.info("Successfully connected to MongoDB Atlas database '{}'", getEffectiveDatabaseName());
             } catch (Exception pingEx) {
                 logger.warn("Initial MongoDB ping failed: {}. Application will run in degraded/sample mode.", pingEx.getMessage());
                 this.connected = false;
@@ -83,6 +83,23 @@ public class MongoConfig {
         return this.mongoClient;
     }
 
+    public String getEffectiveDatabaseName() {
+        String rawUri = properties.getMongodbUri();
+        if (rawUri != null && !rawUri.isBlank()) {
+            try {
+                ConnectionString cs = new ConnectionString(rawUri);
+                if (cs.getDatabase() != null && !cs.getDatabase().isBlank()) {
+                    return cs.getDatabase();
+                }
+            } catch (Exception ignored) {}
+        }
+        String configuredDb = properties.getMongodbDatabase();
+        if (configuredDb != null && !configuredDb.isBlank()) {
+            return configuredDb;
+        }
+        return "issue_pilot";
+    }
+
     @Bean
     public MongoTemplate mongoTemplate() {
         if (this.mongoTemplate != null) {
@@ -90,10 +107,7 @@ public class MongoConfig {
         }
         MongoClient client = mongoClient();
         if (client != null) {
-            String dbName = properties.getMongodbDatabase();
-            if (dbName == null || dbName.isBlank()) {
-                dbName = "issue_pilot";
-            }
+            String dbName = getEffectiveDatabaseName();
             this.mongoTemplate = new MongoTemplate(new SimpleMongoClientDatabaseFactory(client, dbName));
         }
         return this.mongoTemplate;
@@ -119,7 +133,7 @@ public class MongoConfig {
         }
 
         try {
-            MongoDatabase db = mongoClient.getDatabase(properties.getMongodbDatabase());
+            MongoDatabase db = mongoClient.getDatabase(getEffectiveDatabaseName());
 
             // 1. issues collection indexes
             var issues = db.getCollection("issues");

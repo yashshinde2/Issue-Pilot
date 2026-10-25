@@ -1,11 +1,20 @@
 name: Issue Pilot Daily Ingestion
 
+# Production schedule is disabled until a separate, explicitly approved rollout plan exists.
+# on:
+#   schedule:
+#     - cron: '0 3 * * *'
+
 on:
-  schedule:
-    # Run daily at 03:00 UTC
-    - cron: '0 3 * * *'
   workflow_dispatch:
     inputs:
+      target_env:
+        description: 'Target environment (must be staging; production requires explicit separate rollout)'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - 'staging'
       creation_age_days:
         description: 'Creation age window in days (7 or 30)'
         required: false
@@ -37,6 +46,17 @@ on:
         description: 'Batch size for refreshing open issues'
         required: false
         default: '50'
+      require_isolated_cluster:
+        description: 'Require separate staging cluster host (fail-closed if on shared Atlas cluster)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+permissions:
+  contents: read
 
 jobs:
   daily-ingestion:
@@ -56,12 +76,54 @@ jobs:
 
       - name: Build Executable JAR
         run: |
+          set -euo pipefail
           mvn clean package -DskipTests
+
+      - name: Fail-Closed Staging Preflight Guard
+        env:
+          TARGET_ENV: ${{ inputs.target_env || 'staging' }}
+          STAGING_MONGODB_URI: ${{ secrets.STAGING_MONGODB_URI }}
+        run: |
+          set -euo pipefail
+          echo "================================================="
+          echo " Issue Pilot Staging Preflight Guard"
+          echo "================================================="
+
+          if [ "${TARGET_ENV}" != "staging" ]; then
+            echo "::error::Only 'staging' environment is authorized for this workflow. Production runs are strictly prohibited."
+            exit 1
+          fi
+
+          if [ -z "${STAGING_MONGODB_URI:-}" ]; then
+            echo "::error::STAGING_MONGODB_URI secret is missing or empty."
+            echo "::error::Staging runs require a dedicated STAGING_MONGODB_URI secret."
+            echo "::error::This workflow will NEVER silently fall back to MONGODB_URI."
+            exit 1
+          fi
+
+          echo "Staging environment authorized and STAGING_MONGODB_URI secret verified present."
+
+      - name: Audit Staging Isolation (Java Preflight)
+        env:
+          MONGODB_URI: ${{ secrets.STAGING_MONGODB_URI }}
+          MONGODB_DATABASE: "issue_pilot_staging"
+          REQUIRE_ISOLATED_CLUSTER: ${{ inputs.require_isolated_cluster || 'false' }}
+          SCHEDULER_ENABLED: "false"
+        run: |
+          set -euo pipefail
+          echo "Executing fail-closed Java staging isolation audit..."
+          java -Dspring.main.web-application-type=none \
+            -jar target/issue-pilot-*.jar \
+            --preflight-staging \
+            --require-isolated-cluster="${REQUIRE_ISOLATED_CLUSTER}"
 
       - name: Run Standalone Ingestion Batch
         env:
-          # Required database connection secret
-          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          # Required database connection secret: strictly staging
+          MONGODB_URI: ${{ secrets.STAGING_MONGODB_URI }}
+          MONGODB_DATABASE: "issue_pilot_staging"
+          TARGET_ENV: "staging"
+          REQUIRE_ISOLATED_CLUSTER: ${{ inputs.require_isolated_cluster || 'false' }}
           # Platform credentials (token/apiKey optional or recommended depending on rate-limit needs)
           GITHUB_TOKEN: ${{ secrets.PAT_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
@@ -71,27 +133,38 @@ jobs:
           SCHEDULER_ENABLED: "false"
           INGESTION_ENABLED: "true"
         run: |
+          set -euo pipefail
           DAYS="${{ inputs.creation_age_days || '30' }}"
           SRC="${{ inputs.source || 'all' }}"
           PAGES="${{ inputs.max_pages || '2' }}"
           PER_PAGE="${{ inputs.per_page || '15' }}"
           BATCH="${{ inputs.refresh_batch || '50' }}"
+          REQ_ISOLATED="${{ inputs.require_isolated_cluster || 'false' }}"
 
-          echo "Starting Issue Pilot daily ingestion batch (days=${DAYS}, source=${SRC}, pages=${PAGES}, per_page=${PER_PAGE}, refresh_batch=${BATCH})..."
+          echo "Starting Issue Pilot daily ingestion batch (target_env=staging, days=${DAYS}, source=${SRC}, pages=${PAGES}, per_page=${PER_PAGE}, refresh_batch=${BATCH})..."
 
           java -Dspring.main.web-application-type=none \
             -jar target/issue-pilot-*.jar \
             --daily-ingestion \
+            --target-env=staging \
+            --require-isolated-cluster="${REQ_ISOLATED}" \
             --days="${DAYS}" \
             --source="${SRC}" \
             --pages="${PAGES}" \
             --per-page="${PER_PAGE}" \
             --refresh-batch="${BATCH}" | tee ingestion_output.txt
 
+          PIPE_STATUS="${PIPESTATUS[0]}"
+          if [ "${PIPE_STATUS}" -ne 0 ]; then
+            echo "Ingestion command failed with exit status ${PIPE_STATUS}"
+            exit "${PIPE_STATUS}"
+          fi
+
       - name: Generate Summary Report
         if: always()
         run: |
-          echo "###  Issue Pilot Daily Ingestion Run" >> $GITHUB_STEP_SUMMARY
+          echo "### Issue Pilot Daily Ingestion Run" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target Environment**: ${{ inputs.target_env || 'staging' }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Execution Mode**: Standalone CLI runner (non-web)" >> $GITHUB_STEP_SUMMARY
           echo "- **Platforms Targeted**: ${{ inputs.source || 'all' }} (GitHub, GitLab, Codeberg, Bugzilla)" >> $GITHUB_STEP_SUMMARY
           echo "- **Creation-Age Window**: ${{ inputs.creation_age_days || '30' }} days" >> $GITHUB_STEP_SUMMARY
