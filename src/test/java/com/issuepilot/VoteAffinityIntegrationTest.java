@@ -272,7 +272,7 @@ public class VoteAffinityIntegrationTest {
         assertTrue(scoreCpp < 10.0, "Unrelated C++ candidate should have minimal affinity");
 
         System.out.println("[TEST] C++ affinity evaluation and grounded explanations verified successfully: " +
-                "Python affinity = " + scorePy + ", C++ affinity = " + scoreCpp);
+                "Python-candidate affinity = " + scorePy + ", C++-candidate affinity = " + scoreCpp);
     }
 
     @Test
