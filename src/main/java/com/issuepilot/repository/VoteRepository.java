@@ -1,6 +1,5 @@
 package com.issuepilot.repository;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.issuepilot.model.IssueVote;
 import com.mongodb.client.model.IndexOptions;

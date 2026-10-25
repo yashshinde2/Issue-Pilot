@@ -62,34 +62,26 @@ public class VoteAffinityEvaluationTest {
 
         // Scenario 1: Dense votes (User likes Python/Backend, dislikes Frontend/UI)
         for (int i = 1; i <= 3; i++) {
-            VoteController.VoteRequest vLike = new VoteController.VoteRequest();
-            vLike.user_id = EVAL_USER_DENSE;
-            vLike.source = "github";
-            vLike.platform_issue_id = "liked_dense_" + i;
-            vLike.vote = 1;
-            vLike.feature_snapshot = Map.of(
+            com.issuepilot.model.IssueVote vLike = new com.issuepilot.model.IssueVote(EVAL_USER_DENSE, "github", "liked_dense_" + i, 1);
+            vLike.setFeatureSnapshot(Map.of(
                     "technologies", List.of("Python", "FastAPI"),
                     "labels", List.of("backend", "performance"),
                     "issue_type", "enhancement",
                     "difficulty", 50.0 + (i * 5),
                     "difficulty_available", true
-            );
-            voteController.recordVote(vLike);
+            ));
+            voteRepository.recordVote(vLike);
         }
 
-        VoteController.VoteRequest vDislike = new VoteController.VoteRequest();
-        vDislike.user_id = EVAL_USER_DENSE;
-        vDislike.source = "github";
-        vDislike.platform_issue_id = "disliked_dense_1";
-        vDislike.vote = -1;
-        vDislike.feature_snapshot = Map.of(
+        com.issuepilot.model.IssueVote vDislike = new com.issuepilot.model.IssueVote(EVAL_USER_DENSE, "github", "disliked_dense_1", -1);
+        vDislike.setFeatureSnapshot(Map.of(
                 "technologies", List.of("React", "CSS"),
                 "labels", List.of("frontend", "ui"),
                 "issue_type", "bug",
                 "difficulty", 30.0,
                 "difficulty_available", true
-        );
-        voteController.recordVote(vDislike);
+        ));
+        voteRepository.recordVote(vDislike);
 
         // Candidate Pool for Dense User
         Map<String, Object> candPython = Map.of(
@@ -160,15 +152,11 @@ public class VoteAffinityEvaluationTest {
         assertTrue(pyConf > 0.3, "Confidence should reflect multiple pieces of evidence");
 
         // Scenario 2: Sparse Vote Case (Only 1 weak like)
-        VoteController.VoteRequest vSparse = new VoteController.VoteRequest();
-        vSparse.user_id = EVAL_USER_SPARSE;
-        vSparse.source = "github";
-        vSparse.platform_issue_id = "liked_sparse_1";
-        vSparse.vote = 1;
-        vSparse.feature_snapshot = Map.of(
+        com.issuepilot.model.IssueVote vSparse = new com.issuepilot.model.IssueVote(EVAL_USER_SPARSE, "github", "liked_sparse_1", 1);
+        vSparse.setFeatureSnapshot(Map.of(
                 "technologies", List.of("Python")
-        );
-        voteController.recordVote(vSparse);
+        ));
+        voteRepository.recordVote(vSparse);
 
         VoteController.AffinityEvaluationRequest sparseReq = new VoteController.AffinityEvaluationRequest();
         sparseReq.user_id = EVAL_USER_SPARSE;
@@ -184,21 +172,13 @@ public class VoteAffinityEvaluationTest {
         assertTrue(sparsePyConf < pyConf, "Sparse vote history must produce lower confidence than dense history");
 
         // Scenario 3: Conflicting Vote Case (Equal like & dislike on identical feature signatures)
-        VoteController.VoteRequest vConf1 = new VoteController.VoteRequest();
-        vConf1.user_id = EVAL_USER_CONFLICT;
-        vConf1.source = "github";
-        vConf1.platform_issue_id = "conf_1";
-        vConf1.vote = 1;
-        vConf1.feature_snapshot = Map.of("technologies", List.of("Rust"), "labels", List.of("compiler"));
-        voteController.recordVote(vConf1);
+        com.issuepilot.model.IssueVote vConf1 = new com.issuepilot.model.IssueVote(EVAL_USER_CONFLICT, "github", "conf_1", 1);
+        vConf1.setFeatureSnapshot(Map.of("technologies", List.of("Rust"), "labels", List.of("compiler")));
+        voteRepository.recordVote(vConf1);
 
-        VoteController.VoteRequest vConf2 = new VoteController.VoteRequest();
-        vConf2.user_id = EVAL_USER_CONFLICT;
-        vConf2.source = "github";
-        vConf2.platform_issue_id = "conf_2";
-        vConf2.vote = -1;
-        vConf2.feature_snapshot = Map.of("technologies", List.of("Rust"), "labels", List.of("compiler"));
-        voteController.recordVote(vConf2);
+        com.issuepilot.model.IssueVote vConf2 = new com.issuepilot.model.IssueVote(EVAL_USER_CONFLICT, "github", "conf_2", -1);
+        vConf2.setFeatureSnapshot(Map.of("technologies", List.of("Rust"), "labels", List.of("compiler")));
+        voteRepository.recordVote(vConf2);
 
         Map<String, Object> candRust = Map.of(
                 "id", "cand_rust",

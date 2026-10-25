@@ -8,11 +8,14 @@ import com.issuepilot.model.RankingWeights;
 import com.issuepilot.repository.IssueRepository;
 import com.issuepilot.repository.RecommendationRepository;
 import com.issuepilot.repository.UserRepository;
+import com.issuepilot.security.UserIdentityResolver;
 import com.issuepilot.service.CppRankingClient;
 import com.issuepilot.service.LiveVerifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -35,6 +38,7 @@ public class RecommendationController {
     private final LiveVerifier liveVerifier;
     private final SimulatorController simulatorController;
     private final ObjectMapper objectMapper;
+    private final UserIdentityResolver userIdentityResolver;
 
     public RecommendationController(
             MongoConfig mongoConfig,
@@ -45,7 +49,8 @@ public class RecommendationController {
             CppRankingClient cppRankingClient,
             LiveVerifier liveVerifier,
             SimulatorController simulatorController,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            UserIdentityResolver userIdentityResolver
     ) {
         this.mongoConfig = mongoConfig;
         this.properties = properties;
@@ -56,6 +61,7 @@ public class RecommendationController {
         this.liveVerifier = liveVerifier;
         this.simulatorController = simulatorController;
         this.objectMapper = objectMapper;
+        this.userIdentityResolver = userIdentityResolver;
     }
 
     public static class RecommendationRequest {
@@ -76,8 +82,36 @@ public class RecommendationController {
         public Integer max_retries;
     }
 
+    private String resolveActingUserId(Authentication auth, String suppliedUserId) {
+        if (auth != null && auth.isAuthenticated() && !"anonymousUser".equals(auth.getPrincipal())) {
+            String id = userIdentityResolver.resolveUserId(auth);
+            if (id != null) return id;
+        }
+        Authentication secAuth = SecurityContextHolder.getContext().getAuthentication();
+        if (secAuth != null && secAuth.isAuthenticated() && !"anonymousUser".equals(secAuth.getPrincipal())) {
+            String id = userIdentityResolver.resolveUserId(secAuth);
+            if (id != null) return id;
+        }
+        return suppliedUserId;
+    }
+
     @PostMapping("/personalized")
-    public Map<String, Object> getPersonalizedRecommendations(@RequestBody RecommendationRequest req) {
+    public Map<String, Object> getPersonalizedRecommendations(
+            @RequestBody RecommendationRequest req,
+            Authentication authentication
+    ) {
+        if (req == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Request body is required.");
+        }
+
+        String actingUserId = resolveActingUserId(authentication, req.user_id);
+        if (actingUserId != null && !actingUserId.isBlank()) {
+            if (req.user_id != null && !req.user_id.isBlank() && !req.user_id.equals(actingUserId)) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied: Cannot request personalized recommendations for another user.");
+            }
+            req.user_id = actingUserId;
+        }
+
         boolean isLive = !req.demo_mode && req.prefer_live_atlas;
 
         if (isLive && !mongoConfig.isConnected()) {
@@ -218,6 +252,7 @@ public class RecommendationController {
         Map<String, Object> metrics = backfillResult.getMetrics();
 
         // 5. Save Audit Snapshots to MongoDB Atlas for Idempotency and Reproducibility
+        // Note: Demo mode is strictly isolated and does NOT persist recommendations to Atlas
         String nowIso = DateTimeFormatter.ISO_INSTANT.format(Instant.now());
         String runId = req.run_id != null && !req.run_id.isBlank()
                 ? req.run_id
@@ -264,8 +299,14 @@ public class RecommendationController {
     @GetMapping("/snapshots/{userId}")
     public Map<String, Object> getUserSnapshots(
             @PathVariable String userId,
-            @RequestParam(defaultValue = "10") int limit
+            @RequestParam(defaultValue = "10") int limit,
+            Authentication authentication
     ) {
+        String actingUserId = resolveActingUserId(authentication, userId);
+        if (actingUserId != null && !actingUserId.equals(userId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied: Cannot view recommendation snapshots for another user.");
+        }
+
         if (!mongoConfig.isConnected()) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "MongoDB Atlas is unavailable.");
         }
@@ -312,5 +353,14 @@ public class RecommendationController {
         } catch (Exception e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage());
         }
+    }
+
+    // Convenience overloads for direct Java invocations
+    public Map<String, Object> getPersonalizedRecommendations(RecommendationRequest req) {
+        return getPersonalizedRecommendations(req, null);
+    }
+
+    public Map<String, Object> getUserSnapshots(String userId, int limit) {
+        return getUserSnapshots(userId, limit, null);
     }
 }

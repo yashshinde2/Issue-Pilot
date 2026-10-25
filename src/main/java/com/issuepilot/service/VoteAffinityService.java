@@ -148,23 +148,16 @@ public class VoteAffinityService {
         IssueVote vote = new IssueVote(userId, source, platformIssueId, voteValue);
         vote.setRecommendationRunId(recommendationRunId);
 
-        // If snapshot not supplied, try resolving from database
-        if (featureSnapshot != null && !featureSnapshot.isEmpty()) {
-            vote.setFeatureSnapshot(featureSnapshot);
-        } else {
-            try {
-                // Try looking up candidate by id
-                String compositeId = source + "_" + platformIssueId;
-                Map<String, Object> recordMap = issueRepository.getIssueById(compositeId);
-                if (recordMap != null) {
-                    IssueRecord record = objectMapper.convertValue(recordMap, IssueRecord.class);
-                    if (record != null) {
-                        vote.setFeatureSnapshot(extractFeatureSnapshot(record));
-                    }
-                }
-            } catch (Exception ignored) {
-            }
+        // Stage 1 Security Decision 6:
+        // Ignore client-supplied feature snapshots. Build them from trusted server-side issue data.
+        // Reject votes when the canonical issue record cannot be resolved.
+        Map<String, Object> recordMap = issueRepository.findIssue(source, platformIssueId);
+        if (recordMap == null) {
+            throw new IllegalArgumentException("Canonical issue record cannot be resolved for source '" + source
+                    + "' and issue '" + platformIssueId + "'. Votes can only be recorded on catalog issues.");
         }
+        IssueRecord record = objectMapper.convertValue(recordMap, IssueRecord.class);
+        vote.setFeatureSnapshot(extractFeatureSnapshot(record));
 
         return voteRepository.recordVote(vote);
     }

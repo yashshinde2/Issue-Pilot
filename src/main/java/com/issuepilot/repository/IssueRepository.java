@@ -34,6 +34,39 @@ public class IssueRepository {
         return cleanDoc(doc);
     }
 
+    public Map<String, Object> findIssue(String source, String platformIssueId) {
+        if (mongoTemplate == null || platformIssueId == null || platformIssueId.isBlank()) return null;
+
+        var collection = mongoTemplate.getCollection("issues");
+
+        // 1. Direct match by id
+        Document doc = collection.find(new Document("id", platformIssueId)).first();
+        if (doc != null) return cleanDoc(doc);
+
+        if (source != null && !source.isBlank()) {
+            String normSource = source.toLowerCase().trim();
+            // 2. Composite ID: source_platformIssueId
+            doc = collection.find(new Document("id", normSource + "_" + platformIssueId)).first();
+            if (doc != null) return cleanDoc(doc);
+
+            // 3. Search by source and native_id, source_issue_id, or issue_number
+            List<Document> orFilters = new ArrayList<>();
+            orFilters.add(new Document("id", platformIssueId));
+            orFilters.add(new Document("native_id", platformIssueId));
+            orFilters.add(new Document("source_issue_id", platformIssueId));
+            try {
+                int issueNum = Integer.parseInt(platformIssueId);
+                orFilters.add(new Document("issue_number", issueNum));
+            } catch (NumberFormatException ignored) {}
+
+            Document query = new Document("source", normSource).append("$or", orFilters);
+            doc = collection.find(query).first();
+            if (doc != null) return cleanDoc(doc);
+        }
+
+        return null;
+    }
+
     public Map<String, Object> upsertIssue(Map<String, Object> issueMap, boolean preserveUnsupplied) {
         if (mongoTemplate == null) {
             throw new IllegalStateException("MongoDB Atlas connection unavailable.");

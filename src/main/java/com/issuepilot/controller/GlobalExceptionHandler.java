@@ -44,6 +44,24 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(body, HttpStatus.SERVICE_UNAVAILABLE);
     }
 
+    @ExceptionHandler(SecurityException.class)
+    public ResponseEntity<Map<String, Object>> handleSecurityException(SecurityException ex) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("detail", ex.getMessage());
+        body.put("message", ex.getMessage());
+        body.put("status", HttpStatus.FORBIDDEN.value());
+        return new ResponseEntity<>(body, HttpStatus.FORBIDDEN);
+    }
+
+    @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class)
+    public ResponseEntity<Map<String, Object>> handleAccessDenied(org.springframework.security.access.AccessDeniedException ex) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("detail", ex.getMessage());
+        body.put("message", ex.getMessage());
+        body.put("status", HttpStatus.FORBIDDEN.value());
+        return new ResponseEntity<>(body, HttpStatus.FORBIDDEN);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> handleGeneralException(Exception ex) {
         logger.error("Unhandled server exception: {}", ex.getMessage(), ex);

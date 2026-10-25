@@ -39,11 +39,90 @@ public class VoteAffinityIntegrationTest {
     @Autowired
     private VoteController voteController;
 
+    @Autowired
+    private com.issuepilot.repository.IssueRepository issueRepository;
+
     private static final String TEST_USER_1 = "synthetic_user_alpha";
     private static final String TEST_USER_2 = "synthetic_user_beta";
 
     @BeforeEach
+    public void setupTestCatalogIssues() {
+        cleanupTestVotes();
+
+        // Register synthetic catalog issues in MongoDB Atlas for server-side snapshot reconstruction
+        Map<String, Object> synth101 = new LinkedHashMap<>();
+        synth101.put("id", "github_test-org_test-repo_101");
+        synth101.put("source", "github");
+        synth101.put("source_issue_id", "synth_101");
+        synth101.put("native_id", "synth_101");
+        synth101.put("issue_number", 101);
+        synth101.put("repository_full_name", "web-frameworks/django");
+        synth101.put("repository_language", "Python");
+        synth101.put("title", "Synthetic Django Web Framework Issue");
+        synth101.put("detected_technologies", List.of("Python", "Django", "FastAPI"));
+        synth101.put("labels", List.of("api", "backend", "enhancement"));
+        synth101.put("discovery_category", "feature");
+        synth101.put("issue_url", "https://github.com/web-frameworks/django/issues/101");
+        Map<String, Object> diff = Map.of(
+                "scope_change_size", 60.0,
+                "technical_complexity", 60.0,
+                "historical_effort", 60.0,
+                "dependency_arch_impact", 60.0,
+                "coordination_complexity", 60.0
+        );
+        synth101.put("difficulty_evidence", diff);
+        issueRepository.upsertIssue(synth101, false);
+
+        Map<String, Object> synthConcurrent = new LinkedHashMap<>();
+        synthConcurrent.put("id", "github_test-org_test-repo_102");
+        synthConcurrent.put("source", "github");
+        synthConcurrent.put("source_issue_id", "synth_concurrent_101");
+        synthConcurrent.put("native_id", "synth_concurrent_101");
+        synthConcurrent.put("issue_number", 102);
+        synthConcurrent.put("repository_full_name", "web-frameworks/django");
+        synthConcurrent.put("repository_language", "Python");
+        synthConcurrent.put("title", "Synthetic Concurrent Update Issue");
+        synthConcurrent.put("detected_technologies", List.of("Python", "FastAPI"));
+        synthConcurrent.put("labels", List.of("backend", "concurrency"));
+        synthConcurrent.put("discovery_category", "bug");
+        synthConcurrent.put("issue_url", "https://github.com/web-frameworks/django/issues/102");
+        synthConcurrent.put("difficulty_evidence", diff);
+        issueRepository.upsertIssue(synthConcurrent, false);
+
+        Map<String, Object> synthDense = new LinkedHashMap<>();
+        synthDense.put("id", "github_test-org_test-repo_103");
+        synthDense.put("source", "github");
+        synthDense.put("source_issue_id", "synth_dense_1");
+        synthDense.put("native_id", "synth_dense_1");
+        synthDense.put("issue_number", 103);
+        synthDense.put("repository_full_name", "web-frameworks/django");
+        synthDense.put("repository_language", "Python");
+        synthDense.put("title", "Synthetic Dense Feature Issue");
+        synthDense.put("detected_technologies", List.of("Python", "Django"));
+        synthDense.put("labels", List.of("backend", "orm"));
+        synthDense.put("discovery_category", "enhancement");
+        synthDense.put("issue_url", "https://github.com/web-frameworks/django/issues/103");
+        Map<String, Object> diff75 = Map.of(
+                "scope_change_size", 75.0,
+                "technical_complexity", 75.0,
+                "historical_effort", 75.0,
+                "dependency_arch_impact", 75.0,
+                "coordination_complexity", 75.0
+        );
+        synthDense.put("difficulty_evidence", diff75);
+        issueRepository.upsertIssue(synthDense, false);
+    }
+
     @AfterEach
+    public void cleanupTestCatalogIssues() {
+        cleanupTestVotes();
+        try {
+            issueRepository.deleteIssue("github_test-org_test-repo_101");
+            issueRepository.deleteIssue("github_test-org_test-repo_102");
+            issueRepository.deleteIssue("github_test-org_test-repo_103");
+        } catch (Exception ignored) {}
+    }
+
     public void cleanupTestVotes() {
         // Clean up only our synthetic test users to prevent polluting database
         try {
@@ -51,6 +130,8 @@ public class VoteAffinityIntegrationTest {
             voteRepository.removeVote(TEST_USER_1, "github", "synth_102");
             voteRepository.removeVote(TEST_USER_2, "github", "synth_101");
             voteRepository.removeVote(TEST_USER_1, "bugzilla", "synth_bz_1");
+            voteRepository.removeVote(TEST_USER_1, "github", "synth_concurrent_101");
+            voteRepository.removeVote(TEST_USER_1, "github", "synth_dense_1");
         } catch (Exception ignored) {}
     }
 
