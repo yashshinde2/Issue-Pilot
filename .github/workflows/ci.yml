@@ -36,7 +36,9 @@ jobs:
         cmake --build ranking_engine/build --config Release
         chmod +x ranking_engine/build/issue_pilot_ranking_engine || true
         chmod +x ranking_engine/build/test_ranking || true
+        chmod +x ranking_engine/build/test_affinity || true
         ./ranking_engine/build/test_ranking
+        ./ranking_engine/build/test_affinity
 
     - name: Set up JDK 21
       uses: actions/setup-java@v4

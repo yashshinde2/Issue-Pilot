@@ -11,6 +11,7 @@ add_library(ranking_engine_lib STATIC
     src/ranking_engine.cpp
     src/evaluation.cpp
     src/json_adapter.cpp
+    src/vote_affinity.cpp
 )
 
 add_executable(issue_pilot_ranking_engine
@@ -23,5 +24,11 @@ add_executable(test_ranking
 )
 target_link_libraries(test_ranking PRIVATE ranking_engine_lib)
 
+add_executable(test_affinity
+    tests/test_affinity.cpp
+)
+target_link_libraries(test_affinity PRIVATE ranking_engine_lib)
+
 enable_testing()
 add_test(NAME UnitTests COMMAND test_ranking)
+add_test(NAME AffinityTests COMMAND test_affinity)

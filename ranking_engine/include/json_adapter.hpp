@@ -2,6 +2,7 @@
 
 #include "types.hpp"
 #include "ranking_engine.hpp"
+#include "vote_affinity.hpp"
 #include <string>
 #include <vector>
 
@@ -20,6 +21,18 @@ public:
     static std::string serialize_results(const std::vector<RankingResult>& results,
                                          const RankingWeights& weights,
                                          const std::string& model_version);
+
+    // Parse affinity evaluation payload containing candidate issues and user vote records
+    static bool parse_affinity_request(const std::string& json_str,
+                                       std::vector<CandidateIssue>& out_candidates,
+                                       std::vector<IssueVoteRecord>& out_votes,
+                                       AffinityWeights& out_weights,
+                                       std::string& out_error);
+
+    // Serialize affinity results to JSON
+    static std::string serialize_affinity_results(const std::vector<AffinityResult>& results,
+                                                  const AffinityWeights& weights,
+                                                  const std::string& model_version);
 
     // Serialize what-if experiments output to JSON
     static std::string serialize_experiments_json();

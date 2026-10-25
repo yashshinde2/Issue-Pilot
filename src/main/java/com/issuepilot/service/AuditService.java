@@ -36,7 +36,7 @@ public class AuditService {
 
         // Collection counts
         Map<String, Long> counts = new LinkedHashMap<>();
-        for (String col : List.of("issues", "users", "recommendations", "feedback", "jobs")) {
+        for (String col : List.of("issues", "users", "recommendations", "feedback", "jobs", "issue_votes")) {
             try {
                 counts.put(col, database.getCollection(col).countDocuments());
             } catch (Exception e) {

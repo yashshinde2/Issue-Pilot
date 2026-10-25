@@ -717,4 +717,231 @@ std::string JsonAdapter::serialize_experiments_json() {
     return ss.str();
 }
 
+static FeatureProfile parse_feature_profile(const JsonValue& obj) {
+    FeatureProfile fp;
+    fp.source = obj.get("source").as_str();
+    fp.platform_issue_id = obj.has("platform_issue_id") ? obj.get("platform_issue_id").as_str() : obj.get("source_issue_id").as_str();
+    if (fp.platform_issue_id.empty() && obj.has("issue_number") && obj.get("issue_number").as_int() > 0) {
+        fp.platform_issue_id = std::to_string(obj.get("issue_number").as_int());
+    }
+    fp.repository_full_name = obj.get("repository_full_name").as_str();
+
+    // Technologies
+    if (obj.has("technologies") && obj.get("technologies").type == JsonValue::V_ARR) {
+        for (const auto& t : obj.get("technologies").arr_val) {
+            if (t.type == JsonValue::V_STR) {
+                fp.technologies.push_back(t.as_str());
+            } else if (t.type == JsonValue::V_OBJ && t.has("technology")) {
+                fp.technologies.push_back(t.get("technology").as_str());
+            }
+        }
+    }
+    if (obj.has("detected_technologies") && obj.get("detected_technologies").type == JsonValue::V_ARR) {
+        for (const auto& t : obj.get("detected_technologies").arr_val) {
+            fp.technologies.push_back(t.as_str());
+        }
+    }
+
+    // Labels
+    if (obj.has("labels") && obj.get("labels").type == JsonValue::V_ARR) {
+        for (const auto& l : obj.get("labels").arr_val) {
+            fp.labels.push_back(l.as_str());
+        }
+    }
+
+    // Issue type
+    if (obj.has("issue_type") && !obj.get("issue_type").as_str().empty()) {
+        fp.issue_type = obj.get("issue_type").as_str();
+    } else if (obj.has("discovery_category") && !obj.get("discovery_category").as_str().empty()) {
+        fp.issue_type = obj.get("discovery_category").as_str();
+    } else {
+        // Infer from labels
+        for (const auto& l : fp.labels) {
+            std::string nl = VoteAffinityEngine::normalize_token(l);
+            if (nl.find("bug") != std::string::npos) {
+                fp.issue_type = "bug";
+                break;
+            } else if (nl.find("enhancement") != std::string::npos || nl.find("feature") != std::string::npos) {
+                fp.issue_type = "enhancement";
+                break;
+            } else if (nl.find("doc") != std::string::npos) {
+                fp.issue_type = "documentation";
+                break;
+            }
+        }
+    }
+
+    // Difficulty
+    if (obj.has("difficulty")) {
+        fp.difficulty = obj.get("difficulty").as_double();
+        fp.difficulty_available = (fp.difficulty >= 0.0);
+    } else if (obj.has("difficulty_evidence")) {
+        const auto& d = obj.get("difficulty_evidence");
+        bool avail = d.get("available").as_bool(true);
+        if (avail) {
+            double sc = d.get("scope_change_size").as_double(50.0);
+            double tc = d.get("technical_complexity").as_double(50.0);
+            double he = d.get("historical_effort").as_double(50.0);
+            double di = d.get("dependency_arch_impact").as_double(50.0);
+            double cc = d.get("coordination_complexity").as_double(50.0);
+            fp.difficulty = 0.25 * sc + 0.25 * tc + 0.25 * he + 0.15 * di + 0.10 * cc;
+            fp.difficulty_available = true;
+        } else {
+            fp.difficulty = -1.0;
+            fp.difficulty_available = false;
+        }
+    }
+
+    // Structured metadata
+    if (obj.has("structured_metadata") && obj.get("structured_metadata").type == JsonValue::V_ARR) {
+        for (const auto& m : obj.get("structured_metadata").arr_val) {
+            fp.structured_metadata.push_back(m.as_str());
+        }
+    }
+    if (obj.has("repository_language") && !obj.get("repository_language").as_str().empty()) {
+        fp.structured_metadata.push_back(obj.get("repository_language").as_str());
+    }
+    if (obj.has("product") && !obj.get("product").as_str().empty()) {
+        fp.structured_metadata.push_back(obj.get("product").as_str());
+    }
+    if (obj.has("component") && !obj.get("component").as_str().empty()) {
+        fp.structured_metadata.push_back(obj.get("component").as_str());
+    }
+    if (obj.has("discovery_category") && !obj.get("discovery_category").as_str().empty()) {
+        fp.structured_metadata.push_back(obj.get("discovery_category").as_str());
+    }
+
+    return fp;
+}
+
+bool JsonAdapter::parse_affinity_request(const std::string& json_str,
+                                        std::vector<CandidateIssue>& out_candidates,
+                                        std::vector<IssueVoteRecord>& out_votes,
+                                        AffinityWeights& out_weights,
+                                        std::string& out_error) {
+    bool err = false;
+    size_t pos = 0;
+    JsonValue root = SimpleJsonParser::parse(json_str, pos, err);
+    SimpleJsonParser::skip_ws(json_str, pos);
+    if (err || root.type != JsonValue::V_OBJ || pos < json_str.size()) {
+        out_error = "Invalid JSON: syntax error or root is not an object";
+        return false;
+    }
+
+    // Weights (optional)
+    if (root.has("weights") && root.get("weights").type == JsonValue::V_OBJ) {
+        const auto& w = root.get("weights");
+        out_weights.technology_weight = w.get("technology_weight").as_double(out_weights.technology_weight);
+        out_weights.label_weight = w.get("label_weight").as_double(out_weights.label_weight);
+        out_weights.issue_type_weight = w.get("issue_type_weight").as_double(out_weights.issue_type_weight);
+        out_weights.difficulty_weight = w.get("difficulty_weight").as_double(out_weights.difficulty_weight);
+        out_weights.structured_metadata_weight = w.get("structured_metadata_weight").as_double(out_weights.structured_metadata_weight);
+        out_weights.repository_weight = w.get("repository_weight").as_double(out_weights.repository_weight);
+        out_weights.lambda = w.get("lambda").as_double(out_weights.lambda);
+        out_weights.k = w.get("k").as_double(out_weights.k);
+        out_weights.correlation_threshold = w.get("correlation_threshold").as_double(out_weights.correlation_threshold);
+    }
+
+    // Votes
+    if (root.has("votes") && root.get("votes").type == JsonValue::V_ARR) {
+        for (const auto& v : root.get("votes").arr_val) {
+            IssueVoteRecord rec;
+            rec.user_id = v.get("user_id").as_str();
+            rec.source = v.get("source").as_str();
+            rec.platform_issue_id = v.has("platform_issue_id") ? v.get("platform_issue_id").as_str() : v.get("source_issue_id").as_str();
+            rec.vote = v.get("vote").as_int();
+            rec.updated_at = v.get("updated_at").as_str();
+
+            if (v.has("feature_snapshot") && v.get("feature_snapshot").type == JsonValue::V_OBJ) {
+                rec.profile = parse_feature_profile(v.get("feature_snapshot"));
+            } else if (v.has("profile") && v.get("profile").type == JsonValue::V_OBJ) {
+                rec.profile = parse_feature_profile(v.get("profile"));
+            } else {
+                rec.profile = parse_feature_profile(v);
+            }
+
+            if (rec.profile.source.empty()) rec.profile.source = rec.source;
+            if (rec.profile.platform_issue_id.empty()) rec.profile.platform_issue_id = rec.platform_issue_id;
+
+            out_votes.push_back(rec);
+        }
+    }
+
+    // Candidates
+    if (root.has("candidates") && root.get("candidates").type == JsonValue::V_ARR) {
+        for (const auto& c : root.get("candidates").arr_val) {
+            CandidateIssue cand;
+            cand.id = c.get("id").as_str();
+            cand.source = c.get("source").as_str();
+            cand.platform_issue_id = c.has("platform_issue_id") ? c.get("platform_issue_id").as_str() : c.get("source_issue_id").as_str();
+            if (cand.platform_issue_id.empty() && c.has("issue_number") && c.get("issue_number").as_int() > 0) {
+                cand.platform_issue_id = std::to_string(c.get("issue_number").as_int());
+            }
+
+            if (c.has("profile") && c.get("profile").type == JsonValue::V_OBJ) {
+                cand.profile = parse_feature_profile(c.get("profile"));
+            } else {
+                cand.profile = parse_feature_profile(c);
+            }
+
+            if (cand.profile.source.empty()) cand.profile.source = cand.source;
+            if (cand.profile.platform_issue_id.empty()) cand.profile.platform_issue_id = cand.platform_issue_id;
+
+            out_candidates.push_back(cand);
+        }
+    }
+
+    return true;
+}
+
+std::string JsonAdapter::serialize_affinity_results(const std::vector<AffinityResult>& results,
+                                                    const AffinityWeights& weights,
+                                                    const std::string& model_version) {
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(4);
+    ss << "{\n";
+    ss << "  \"algorithm_version\": \"" << escape_json(model_version) << "\",\n";
+    ss << "  \"total_evaluated\": " << results.size() << ",\n";
+    ss << "  \"weights\": {\n";
+    ss << "    \"technology_weight\": " << weights.technology_weight << ",\n";
+    ss << "    \"label_weight\": " << weights.label_weight << ",\n";
+    ss << "    \"issue_type_weight\": " << weights.issue_type_weight << ",\n";
+    ss << "    \"difficulty_weight\": " << weights.difficulty_weight << ",\n";
+    ss << "    \"structured_metadata_weight\": " << weights.structured_metadata_weight << ",\n";
+    ss << "    \"repository_weight\": " << weights.repository_weight << ",\n";
+    ss << "    \"lambda\": " << weights.lambda << ",\n";
+    ss << "    \"k\": " << weights.k << "\n";
+    ss << "  },\n";
+    ss << "  \"results\": [\n";
+    for (size_t i = 0; i < results.size(); ++i) {
+        const auto& r = results[i];
+        ss << "    {\n";
+        ss << "      \"id\": \"" << escape_json(r.id) << "\",\n";
+        ss << "      \"source\": \"" << escape_json(r.source) << "\",\n";
+        ss << "      \"platform_issue_id\": \"" << escape_json(r.platform_issue_id) << "\",\n";
+        ss << "      \"affinity_score\": " << r.affinity_score << ",\n";
+        ss << "      \"confidence\": " << r.confidence << ",\n";
+        ss << "      \"positive_evidence\": " << r.positive_evidence << ",\n";
+        ss << "      \"negative_evidence\": " << r.negative_evidence << ",\n";
+        ss << "      \"conflict_indicator\": " << (r.conflict_indicator ? "true" : "false") << ",\n";
+        ss << "      \"conflict_ratio\": " << r.conflict_ratio << ",\n";
+        ss << "      \"matched_feature_groups\": [";
+        for (size_t g = 0; g < r.matched_feature_groups.size(); ++g) {
+            if (g > 0) ss << ", ";
+            ss << "\"" << escape_json(r.matched_feature_groups[g]) << "\"";
+        }
+        ss << "],\n";
+        ss << "      \"explanations\": [";
+        for (size_t e = 0; e < r.explanations.size(); ++e) {
+            if (e > 0) ss << ", ";
+            ss << "\"" << escape_json(r.explanations[e]) << "\"";
+        }
+        ss << "]\n";
+        ss << "    }" << (i + 1 < results.size() ? "," : "") << "\n";
+    }
+    ss << "  ]\n";
+    ss << "}\n";
+    return ss.str();
+}
+
 } // namespace issue_pilot

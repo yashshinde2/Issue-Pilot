@@ -1,6 +1,7 @@
 #include "../include/ranking_engine.hpp"
 #include "../include/json_adapter.hpp"
 #include "../include/evaluation.hpp"
+#include "../include/vote_affinity.hpp"
 #include <iostream>
 #include <string>
 #include <sstream>
@@ -13,6 +14,35 @@ int main(int argc, char* argv[]) {
 
     if (mode == "--version" || mode == "-v") {
         std::cout << "{\"algorithm_version\": \"" << issue_pilot::RankingEngine::ALGORITHM_VERSION << "\"}\n";
+        return 0;
+    }
+
+    if (mode == "--affinity" || mode == "--vote-affinity") {
+        std::string input_content;
+        std::string line;
+        while (std::getline(std::cin, line)) {
+            input_content += line + "\n";
+        }
+
+        if (input_content.empty()) {
+            std::cerr << "{\"error\": \"No input JSON received on stdin for affinity\"}\n";
+            return 1;
+        }
+
+        std::vector<issue_pilot::CandidateIssue> candidates;
+        std::vector<issue_pilot::IssueVoteRecord> votes;
+        issue_pilot::AffinityWeights weights;
+        std::string err;
+
+        if (!issue_pilot::JsonAdapter::parse_affinity_request(input_content, candidates, votes, weights, err)) {
+            std::cerr << "{\"error\": \"" << err << "\"}\n";
+            return 1;
+        }
+
+        issue_pilot::VoteAffinityEngine engine(weights);
+        auto results = engine.evaluate(candidates, votes);
+        std::string output = issue_pilot::JsonAdapter::serialize_affinity_results(results, engine.get_weights(), issue_pilot::VoteAffinityEngine::ALGORITHM_VERSION);
+        std::cout << output;
         return 0;
     }
 

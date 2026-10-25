@@ -158,6 +158,62 @@ public class CppRankingClient {
         }
     }
 
+    public Map<String, Object> executeAffinity(Map<String, Object> payload) {
+        if (!isAvailable()) {
+            throw new IllegalStateException("C++ Ranking Engine executable not found at: " +
+                    (executableFile != null ? executableFile.getAbsolutePath() : "unknown"));
+        }
+        try {
+            String jsonInput = objectMapper.writeValueAsString(payload);
+            Process process = new ProcessBuilder(executableFile.getAbsolutePath(), "--affinity")
+                    .start();
+
+            try (OutputStream os = process.getOutputStream()) {
+                os.write(jsonInput.getBytes(StandardCharsets.UTF_8));
+                os.flush();
+            }
+
+            String stdout;
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line);
+                }
+                stdout = sb.toString();
+            }
+
+            String stderr;
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line).append("\n");
+                }
+                stderr = sb.toString();
+            }
+
+            boolean finished = process.waitFor(15, TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                throw new RuntimeException("C++ vote-affinity engine execution timed out after 15 seconds.");
+            }
+
+            if (process.exitValue() != 0) {
+                logger.error("C++ affinity engine error: {}", stderr);
+                throw new RuntimeException(
+                        "C++ affinity engine failed with code " + process.exitValue() + ": " + stderr);
+            }
+
+            return objectMapper.readValue(stdout, new TypeReference<>() {});
+        } catch (Exception e) {
+            logger.error("C++ affinity engine execution failed: {}", e.getMessage(), e);
+            throw new RuntimeException("Affinity execution failed: " + e.getMessage(), e);
+        }
+    }
+
     public Map<String, Object> executeExperiments() {
         if (!isAvailable()) {
             throw new IllegalStateException("C++ Ranking Engine executable not found.");
