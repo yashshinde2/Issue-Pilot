@@ -33,12 +33,18 @@ public class VoteController {
     }
 
     @PostMapping
-    public Map<String, Object> recordVote(@RequestBody VoteRequest req) {
+    public Map<String, Object> recordVote(
+            @RequestBody VoteRequest req,
+            @RequestHeader(name = "X-User-Id", required = false) String requestingUserId
+    ) {
         if (req == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Request body is required.");
         }
         if (req.user_id == null || req.user_id.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Field 'user_id' is required.");
+        }
+        if (requestingUserId != null && !requestingUserId.isBlank() && !requestingUserId.equals(req.user_id)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied: Cannot record or modify another user's votes.");
         }
         if (req.source == null || req.source.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Field 'source' is required.");
@@ -111,7 +117,13 @@ public class VoteController {
     }
 
     @GetMapping("/summary/{userId}")
-    public Map<String, Object> getVoteSummary(@PathVariable String userId) {
+    public Map<String, Object> getVoteSummary(
+            @PathVariable String userId,
+            @RequestHeader(name = "X-User-Id", required = false) String requestingUserId
+    ) {
+        if (requestingUserId != null && !requestingUserId.isBlank() && !requestingUserId.equals(userId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied: Cannot view another user's vote summary.");
+        }
         Map<String, Integer> counts = voteAffinityService.countUserVotes(userId);
         Map<String, Object> res = new LinkedHashMap<>();
         res.put("user_id", userId);
@@ -120,10 +132,37 @@ public class VoteController {
     }
 
     @PostMapping("/affinity")
-    public Map<String, Object> evaluateAffinity(@RequestBody AffinityEvaluationRequest req) {
+    public Map<String, Object> evaluateAffinity(
+            @RequestBody AffinityEvaluationRequest req,
+            @RequestHeader(name = "X-User-Id", required = false) String requestingUserId
+    ) {
         if (req == null || req.user_id == null || req.user_id.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Field 'user_id' is required.");
         }
+        if (requestingUserId != null && !requestingUserId.isBlank() && !requestingUserId.equals(req.user_id)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied: Cannot evaluate affinity for another user.");
+        }
         return voteAffinityService.evaluateCandidateAffinity(req.user_id, req.candidates);
+    }
+
+    // Convenience overloads for direct Java service / test invocations
+    public Map<String, Object> recordVote(VoteRequest req) {
+        return recordVote(req, null);
+    }
+
+    public Map<String, Object> removeVote(String userId, String source, String platformIssueId) {
+        return removeVote(userId, source, platformIssueId, null);
+    }
+
+    public Map<String, Object> getUserVotes(String userId) {
+        return getUserVotes(userId, null);
+    }
+
+    public Map<String, Object> getVoteSummary(String userId) {
+        return getVoteSummary(userId, null);
+    }
+
+    public Map<String, Object> evaluateAffinity(AffinityEvaluationRequest req) {
+        return evaluateAffinity(req, null);
     }
 }

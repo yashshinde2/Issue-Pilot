@@ -353,4 +353,151 @@ public class VoteAffinityIntegrationTest {
 
         System.out.println("[TEST] Feature snapshot extraction integrity verified.");
     }
+
+    @Test
+    @DisplayName("[Audit] Cross-User Authorization Bypass Prevention on All Endpoints")
+    public void testCrossUserAuthorizationBypassPrevention() {
+        VoteController.VoteRequest req = new VoteController.VoteRequest();
+        req.user_id = TEST_USER_1;
+        req.source = "github";
+        req.platform_issue_id = "synth_auth_1";
+        req.vote = 1;
+
+        // 1. Cross-user POST /api/votes must be rejected with 403 Forbidden
+        ResponseStatusException postEx = assertThrows(ResponseStatusException.class, () -> {
+            voteController.recordVote(req, "unauthorized_attacker");
+        });
+        assertEquals(403, postEx.getStatusCode().value());
+
+        // 2. Cross-user GET /api/votes/summary/{userId} must be rejected with 403 Forbidden
+        ResponseStatusException summaryEx = assertThrows(ResponseStatusException.class, () -> {
+            voteController.getVoteSummary(TEST_USER_1, "unauthorized_attacker");
+        });
+        assertEquals(403, summaryEx.getStatusCode().value());
+
+        // 3. Cross-user POST /api/votes/affinity must be rejected with 403 Forbidden
+        VoteController.AffinityEvaluationRequest evalReq = new VoteController.AffinityEvaluationRequest();
+        evalReq.user_id = TEST_USER_1;
+        evalReq.candidates = List.of(Map.of("id", "c1", "source", "github", "platform_issue_id", "1"));
+
+        ResponseStatusException evalEx = assertThrows(ResponseStatusException.class, () -> {
+            voteController.evaluateAffinity(evalReq, "unauthorized_attacker");
+        });
+        assertEquals(403, evalEx.getStatusCode().value());
+
+        System.out.println("[TEST] Cross-user authorization bypass prevention verified across all endpoints.");
+    }
+
+    @Test
+    @DisplayName("[Audit] Concurrent Vote Updates Preserve Single Record Idempotently Without Exception")
+    public void testConcurrentVoteUpdates() throws Exception {
+        final int numThreads = 10;
+        final java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(numThreads);
+        final java.util.concurrent.CountDownLatch startLatch = new java.util.concurrent.CountDownLatch(1);
+        final java.util.concurrent.CountDownLatch doneLatch = new java.util.concurrent.CountDownLatch(numThreads);
+        final java.util.concurrent.atomic.AtomicInteger errorCount = new java.util.concurrent.atomic.AtomicInteger(0);
+
+        try {
+            for (int i = 0; i < numThreads; i++) {
+                final int idx = i;
+                executor.submit(() -> {
+                    try {
+                        startLatch.await();
+                        VoteController.VoteRequest req = new VoteController.VoteRequest();
+                        req.user_id = TEST_USER_1;
+                        req.source = "github";
+                        req.platform_issue_id = "synth_concurrent_101";
+                        // Alternate likes and dislikes
+                        req.vote = (idx % 2 == 0) ? 1 : -1;
+                        req.feature_snapshot = Map.of(
+                                "technologies", List.of("Python", "FastAPI"),
+                                "difficulty", 50.0 + idx,
+                                "difficulty_available", true
+                        );
+                        voteController.recordVote(req, null);
+                    } catch (Exception e) {
+                        errorCount.incrementAndGet();
+                    } finally {
+                        doneLatch.countDown();
+                    }
+                });
+            }
+
+            // Release all threads simultaneously
+            startLatch.countDown();
+            boolean finished = doneLatch.await(10, java.util.concurrent.TimeUnit.SECONDS);
+            assertTrue(finished, "Concurrent vote recording tasks should finish within 10 seconds");
+            assertEquals(0, errorCount.get(), "No thread should fail with MongoWriteException or DuplicateKeyException");
+
+            // Verify that exactly 1 current vote record exists in the repository
+            Optional<IssueVote> voteOpt = voteRepository.getVote(TEST_USER_1, "github", "synth_concurrent_101");
+            assertTrue(voteOpt.isPresent(), "Current vote record must be present");
+            assertTrue(voteOpt.get().getVote() == 1 || voteOpt.get().getVote() == -1, "Vote value must be valid");
+
+            List<IssueVote> userVotes = voteRepository.getUserVotes(TEST_USER_1);
+            long matchCount = userVotes.stream()
+                    .filter(v -> "synth_concurrent_101".equals(v.getPlatformIssueId()))
+                    .count();
+            assertEquals(1, matchCount, "Concurrent updates must never produce duplicate vote records");
+
+            System.out.println("[TEST] Concurrent atomic upsert verified successfully without race condition.");
+        } finally {
+            executor.shutdown();
+            voteRepository.removeVote(TEST_USER_1, "github", "synth_concurrent_101");
+        }
+    }
+
+    @Test
+    @DisplayName("[Audit] Missing Feature Semantics One-Sided Renormalization")
+    public void testMissingFeatureSemanticsOneSided() {
+        // Candidate has technologies but empty labels and unavailable difficulty
+        Map<String, Object> candidate = new LinkedHashMap<>();
+        candidate.put("id", "cand_sparse_features");
+        candidate.put("source", "github");
+        candidate.put("platform_issue_id", "synth_sparse_1");
+        candidate.put("profile", Map.of(
+                "technologies", List.of("Python", "Django"),
+                "labels", Collections.emptyList(),
+                "difficulty", -1.0,
+                "difficulty_available", false
+        ));
+
+        // Liked issue has technologies, labels, and difficulty
+        VoteController.VoteRequest likeReq = new VoteController.VoteRequest();
+        likeReq.user_id = TEST_USER_1;
+        likeReq.source = "github";
+        likeReq.platform_issue_id = "synth_dense_1";
+        likeReq.vote = 1;
+        likeReq.feature_snapshot = Map.of(
+                "technologies", List.of("Python", "Django"),
+                "labels", List.of("backend", "orm"),
+                "issue_type", "enhancement",
+                "difficulty", 75.0,
+                "difficulty_available", true
+        );
+        voteController.recordVote(likeReq, null);
+
+        VoteController.AffinityEvaluationRequest evalReq = new VoteController.AffinityEvaluationRequest();
+        evalReq.user_id = TEST_USER_1;
+        evalReq.candidates = List.of(candidate);
+
+        Map<String, Object> evalResp = voteController.evaluateAffinity(evalReq, null);
+        assertNotNull(evalResp);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> results = (List<Map<String, Object>>) evalResp.get("results");
+        assertEquals(1, results.size());
+        Map<String, Object> res = results.get(0);
+
+        double evidence = ((Number) res.get("positive_evidence")).doubleValue();
+        double affinity = ((Number) res.get("affinity_score")).doubleValue();
+
+        // Technology matches 1.0. All missing features on candidate are omitted without penalty.
+        // Similarity is 1.0, Positive evidence = 1.0, Affinity = 100 * 1 / (1 + 1) = 50.0
+        assertEquals(1.0, evidence, 0.01, "One-sided missing features must renormalize without penalty");
+        assertEquals(50.0, affinity, 0.01, "Affinity must be exactly 50.0 for unit evidence");
+
+        System.out.println("[TEST] One-sided missing feature renormalization verified successfully.");
+        voteRepository.removeVote(TEST_USER_1, "github", "synth_dense_1");
+    }
 }

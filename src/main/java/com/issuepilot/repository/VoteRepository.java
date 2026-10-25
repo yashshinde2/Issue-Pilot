@@ -86,33 +86,32 @@ public class VoteRepository {
                 .append("source", vote.getSource())
                 .append("platform_issue_id", vote.getPlatformIssueId());
 
-        Document existing = collection.find(filter).first();
-
-        if (existing != null) {
-            // Update existing vote
-            Document updateFields = new Document("vote", vote.getVote())
-                    .append("updated_at", nowIso);
-
-            if (vote.getRecommendationRunId() != null) {
-                updateFields.append("recommendation_run_id", vote.getRecommendationRunId());
-            }
-            if (vote.getFeatureSnapshot() != null && !vote.getFeatureSnapshot().isEmpty()) {
-                updateFields.append("feature_snapshot", vote.getFeatureSnapshot());
-            }
-
-            collection.updateOne(filter, new Document("$set", updateFields));
-            vote.setCreatedAt(existing.getString("created_at"));
-            vote.setUpdatedAt(nowIso);
-        } else {
-            // Insert new vote
-            vote.setCreatedAt(nowIso);
-            vote.setUpdatedAt(nowIso);
-
-            Map<String, Object> map = objectMapper.convertValue(vote, new TypeReference<>() {});
-            Document doc = new Document(map);
-            collection.insertOne(doc);
+        Document setFields = new Document("vote", vote.getVote())
+                .append("updated_at", nowIso);
+        if (vote.getRecommendationRunId() != null) {
+            setFields.append("recommendation_run_id", vote.getRecommendationRunId());
+        }
+        if (vote.getFeatureSnapshot() != null && !vote.getFeatureSnapshot().isEmpty()) {
+            setFields.append("feature_snapshot", vote.getFeatureSnapshot());
         }
 
+        Document setOnInsert = new Document("user_id", vote.getUserId())
+                .append("source", vote.getSource())
+                .append("platform_issue_id", vote.getPlatformIssueId())
+                .append("created_at", nowIso);
+
+        Document updateDoc = new Document("$set", setFields)
+                .append("$setOnInsert", setOnInsert);
+
+        collection.updateOne(filter, updateDoc, new com.mongodb.client.model.UpdateOptions().upsert(true));
+
+        Document saved = collection.find(filter).first();
+        if (saved != null) {
+            return objectMapper.convertValue(cleanDoc(saved), IssueVote.class);
+        }
+
+        vote.setCreatedAt(nowIso);
+        vote.setUpdatedAt(nowIso);
         return vote;
     }
 

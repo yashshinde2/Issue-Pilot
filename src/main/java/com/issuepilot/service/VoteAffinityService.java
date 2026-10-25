@@ -85,7 +85,11 @@ public class VoteAffinityService {
                 }
             }
         }
-        snap.put("issue_type", issueType != null ? issueType : "task");
+        if (issueType != null && !issueType.isBlank()) {
+            snap.put("issue_type", issueType);
+        } else {
+            snap.put("issue_type", "");
+        }
 
         // Difficulty
         if (issue.getDifficultyEvidence() != null) {

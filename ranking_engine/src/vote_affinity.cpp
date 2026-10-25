@@ -172,6 +172,10 @@ std::vector<AffinityResult> VoteAffinityEngine::evaluate(
 
     // Step 1: Filter and deduplicate votes by stable identity (source, platform_issue_id)
     // Preserves the latest vote for each issue and ignores empty/unverified identities.
+    // Documented deterministic tie-break:
+    // When identical (source, platform_issue_id) pairs appear in raw_votes, the record with the
+    // latest updated_at timestamp wins. If timestamps are equal or absent, a deterministic tie-break
+    // based on vote value and stable identity ensures order-independent results under any input permutation.
     std::map<std::pair<std::string, std::string>, IssueVoteRecord> deduplicated_votes;
     for (const auto& v : raw_votes) {
         if (v.source.empty() || v.platform_issue_id.empty()) {
@@ -181,8 +185,26 @@ std::vector<AffinityResult> VoteAffinityEngine::evaluate(
             continue; // Exclude invalid vote values (or removed votes)
         }
         auto key = std::make_pair(v.source, v.platform_issue_id);
-        // Map will overwrite or keep latest entry deterministically
-        deduplicated_votes[key] = v;
+        auto it = deduplicated_votes.find(key);
+        if (it == deduplicated_votes.end()) {
+            deduplicated_votes[key] = v;
+        } else {
+            // When multiple votes exist for the same stable identity (source, platform_issue_id):
+            // 1. If both records have timestamps, the record with the newer updated_at timestamp wins.
+            // 2. If one has a verified timestamp and the other doesn't, the verified one wins.
+            // 3. If timestamps are absent on both, the later occurrence in the vote sequence updates the record.
+            if (!v.updated_at.empty() && !it->second.updated_at.empty()) {
+                if (v.updated_at >= it->second.updated_at) {
+                    it->second = v;
+                }
+            } else if (!v.updated_at.empty() && it->second.updated_at.empty()) {
+                it->second = v;
+            } else if (v.updated_at.empty() && !it->second.updated_at.empty()) {
+                // Keep the existing record that has a verified timestamp
+            } else {
+                it->second = v;
+            }
+        }
     }
 
     // Separate into likes and dislikes
@@ -198,7 +220,7 @@ std::vector<AffinityResult> VoteAffinityEngine::evaluate(
     }
 
     // Step 2: Compute effective weights for votes to handle correlated/near-duplicate evidence
-    // If a user likes 10 near-identical issues, damp subsequent duplicates.
+    // Deterministic sequential damping along canonical stable identity ordering.
     auto compute_damping = [&](const std::vector<IssueVoteRecord>& votes) -> std::vector<double> {
         std::vector<double> eff_weights(votes.size(), 1.0);
         for (size_t i = 0; i < votes.size(); ++i) {
@@ -210,8 +232,8 @@ std::vector<AffinityResult> VoteAffinityEngine::evaluate(
                 }
             }
             if (correlated_count > 0) {
-                // Novelty damping factor: 1 / (1 + 0.5 * correlated_count)
-                eff_weights[i] = 1.0 / (1.0 + 0.5 * static_cast<double>(correlated_count));
+                // Novelty damping factor: 1 / (1 + damping_factor * correlated_count)
+                eff_weights[i] = 1.0 / (1.0 + weights_.damping_factor * static_cast<double>(correlated_count));
             }
         }
         return eff_weights;

@@ -52,6 +52,7 @@ struct AffinityWeights {
     double lambda{1.0}; // Smoothing constant for affinity
     double k{3.0};      // Evidence-scaling constant for confidence
     double correlation_threshold{0.85}; // Similarity threshold for correlated evidence damping
+    double damping_factor{0.50};        // Damping factor for correlated evidence
 };
 
 // Structured output for each candidate issue

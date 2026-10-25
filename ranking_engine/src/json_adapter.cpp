@@ -772,7 +772,17 @@ static FeatureProfile parse_feature_profile(const JsonValue& obj) {
     }
 
     // Difficulty
-    if (obj.has("difficulty")) {
+    if (obj.has("difficulty_available")) {
+        fp.difficulty_available = obj.get("difficulty_available").as_bool();
+        if (obj.has("difficulty")) {
+            fp.difficulty = obj.get("difficulty").as_double();
+            if (fp.difficulty < 0.0) {
+                fp.difficulty_available = false;
+            }
+        } else {
+            fp.difficulty = -1.0;
+        }
+    } else if (obj.has("difficulty")) {
         fp.difficulty = obj.get("difficulty").as_double();
         fp.difficulty_available = (fp.difficulty >= 0.0);
     } else if (obj.has("difficulty_evidence")) {
@@ -840,6 +850,7 @@ bool JsonAdapter::parse_affinity_request(const std::string& json_str,
         out_weights.lambda = w.get("lambda").as_double(out_weights.lambda);
         out_weights.k = w.get("k").as_double(out_weights.k);
         out_weights.correlation_threshold = w.get("correlation_threshold").as_double(out_weights.correlation_threshold);
+        out_weights.damping_factor = w.get("damping_factor").as_double(out_weights.damping_factor);
     }
 
     // Votes
@@ -910,7 +921,9 @@ std::string JsonAdapter::serialize_affinity_results(const std::vector<AffinityRe
     ss << "    \"structured_metadata_weight\": " << weights.structured_metadata_weight << ",\n";
     ss << "    \"repository_weight\": " << weights.repository_weight << ",\n";
     ss << "    \"lambda\": " << weights.lambda << ",\n";
-    ss << "    \"k\": " << weights.k << "\n";
+    ss << "    \"k\": " << weights.k << ",\n";
+    ss << "    \"correlation_threshold\": " << weights.correlation_threshold << ",\n";
+    ss << "    \"damping_factor\": " << weights.damping_factor << "\n";
     ss << "  },\n";
     ss << "  \"results\": [\n";
     for (size_t i = 0; i < results.size(); ++i) {

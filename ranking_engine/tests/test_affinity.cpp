@@ -573,8 +573,281 @@ int main() {
                              "Skill: " + std::to_string(s) + " | Final: " + std::to_string(scores.final_score));
     }
 
+    // Test 19: One-sided missing labels (Omitted and renormalized, not interpreted as genuine mismatch)
+    {
+        issue_pilot::CandidateIssue cand;
+        cand.id = "cand-labels-missing-one-side";
+        cand.source = "github";
+        cand.platform_issue_id = "1900";
+        cand.profile.technologies = {"Python"};
+        cand.profile.labels = {"performance", "backend"}; // Candidate has labels
+
+        issue_pilot::IssueVoteRecord vote;
+        vote.user_id = "user1";
+        vote.source = "github";
+        vote.platform_issue_id = "1901";
+        vote.vote = 1;
+        vote.profile.technologies = {"Python"};
+        // vote.profile.labels is empty (unavailable)
+
+        auto results = engine.evaluate({cand}, {vote});
+        // Technology matches 1.0 (weight 0.30). Labels missing on vote side -> omitted.
+        // Total available weight = 0.30. Similarity = 0.30 / 0.30 = 1.0!
+        bool ok = (results.size() == 1 &&
+                   std::abs(results[0].positive_evidence - 1.0) < 0.001 &&
+                   results[0].affinity_score == 50.0);
+        report_affinity_test("Test 19: One-Sided Missing Labels (Renormalized Without Penalty)", ok,
+                             "Evidence: " + std::to_string(results[0].positive_evidence));
+    }
+
+    // Test 20: One-sided missing technologies (Omitted and renormalized)
+    {
+        issue_pilot::CandidateIssue cand;
+        cand.id = "cand-tech-missing-one-side";
+        cand.source = "github";
+        cand.platform_issue_id = "2000";
+        cand.profile.technologies = {"Java", "Kotlin"}; // Candidate has tech
+        cand.profile.labels = {"security"};
+
+        issue_pilot::IssueVoteRecord vote;
+        vote.user_id = "user1";
+        vote.source = "github";
+        vote.platform_issue_id = "2001";
+        vote.vote = 1;
+        // vote.profile.technologies is empty (unavailable)
+        vote.profile.labels = {"security"};
+
+        auto results = engine.evaluate({cand}, {vote});
+        // Labels match 1.0 (weight 0.30). Tech missing on vote side -> omitted.
+        // Total available weight = 0.30. Similarity = 0.30 / 0.30 = 1.0!
+        bool ok = (results.size() == 1 &&
+                   std::abs(results[0].positive_evidence - 1.0) < 0.001 &&
+                   results[0].affinity_score == 50.0);
+        report_affinity_test("Test 20: One-Sided Missing Technologies (Renormalized Without Penalty)", ok,
+                             "Evidence: " + std::to_string(results[0].positive_evidence));
+    }
+
+    // Test 21: Unknown difficulty (difficulty_available = false or < 0) omitted and renormalized
+    {
+        issue_pilot::CandidateIssue cand;
+        cand.id = "cand-diff-unknown";
+        cand.source = "github";
+        cand.platform_issue_id = "2100";
+        cand.profile.technologies = {"Go"};
+        cand.profile.difficulty = -1.0;
+        cand.profile.difficulty_available = false; // Candidate difficulty unknown
+
+        issue_pilot::IssueVoteRecord vote;
+        vote.user_id = "user1";
+        vote.source = "github";
+        vote.platform_issue_id = "2101";
+        vote.vote = 1;
+        vote.profile.technologies = {"Go"};
+        vote.profile.difficulty = 80.0;
+        vote.profile.difficulty_available = true; // Vote difficulty known
+
+        auto results = engine.evaluate({cand}, {vote});
+        // Difficulty unavailable on candidate -> omitted from available weights.
+        // Tech matches 1.0 -> Evidence = 1.0, Affinity = 50.0
+        bool ok = (results.size() == 1 &&
+                   std::abs(results[0].positive_evidence - 1.0) < 0.001 &&
+                   results[0].affinity_score == 50.0);
+        report_affinity_test("Test 21: Unknown Difficulty Omitted and Renormalized", ok,
+                             "Evidence: " + std::to_string(results[0].positive_evidence));
+    }
+
+    // Test 22: Genuine categorical mismatch vs missing category
+    {
+        // Case A: Missing issue_type
+        issue_pilot::CandidateIssue candMissing;
+        candMissing.id = "cand-missing-type";
+        candMissing.source = "github";
+        candMissing.platform_issue_id = "2201";
+        candMissing.profile.technologies = {"Python"};
+        candMissing.profile.issue_type = ""; // Missing
+
+        // Case B: Genuine mismatch on issue_type
+        issue_pilot::CandidateIssue candMismatch;
+        candMismatch.id = "cand-mismatch-type";
+        candMismatch.source = "github";
+        candMismatch.platform_issue_id = "2202";
+        candMismatch.profile.technologies = {"Python"};
+        candMismatch.profile.issue_type = "bug"; // Known but mismatched!
+
+        issue_pilot::IssueVoteRecord vote;
+        vote.user_id = "user1";
+        vote.source = "github";
+        vote.platform_issue_id = "2200";
+        vote.vote = 1;
+        vote.profile.technologies = {"Python"};
+        vote.profile.issue_type = "enhancement"; // Voted issue type
+
+        auto results = engine.evaluate({candMissing, candMismatch}, {vote});
+        // For candMissing: issue_type omitted. tech_sim = 1.0. Available weight = 0.30 -> Similarity = 1.0. Evidence = 1.0
+        // For candMismatch: both known. tech_sim = 1.0 (0.30), type_sim = 0.0 (0.15). Total weight = 0.45. Similarity = 0.30 / 0.45 = 0.6667. Evidence = 0.6667
+        bool ok = (results.size() == 2 &&
+                   results[0].positive_evidence > results[1].positive_evidence &&
+                   std::abs(results[0].positive_evidence - 1.0) < 0.001 &&
+                   std::abs(results[1].positive_evidence - (0.30 / 0.45)) < 0.001 &&
+                   results[0].affinity_score > results[1].affinity_score);
+        report_affinity_test("Test 22: Genuine Categorical Mismatch Penalized vs Missing Feature", ok,
+                             "Missing: " + std::to_string(results[0].positive_evidence) +
+                             " | Mismatch: " + std::to_string(results[1].positive_evidence));
+    }
+
+    // Test 23: Entirely unavailable feature profiles produce zero evidence and zero affinity
+    {
+        issue_pilot::CandidateIssue cand;
+        cand.id = "cand-empty";
+        cand.source = "github";
+        cand.platform_issue_id = "2300";
+        // completely empty profile
+
+        issue_pilot::IssueVoteRecord vote;
+        vote.user_id = "user1";
+        vote.source = "github";
+        vote.platform_issue_id = "2301";
+        vote.vote = 1;
+        // completely empty profile
+
+        auto results = engine.evaluate({cand}, {vote});
+        bool ok = (results.size() == 1 &&
+                   results[0].positive_evidence == 0.0 &&
+                   results[0].negative_evidence == 0.0 &&
+                   results[0].affinity_score == 0.0 &&
+                   results[0].confidence == 0.0);
+        report_affinity_test("Test 23: Entirely Unavailable Profiles Produce Zero Evidence", ok);
+    }
+
+    // Test 24: Correlated-evidence damping under arbitrary permutations of the input vote set
+    {
+        issue_pilot::CandidateIssue cand;
+        cand.id = "cand-perm";
+        cand.source = "github";
+        cand.platform_issue_id = "2400";
+        cand.profile.technologies = {"Python", "FastAPI"};
+        cand.profile.labels = {"api"};
+
+        // Create 4 near-duplicate likes and 2 distinct dislikes
+        std::vector<issue_pilot::IssueVoteRecord> vote_set;
+        for (int i = 0; i < 4; ++i) {
+            issue_pilot::IssueVoteRecord v;
+            v.user_id = "user1";
+            v.source = "github";
+            v.platform_issue_id = "like-dup-" + std::to_string(i);
+            v.vote = 1;
+            v.profile.technologies = {"Python", "FastAPI"};
+            v.profile.labels = {"api"};
+            v.updated_at = "2026-10-25T12:00:0" + std::to_string(i) + "Z";
+            vote_set.push_back(v);
+        }
+        for (int i = 0; i < 2; ++i) {
+            issue_pilot::IssueVoteRecord v;
+            v.user_id = "user1";
+            v.source = "github";
+            v.platform_issue_id = "dislike-" + std::to_string(i);
+            v.vote = -1;
+            v.profile.technologies = {"Rust"};
+            v.profile.labels = {"crypto"};
+            v.updated_at = "2026-10-25T12:00:1" + std::to_string(i) + "Z";
+            vote_set.push_back(v);
+        }
+
+        // Add an updated duplicate vote to test deterministic deduplication
+        issue_pilot::IssueVoteRecord v_update;
+        v_update.user_id = "user1";
+        v_update.source = "github";
+        v_update.platform_issue_id = "like-dup-0";
+        v_update.vote = 1;
+        v_update.profile.technologies = {"Python", "FastAPI"};
+        v_update.profile.labels = {"api"};
+        v_update.updated_at = "2026-10-25T13:00:00Z"; // Later timestamp
+        vote_set.push_back(v_update);
+
+        // Baseline run
+        auto base_results = engine.evaluate({cand}, vote_set);
+
+        // Permutations
+        bool all_permutations_match = true;
+        // Permutation 1: Reversed
+        std::vector<issue_pilot::IssueVoteRecord> perm1 = vote_set;
+        std::reverse(perm1.begin(), perm1.end());
+        auto res_perm1 = engine.evaluate({cand}, perm1);
+        if (std::abs(res_perm1[0].affinity_score - base_results[0].affinity_score) > 1e-9 ||
+            std::abs(res_perm1[0].confidence - base_results[0].confidence) > 1e-9 ||
+            std::abs(res_perm1[0].positive_evidence - base_results[0].positive_evidence) > 1e-9) {
+            all_permutations_match = false;
+        }
+
+        // Permutation 2: Rotated
+        std::vector<issue_pilot::IssueVoteRecord> perm2 = vote_set;
+        std::rotate(perm2.begin(), perm2.begin() + 3, perm2.end());
+        auto res_perm2 = engine.evaluate({cand}, perm2);
+        if (std::abs(res_perm2[0].affinity_score - base_results[0].affinity_score) > 1e-9 ||
+            std::abs(res_perm2[0].confidence - base_results[0].confidence) > 1e-9 ||
+            std::abs(res_perm2[0].positive_evidence - base_results[0].positive_evidence) > 1e-9) {
+            all_permutations_match = false;
+        }
+
+        // Permutation 3: Dislikes first, likes second
+        std::vector<issue_pilot::IssueVoteRecord> perm3;
+        for (const auto& v : vote_set) if (v.vote == -1) perm3.push_back(v);
+        for (const auto& v : vote_set) if (v.vote == 1) perm3.push_back(v);
+        auto res_perm3 = engine.evaluate({cand}, perm3);
+        if (std::abs(res_perm3[0].affinity_score - base_results[0].affinity_score) > 1e-9 ||
+            std::abs(res_perm3[0].confidence - base_results[0].confidence) > 1e-9 ||
+            std::abs(res_perm3[0].positive_evidence - base_results[0].positive_evidence) > 1e-9) {
+            all_permutations_match = false;
+        }
+
+        report_affinity_test("Test 24: Permutation-Invariant Deterministic Damping & Deduplication", all_permutations_match,
+                             "Affinity: " + std::to_string(base_results[0].affinity_score) +
+                             " | Conf: " + std::to_string(base_results[0].confidence));
+    }
+
+    // Test 25: Configurable correlation_threshold and damping_factor
+    {
+        issue_pilot::CandidateIssue cand;
+        cand.id = "cand-cfg";
+        cand.source = "github";
+        cand.platform_issue_id = "2500";
+        cand.profile.technologies = {"Python"};
+
+        std::vector<issue_pilot::IssueVoteRecord> votes;
+        for (int i = 0; i < 3; ++i) {
+            issue_pilot::IssueVoteRecord v;
+            v.user_id = "user1";
+            v.source = "github";
+            v.platform_issue_id = "like-cfg-" + std::to_string(i);
+            v.vote = 1;
+            v.profile.technologies = {"Python"};
+            votes.push_back(v);
+        }
+
+        // Engine with default damping (damping_factor = 0.50):
+        // weights: w[0] = 1.0, w[1] = 1/(1 + 0.5*1) = 0.6667, w[2] = 1/(1 + 0.5*2) = 0.50 -> Sum P = 2.1667
+        auto default_res = engine.evaluate({cand}, votes);
+
+        // Engine with custom damping_factor = 1.00:
+        // weights: w[0] = 1.0, w[1] = 1/(1 + 1.0*1) = 0.50, w[2] = 1/(1 + 1.0*2) = 0.3333 -> Sum P = 1.8333
+        issue_pilot::AffinityWeights custom_weights = engine.get_weights();
+        custom_weights.damping_factor = 1.0;
+        custom_weights.correlation_threshold = 0.75;
+        issue_pilot::VoteAffinityEngine custom_engine(custom_weights);
+        auto custom_res = custom_engine.evaluate({cand}, votes);
+
+        bool weights_configured = (std::abs(default_res[0].positive_evidence - 2.166667) < 0.01 &&
+                                   std::abs(custom_res[0].positive_evidence - 1.833333) < 0.01 &&
+                                   custom_res[0].positive_evidence < default_res[0].positive_evidence &&
+                                   custom_res[0].confidence < default_res[0].confidence);
+
+        report_affinity_test("Test 25: Configurable Correlation Threshold & Damping Factor", weights_configured,
+                             "Default P: " + std::to_string(default_res[0].positive_evidence) +
+                             " | Custom P: " + std::to_string(custom_res[0].positive_evidence));
+    }
+
     std::cout << "\n====================================================\n";
-    std::cout << "ALL 18 VOTE-AFFINITY TEST SCENARIOS PASSED!\n";
+    std::cout << "ALL 25 VOTE-AFFINITY TEST SCENARIOS PASSED!\n";
     std::cout << "Total Assertions: " << total_assertions << " | Passed: " << passed_assertions << "\n";
     std::cout << "====================================================\n";
     return 0;
