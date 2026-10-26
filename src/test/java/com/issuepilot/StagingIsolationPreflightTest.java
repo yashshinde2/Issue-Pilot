@@ -33,7 +33,7 @@ public class StagingIsolationPreflightTest {
     @DisplayName("1. Production Database Rejection: Rejects production database 'issue_pilot' and forbidden names")
     public void testRejectsProductionDatabase() throws Exception {
         AppProperties props = new AppProperties();
-        setField(props, "mongodbUri", "mongodb+srv://test_user:secret_password@staging-cluster.example.net/issue_pilot");
+        setField(props, "mongodbUri", "mongodb+srv://synthetic_test_user:synthetic_mask_token@staging-cluster.example.net/issue_pilot");
         setField(props, "mongodbDatabase", "issue_pilot");
 
         MongoConfig mongoConfig = new MongoConfig(props);
@@ -44,15 +44,16 @@ public class StagingIsolationPreflightTest {
         assertFalse(result.isPassed(), "Preflight must fail when target database is production 'issue_pilot'");
         assertTrue(result.getErrors().stream().anyMatch(e -> e.contains("CRITICAL VIOLATION") && e.contains("forbidden or production")),
                 "Must report critical violation for production database");
-        assertFalse(result.getSanitizedUri().contains("secret_password"), "Password must never be in sanitized URI");
+        assertFalse(result.getSanitizedUri().contains("synthetic_mask_token"), "Password must never be in sanitized URI");
+        assertTrue(result.getSanitizedUri().contains("synthetic_test_user:****@"), "Sanitized URI must mask credentials");
     }
 
     @Test
     @DisplayName("2. Production Cluster Rejection: Rejects production cluster even when database is named 'issue_pilot_staging'")
     public void testRejectsProductionClusterEvenWithStagingDatabaseName() throws Exception {
         AppProperties props = new AppProperties();
-        // Target points to production Atlas cluster host with an isolated staging DB name
-        setField(props, "mongodbUri", "mongodb+srv://staging_user:staging_pass@cluster0.eueidog.mongodb.net/issue_pilot_staging");
+        // Target points to production Atlas cluster host without credentials (pure cluster-level isolation test)
+        setField(props, "mongodbUri", "mongodb+srv://cluster0.eueidog.mongodb.net/issue_pilot_staging");
         setField(props, "mongodbDatabase", "issue_pilot_staging");
 
         MongoConfig mongoConfig = new MongoConfig(props);
@@ -65,7 +66,7 @@ public class StagingIsolationPreflightTest {
         assertEquals("REJECTED_PRODUCTION_CLUSTER", result.getClusterIsolationLevel());
         assertTrue(result.getErrors().stream().anyMatch(e -> e.contains("Connection points to production Atlas cluster host")),
                 "Error must indicate connection points to production Atlas cluster");
-        assertFalse(result.getSanitizedUri().contains("staging_pass"), "Password must never be in sanitized URI");
+        assertEquals("mongodb+srv://cluster0.eueidog.mongodb.net/issue_pilot_staging", result.getSanitizedUri());
     }
 
     @Test
@@ -90,7 +91,7 @@ public class StagingIsolationPreflightTest {
     @DisplayName("4. Missing Expected Staging Cluster Identity: Fails closed when expected staging host is not specified")
     public void testRejectsMissingExpectedStagingClusterIdentity() throws Exception {
         AppProperties props = new AppProperties();
-        setField(props, "mongodbUri", "mongodb+srv://staging_user:staging_pass@staging-cluster.example.net/issue_pilot_staging");
+        setField(props, "mongodbUri", "mongodb+srv://staging-cluster.example.net/issue_pilot_staging");
         setField(props, "mongodbDatabase", "issue_pilot_staging");
         setField(props, "expectedStagingHost", "");
 
@@ -109,7 +110,7 @@ public class StagingIsolationPreflightTest {
     public void testRejectsConflictingUriAndConfiguredDatabase() throws Exception {
         AppProperties props = new AppProperties();
         // URI specifies staging_alpha, but properties specify staging_beta
-        setField(props, "mongodbUri", "mongodb+srv://staging_user:staging_pass@staging-cluster.example.net/issue_pilot_staging_alpha");
+        setField(props, "mongodbUri", "mongodb+srv://staging-cluster.example.net/issue_pilot_staging_alpha");
         setField(props, "mongodbDatabase", "issue_pilot_staging_beta");
 
         MongoConfig mongoConfig = new MongoConfig(props);
@@ -156,7 +157,7 @@ public class StagingIsolationPreflightTest {
     public void testNonZeroExitStatusOnPreflightFailure() throws Exception {
         AppProperties props = new AppProperties();
         // Point to production DB
-        setField(props, "mongodbUri", "mongodb+srv://user:pass@staging-cluster.net/issue_pilot");
+        setField(props, "mongodbUri", "mongodb+srv://staging-cluster.example.net/issue_pilot");
         setField(props, "mongodbDatabase", "issue_pilot");
 
         MongoConfig mongoConfig = new MongoConfig(props);
@@ -192,7 +193,7 @@ public class StagingIsolationPreflightTest {
 
         AppProperties props = new AppProperties();
         // Point to production DB so preflight fails closed
-        setField(props, "mongodbUri", "mongodb+srv://user:pass@staging-cluster.net/issue_pilot");
+        setField(props, "mongodbUri", "mongodb+srv://staging-cluster.example.net/issue_pilot");
         setField(props, "mongodbDatabase", "issue_pilot");
 
         MongoConfig mongoConfig = new MongoConfig(props);
@@ -210,13 +211,13 @@ public class StagingIsolationPreflightTest {
     @DisplayName("9. Dedicated Staging Cluster: Passes cluster check when pointing to dedicated staging host")
     public void testAcceptsDedicatedStagingClusterHost() throws Exception {
         AppProperties props = new AppProperties();
-        setField(props, "mongodbUri", "mongodb+srv://staging_user:staging_pass@staging-cluster0.staging.mongodb.net/issue_pilot_staging");
+        setField(props, "mongodbUri", "mongodb+srv://synthetic_staging_user:synthetic_staging_token@staging-cluster0.staging.example.net/issue_pilot_staging");
         setField(props, "mongodbDatabase", "issue_pilot_staging");
 
         MongoConfig mongoConfig = new MongoConfig(props);
         StagingPreflightService service = new StagingPreflightService(mongoConfig, props, objectMapper);
 
-        PreflightResult result = service.validateStagingEnvironment(true, "staging.mongodb.net");
+        PreflightResult result = service.validateStagingEnvironment(true, "staging.example.net");
 
         // Cluster isolation and safety checks pass; connectivity ping fails as this is a dummy host in unit test
         assertTrue(result.getChecks().get("cluster_level_isolation"));
@@ -225,14 +226,15 @@ public class StagingIsolationPreflightTest {
         assertTrue(result.getChecks().get("staging_cluster_identity_verified"));
         assertEquals("DEDICATED_STAGING_CLUSTER", result.getClusterIsolationLevel());
         assertEquals("issue_pilot_staging", result.getTargetDatabase());
-        assertFalse(result.getSanitizedUri().contains("staging_pass"));
+        assertFalse(result.getSanitizedUri().contains("synthetic_staging_token"));
+        assertTrue(result.getSanitizedUri().contains("synthetic_staging_user:****@"));
     }
 
     @Test
     @DisplayName("10. Rejects Expected Staging Host Matching Production Pattern")
     public void testRejectsExpectedStagingHostMatchingProduction() throws Exception {
         AppProperties props = new AppProperties();
-        setField(props, "mongodbUri", "mongodb+srv://staging_user:staging_pass@staging-cluster0.example.net/issue_pilot_staging");
+        setField(props, "mongodbUri", "mongodb+srv://staging-cluster0.example.net/issue_pilot_staging");
         setField(props, "mongodbDatabase", "issue_pilot_staging");
 
         MongoConfig mongoConfig = new MongoConfig(props);
