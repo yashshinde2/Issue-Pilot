@@ -52,6 +52,10 @@ public class IssuePilotCli implements CommandLineRunner, ExitCodeGenerator {
         return exitCode;
     }
 
+    public MongoConfig getMongoConfig() {
+        return mongoConfig;
+    }
+
     @Override
     public void run(String... args) {
         if (args == null || args.length == 0) {
@@ -94,12 +98,17 @@ public class IssuePilotCli implements CommandLineRunner, ExitCodeGenerator {
                     System.out.println("=================================================");
                     System.out.println(" Issue Pilot Staging Environment Preflight Audit");
                     System.out.println("=================================================");
-                    boolean requireIsolated = "true".equalsIgnoreCase(parsedArgs.getOrDefault("require-isolated-cluster",
-                            System.getenv().getOrDefault("REQUIRE_ISOLATED_CLUSTER", "false")));
+                    if (parsedArgs.containsKey("allow-production-write")) {
+                        System.err.println("\n[!] SAFETY VIOLATION: Flag '--allow-production-write' is strictly rejected.");
+                        System.err.println("Staging workflows must never accept a production override.");
+                        this.exitCode = 1;
+                        break;
+                    }
+
                     String expectedHost = parsedArgs.getOrDefault("expected-host",
                             System.getenv().getOrDefault("EXPECTED_STAGING_HOST", null));
 
-                    StagingPreflightService.PreflightResult preflight = stagingPreflightService.validateStagingEnvironment(requireIsolated, expectedHost);
+                    StagingPreflightService.PreflightResult preflight = stagingPreflightService.validateStagingEnvironment(true, expectedHost);
                     System.out.println(objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(preflight.toMap()));
 
                     if (!preflight.isPassed()) {
@@ -226,48 +235,51 @@ public class IssuePilotCli implements CommandLineRunner, ExitCodeGenerator {
     }
 
     private boolean verifyEnvironmentSafety(Map<String, String> parsedArgs) {
-        String targetEnv = parsedArgs.getOrDefault("target-env", System.getenv().getOrDefault("TARGET_ENV", ""));
-        boolean requireIsolated = "true".equalsIgnoreCase(parsedArgs.getOrDefault("require-isolated-cluster",
-                System.getenv().getOrDefault("REQUIRE_ISOLATED_CLUSTER", "false")));
-        String expectedHost = parsedArgs.getOrDefault("expected-host",
-                System.getenv().getOrDefault("EXPECTED_STAGING_HOST", null));
-
-        if ("staging".equalsIgnoreCase(targetEnv)) {
-            System.out.println("Validating staging environment isolation before proceeding...");
-            StagingPreflightService.PreflightResult preflight = stagingPreflightService.validateStagingEnvironment(requireIsolated, expectedHost);
-            if (!preflight.isPassed()) {
-                System.err.println("\n[!] STAGING PREFLIGHT ABORT: Environment isolation checks failed:");
-                for (String err : preflight.getErrors()) {
-                    System.err.println("  - " + err);
-                }
-                this.exitCode = 1;
-                return false;
-            }
-            System.out.println("[+] Staging environment verified (target DB: " + preflight.getTargetDatabase() +
-                    ", isolation: " + preflight.getClusterIsolationLevel() + ").");
-            return true;
-        }
-
-        // Safety guard for production database
-        String effectiveDb = mongoConfig.getEffectiveDatabaseName();
-        boolean allowProd = "true".equalsIgnoreCase(parsedArgs.getOrDefault("allow-production-write", "false"));
-        if ("issue_pilot".equalsIgnoreCase(effectiveDb) && !allowProd) {
-            System.err.println("\n[!] SAFETY GUARD ABORT: Target database is '" + effectiveDb + "' (PRODUCTION).");
-            System.err.println("Execution halted to prevent unintended writes to production.");
-            System.err.println("To run in staging, use --target-env=staging with an isolated database (e.g. 'issue_pilot_staging').");
-            System.err.println("To explicitly authorize production writes, specify --allow-production-write=true.");
+        // 1. Production override flags are strictly forbidden in staging workflows
+        if (parsedArgs.containsKey("allow-production-write")) {
+            System.err.println("\n[!] SAFETY VIOLATION: Production override flag '--allow-production-write' is strictly rejected.");
+            System.err.println("Staging workflows must never accept a production override.");
+            System.err.println("Production authorization requires a separate, explicit release process and cannot be executed via this workflow.");
             this.exitCode = 1;
             return false;
         }
+
+        String targetEnv = parsedArgs.getOrDefault("target-env", System.getenv().getOrDefault("TARGET_ENV", ""));
+        String expectedHost = parsedArgs.getOrDefault("expected-host",
+                System.getenv().getOrDefault("EXPECTED_STAGING_HOST", null));
+
+        // 2. Ingestion commands strictly require target-env=staging
+        if (!"staging".equalsIgnoreCase(targetEnv)) {
+            System.err.println("\n[!] SAFETY GUARD ABORT: Ingestion workflows require --target-env=staging.");
+            System.err.println("Target environment is '" + (targetEnv.isEmpty() ? "unspecified" : targetEnv) + "'. Execution halted.");
+            System.err.println("Production execution is strictly prohibited and requires a separate, explicit release process.");
+            this.exitCode = 1;
+            return false;
+        }
+
+        // 3. Staging preflight validation must pass before any write operation
+        System.out.println("Validating staging environment isolation before proceeding...");
+        StagingPreflightService.PreflightResult preflight = stagingPreflightService.validateStagingEnvironment(true, expectedHost);
+        if (!preflight.isPassed()) {
+            System.err.println("\n[!] STAGING PREFLIGHT ABORT: Environment isolation checks failed:");
+            for (String err : preflight.getErrors()) {
+                System.err.println("  - " + err);
+            }
+            this.exitCode = 1;
+            return false;
+        }
+
+        System.out.println("[+] Staging environment verified (target DB: " + preflight.getTargetDatabase() +
+                ", isolation: " + preflight.getClusterIsolationLevel() + ").");
         return true;
     }
 
     private void printHelp() {
         System.out.println("Issue Pilot CLI Options:");
         System.out.println("  --preflight-staging Audit staging environment isolation without performing writes");
-        System.out.println("                      Options: --require-isolated-cluster=<true|false>, --expected-host=<host>");
+        System.out.println("                      Options: --expected-host=<host>");
         System.out.println("  --daily-ingestion   Run unified daily discovery and refresh across platforms");
-        System.out.println("                      Options: --target-env=<staging>, --days=<7|30>, --source=<all|github|gitlab|codeberg|bugzilla>, --pages=<N>, --per-page=<N>, --refresh-batch=<N>");
+        System.out.println("                      Options: --target-env=staging, --expected-host=<host>, --days=<7|30>, --source=<all|github|gitlab|codeberg|bugzilla>, --pages=<N>, --per-page=<N>, --refresh-batch=<N>");
         System.out.println("  --discover          Run candidate issue discovery across configured sources");
         System.out.println("                      Options: --target-env=<staging>, --days=<7|30>, --source=<all|...>, --pages=<N>, --per-page=<N>");
         System.out.println("  --refresh           Run candidate pool refresh batch (options: --batch=<N>)");

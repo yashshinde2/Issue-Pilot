@@ -15,7 +15,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory;
+import org.springframework.lang.NonNull;
 
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 @Configuration
@@ -38,7 +40,10 @@ public class MongoConfig {
             return this.mongoClient;
         }
 
-        String rawUri = properties.getMongodbUri();
+        String rawUri = properties.getStagingMongodbUri();
+        if (rawUri == null || rawUri.isBlank()) {
+            rawUri = properties.getMongodbUri();
+        }
         String maskedUri = properties.getSanitizedMongodbUri();
         logger.info("Initializing MongoDB Atlas connection to {}", maskedUri);
 
@@ -83,19 +88,24 @@ public class MongoConfig {
         return this.mongoClient;
     }
 
+    @NonNull
     public String getEffectiveDatabaseName() {
-        String rawUri = properties.getMongodbUri();
+        String rawUri = properties.getStagingMongodbUri();
+        if (rawUri == null || rawUri.isBlank()) {
+            rawUri = properties.getMongodbUri();
+        }
         if (rawUri != null && !rawUri.isBlank()) {
             try {
                 ConnectionString cs = new ConnectionString(rawUri);
-                if (cs.getDatabase() != null && !cs.getDatabase().isBlank()) {
-                    return cs.getDatabase();
+                String db = cs.getDatabase();
+                if (db != null && !db.isBlank()) {
+                    return Objects.requireNonNull(db);
                 }
             } catch (Exception ignored) {}
         }
         String configuredDb = properties.getMongodbDatabase();
         if (configuredDb != null && !configuredDb.isBlank()) {
-            return configuredDb;
+            return Objects.requireNonNull(configuredDb);
         }
         return "issue_pilot";
     }

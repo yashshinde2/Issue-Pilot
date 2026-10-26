@@ -12,6 +12,12 @@ public class AppProperties {
     @Value("${MONGODB_URI:mongodb://localhost:27017}")
     private String mongodbUri;
 
+    @Value("${STAGING_MONGODB_URI:}")
+    private String stagingMongodbUri;
+
+    @Value("${EXPECTED_STAGING_HOST:}")
+    private String expectedStagingHost;
+
     @Value("${MONGODB_DATABASE:issue_pilot}")
     private String mongodbDatabase;
 
@@ -169,8 +175,17 @@ public class AppProperties {
         return mongodbUri;
     }
 
+    public String getStagingMongodbUri() {
+        return stagingMongodbUri;
+    }
+
+    public String getExpectedStagingHost() {
+        return expectedStagingHost;
+    }
+
     public String getSanitizedMongodbUri() {
-        return EnvLoader.maskUri(mongodbUri);
+        String uri = (stagingMongodbUri != null && !stagingMongodbUri.isBlank()) ? stagingMongodbUri : mongodbUri;
+        return EnvLoader.maskUri(uri);
     }
 
     public String getMongodbDatabase() {

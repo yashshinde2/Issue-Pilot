@@ -46,14 +46,10 @@ on:
         description: 'Batch size for refreshing open issues'
         required: false
         default: '50'
-      require_isolated_cluster:
-        description: 'Require separate staging cluster host (fail-closed if on shared Atlas cluster)'
+      expected_staging_host:
+        description: 'Expected staging cluster host or pattern (e.g. staging-cluster or staging.mongodb.net)'
         required: false
-        default: 'false'
-        type: choice
-        options:
-          - 'false'
-          - 'true'
+        default: 'staging'
 
 permissions:
   contents: read
@@ -105,9 +101,10 @@ jobs:
 
       - name: Audit Staging Isolation (Java Preflight)
         env:
+          STAGING_MONGODB_URI: ${{ secrets.STAGING_MONGODB_URI }}
           MONGODB_URI: ${{ secrets.STAGING_MONGODB_URI }}
           MONGODB_DATABASE: "issue_pilot_staging"
-          REQUIRE_ISOLATED_CLUSTER: ${{ inputs.require_isolated_cluster || 'false' }}
+          EXPECTED_STAGING_HOST: ${{ inputs.expected_staging_host || secrets.EXPECTED_STAGING_HOST || vars.EXPECTED_STAGING_HOST || 'staging' }}
           SCHEDULER_ENABLED: "false"
         run: |
           set -euo pipefail
@@ -115,15 +112,16 @@ jobs:
           java -Dspring.main.web-application-type=none \
             -jar target/issue-pilot-*.jar \
             --preflight-staging \
-            --require-isolated-cluster="${REQUIRE_ISOLATED_CLUSTER}"
+            --expected-host="${EXPECTED_STAGING_HOST}"
 
       - name: Run Standalone Ingestion Batch
         env:
           # Required database connection secret: strictly staging
+          STAGING_MONGODB_URI: ${{ secrets.STAGING_MONGODB_URI }}
           MONGODB_URI: ${{ secrets.STAGING_MONGODB_URI }}
           MONGODB_DATABASE: "issue_pilot_staging"
           TARGET_ENV: "staging"
-          REQUIRE_ISOLATED_CLUSTER: ${{ inputs.require_isolated_cluster || 'false' }}
+          EXPECTED_STAGING_HOST: ${{ inputs.expected_staging_host || secrets.EXPECTED_STAGING_HOST || vars.EXPECTED_STAGING_HOST || 'staging' }}
           # Platform credentials (token/apiKey optional or recommended depending on rate-limit needs)
           GITHUB_TOKEN: ${{ secrets.PAT_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
@@ -139,7 +137,7 @@ jobs:
           PAGES="${{ inputs.max_pages || '2' }}"
           PER_PAGE="${{ inputs.per_page || '15' }}"
           BATCH="${{ inputs.refresh_batch || '50' }}"
-          REQ_ISOLATED="${{ inputs.require_isolated_cluster || 'false' }}"
+          EXP_HOST="${EXPECTED_STAGING_HOST}"
 
           echo "Starting Issue Pilot daily ingestion batch (target_env=staging, days=${DAYS}, source=${SRC}, pages=${PAGES}, per_page=${PER_PAGE}, refresh_batch=${BATCH})..."
 
@@ -147,7 +145,7 @@ jobs:
             -jar target/issue-pilot-*.jar \
             --daily-ingestion \
             --target-env=staging \
-            --require-isolated-cluster="${REQ_ISOLATED}" \
+            --expected-host="${EXP_HOST}" \
             --days="${DAYS}" \
             --source="${SRC}" \
             --pages="${PAGES}" \

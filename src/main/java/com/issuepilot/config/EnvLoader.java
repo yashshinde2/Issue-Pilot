@@ -67,6 +67,6 @@ public final class EnvLoader {
         if (uri == null || uri.isEmpty()) {
             return "";
         }
-        return uri.replaceAll("://([^:]+):([^@]+)@", "://$1:****@");
+        return uri.replaceAll("://([^:/@]+)(:[^@/]+)?@", "://$1:****@");
     }
 }

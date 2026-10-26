@@ -17,7 +17,6 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.result.UpdateResult;
 import org.bson.Document;
-import org.bson.conversions.Bson;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.core.MongoOperations;
@@ -350,10 +349,19 @@ public class DailyIngestionValidationTest {
 
         AppProperties testProps = new AppProperties();
         MongoConfig mongoConfig = new MongoConfig(testProps);
-        StagingPreflightService preflightService = new StagingPreflightService(mongoConfig, testProps, objectMapper);
+        StagingPreflightService passingPreflight = new StagingPreflightService(mongoConfig, testProps, objectMapper) {
+            @Override
+            public PreflightResult validateStagingEnvironment(boolean requireIsolatedCluster, String expectedStagingHost) {
+                PreflightResult res = new PreflightResult();
+                res.setPassed(true);
+                res.setTargetDatabase("issue_pilot_staging");
+                res.setClusterIsolationLevel("DEDICATED_STAGING_CLUSTER");
+                return res;
+            }
+        };
 
-        IssuePilotCli cli = new IssuePilotCli(null, null, null, discService, refService, null, preflightService, mongoConfig, objectMapper);
-        cli.run("--daily-ingestion", "--days=30", "--source=all", "--allow-production-write=true");
+        IssuePilotCli cli = new IssuePilotCli(null, null, null, discService, refService, null, passingPreflight, mongoConfig, objectMapper);
+        cli.run("--daily-ingestion", "--target-env=staging", "--expected-host=staging-cluster", "--days=30", "--source=all");
 
         assertEquals(1, cli.getExitCode(), "CLI exit code must be 1 on platform failure");
     }
@@ -372,13 +380,22 @@ public class DailyIngestionValidationTest {
 
         AppProperties testProps = new AppProperties();
         MongoConfig mongoConfig = new MongoConfig(testProps);
-        StagingPreflightService preflightService = new StagingPreflightService(mongoConfig, testProps, objectMapper);
+        StagingPreflightService passingPreflight = new StagingPreflightService(mongoConfig, testProps, objectMapper) {
+            @Override
+            public PreflightResult validateStagingEnvironment(boolean requireIsolatedCluster, String expectedStagingHost) {
+                PreflightResult res = new PreflightResult();
+                res.setPassed(true);
+                res.setTargetDatabase("issue_pilot_staging");
+                res.setClusterIsolationLevel("DEDICATED_STAGING_CLUSTER");
+                return res;
+            }
+        };
 
-        IssuePilotCli cli = new IssuePilotCli(null, null, null, discService, refService, null, preflightService, mongoConfig, objectMapper);
+        IssuePilotCli cli = new IssuePilotCli(null, null, null, discService, refService, null, passingPreflight, mongoConfig, objectMapper);
         cli.run("--help");
         assertEquals(0, cli.getExitCode());
 
-        cli.run("--daily-ingestion", "--days=7", "--source=github", "--allow-production-write=true");
+        cli.run("--daily-ingestion", "--target-env=staging", "--expected-host=staging-cluster", "--days=7", "--source=github");
         assertEquals(0, cli.getExitCode());
     }
 }
