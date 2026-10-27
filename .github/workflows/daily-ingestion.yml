@@ -46,10 +46,6 @@ on:
         description: 'Batch size for refreshing open issues'
         required: false
         default: '50'
-      expected_staging_host:
-        description: 'Expected staging cluster host or pattern (e.g. staging-cluster or staging.mongodb.net)'
-        required: false
-        default: 'staging'
 
 permissions:
   contents: read
@@ -79,7 +75,8 @@ jobs:
         env:
           TARGET_ENV: ${{ inputs.target_env || 'staging' }}
           STAGING_MONGODB_URI: ${{ secrets.STAGING_MONGODB_URI }}
-          EXPECTED_STAGING_HOST: ${{ inputs.expected_staging_host || secrets.EXPECTED_STAGING_HOST || vars.EXPECTED_STAGING_HOST || 'staging' }}
+          # Trusted repository secret/variable only; no user-provided override or placeholder fallback.
+          EXPECTED_STAGING_HOST: ${{ secrets.EXPECTED_STAGING_HOST || vars.EXPECTED_STAGING_HOST }}
         run: |
           set -euo pipefail
           echo "================================================="
@@ -100,7 +97,7 @@ jobs:
 
           if [ -z "${EXPECTED_STAGING_HOST:-}" ]; then
             echo "::error::Expected staging cluster host is missing or unconfigured."
-            echo "::error::Staging runs require an explicit, verified EXPECTED_STAGING_HOST."
+            echo "::error::Set EXPECTED_STAGING_HOST to the verified Atlas hostname or supported hostname suffix."
             exit 1
           fi
 
@@ -111,30 +108,25 @@ jobs:
           STAGING_MONGODB_URI: ${{ secrets.STAGING_MONGODB_URI }}
           MONGODB_URI: ${{ secrets.STAGING_MONGODB_URI }}
           MONGODB_DATABASE: "issue_pilot_staging"
-          EXPECTED_STAGING_HOST: ${{ inputs.expected_staging_host || secrets.EXPECTED_STAGING_HOST || vars.EXPECTED_STAGING_HOST || 'staging' }}
+          EXPECTED_STAGING_HOST: ${{ secrets.EXPECTED_STAGING_HOST || vars.EXPECTED_STAGING_HOST }}
           SCHEDULER_ENABLED: "false"
         run: |
           set -euo pipefail
           echo "Executing fail-closed Java staging isolation audit..."
-          java -Dspring.main.web-application-type=none \
-            -jar target/issue-pilot-*.jar \
-            --preflight-staging \
-            --expected-host="${EXPECTED_STAGING_HOST}"
+          java -Dspring.main.web-application-type=none             -jar target/issue-pilot-*.jar             --preflight-staging             --expected-host="${EXPECTED_STAGING_HOST}"
 
       - name: Run Standalone Ingestion Batch
         env:
-          # Required database connection secret: strictly staging
           STAGING_MONGODB_URI: ${{ secrets.STAGING_MONGODB_URI }}
           MONGODB_URI: ${{ secrets.STAGING_MONGODB_URI }}
           MONGODB_DATABASE: "issue_pilot_staging"
           TARGET_ENV: "staging"
-          EXPECTED_STAGING_HOST: ${{ inputs.expected_staging_host || secrets.EXPECTED_STAGING_HOST || vars.EXPECTED_STAGING_HOST || 'staging' }}
-          # Platform credentials (token/apiKey optional or recommended depending on rate-limit needs)
+          EXPECTED_STAGING_HOST: ${{ secrets.EXPECTED_STAGING_HOST || vars.EXPECTED_STAGING_HOST }}
           GITHUB_TOKEN: ${{ secrets.PAT_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
           CODEBERG_TOKEN: ${{ secrets.CODEBERG_TOKEN }}
+          BUGZILLA_BASE_URL: ${{ secrets.BUGZILLA_BASE_URL }}
           BUGZILLA_API_KEY: ${{ secrets.BUGZILLA_API_KEY }}
-          # Ingestion settings: disable internal recurring scheduler in CLI batch mode
           SCHEDULER_ENABLED: "false"
           INGESTION_ENABLED: "true"
         run: |
@@ -146,20 +138,13 @@ jobs:
           BATCH="${{ inputs.refresh_batch || '50' }}"
           EXP_HOST="${EXPECTED_STAGING_HOST}"
 
-          echo "Starting Issue Pilot daily ingestion batch (target_env=staging, days=${DAYS}, source=${SRC}, pages=${PAGES}, per_page=${PER_PAGE}, refresh_batch=${BATCH})..."
+          echo "Starting Issue Pilot ingestion batch (target_env=staging, days=${DAYS}, source=${SRC}, pages=${PAGES}, per_page=${PER_PAGE}, refresh_batch=${BATCH})..."
 
-          java -Dspring.main.web-application-type=none \
-            -jar target/issue-pilot-*.jar \
-            --daily-ingestion \
-            --target-env=staging \
-            --expected-host="${EXP_HOST}" \
-            --days="${DAYS}" \
-            --source="${SRC}" \
-            --pages="${PAGES}" \
-            --per-page="${PER_PAGE}" \
-            --refresh-batch="${BATCH}" | tee ingestion_output.txt
-
+          set +e
+          java -Dspring.main.web-application-type=none             -jar target/issue-pilot-*.jar             --daily-ingestion             --target-env=staging             --expected-host="${EXP_HOST}"             --days="${DAYS}"             --source="${SRC}"             --pages="${PAGES}"             --per-page="${PER_PAGE}"             --refresh-batch="${BATCH}" 2>&1 | tee ingestion_output.txt
           PIPE_STATUS="${PIPESTATUS[0]}"
+          set -e
+
           if [ "${PIPE_STATUS}" -ne 0 ]; then
             echo "Ingestion command failed with exit status ${PIPE_STATUS}"
             exit "${PIPE_STATUS}"
@@ -168,15 +153,19 @@ jobs:
       - name: Generate Summary Report
         if: always()
         run: |
-          echo "### Issue Pilot Daily Ingestion Run" >> $GITHUB_STEP_SUMMARY
-          echo "- **Target Environment**: ${{ inputs.target_env || 'staging' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Execution Mode**: Standalone CLI runner (non-web)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Platforms Targeted**: ${{ inputs.source || 'all' }} (GitHub, GitLab, Codeberg, Bugzilla)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Creation-Age Window**: ${{ inputs.creation_age_days || '30' }} days" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if [ -f ingestion_output.txt ]; then
-            echo "#### Execution Log Tail" >> $GITHUB_STEP_SUMMARY
-            echo '```json' >> $GITHUB_STEP_SUMMARY
-            grep -A 50 "DAILY INGESTION COMPLETE" ingestion_output.txt || tail -n 40 ingestion_output.txt >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-          fi
+          {
+            echo "### Issue Pilot Daily Ingestion Run"
+            echo "- **Target Environment**: ${{ inputs.target_env || 'staging' }}"
+            echo "- **Execution Mode**: Standalone CLI runner (non-web)"
+            echo "- **Platforms Targeted**: ${{ inputs.source || 'all' }}"
+            echo "- **Creation-Age Window**: ${{ inputs.creation_age_days || '30' }} days"
+            echo ""
+            if [ -f ingestion_output.txt ]; then
+              echo "#### Execution Log Tail"
+              echo '```text'
+              grep -A 50 "DAILY INGESTION COMPLETE" ingestion_output.txt || tail -n 40 ingestion_output.txt
+              echo '```'
+            else
+              echo "No ingestion output was produced."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
