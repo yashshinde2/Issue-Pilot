@@ -61,7 +61,7 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up JDK 21
         uses: actions/setup-java@v5
@@ -79,6 +79,7 @@ jobs:
         env:
           TARGET_ENV: ${{ inputs.target_env || 'staging' }}
           STAGING_MONGODB_URI: ${{ secrets.STAGING_MONGODB_URI }}
+          EXPECTED_STAGING_HOST: ${{ inputs.expected_staging_host || secrets.EXPECTED_STAGING_HOST || vars.EXPECTED_STAGING_HOST || 'staging' }}
         run: |
           set -euo pipefail
           echo "================================================="
@@ -97,7 +98,13 @@ jobs:
             exit 1
           fi
 
-          echo "Staging environment authorized and STAGING_MONGODB_URI secret verified present."
+          if [ -z "${EXPECTED_STAGING_HOST:-}" ]; then
+            echo "::error::Expected staging cluster host is missing or unconfigured."
+            echo "::error::Staging runs require an explicit, verified EXPECTED_STAGING_HOST."
+            exit 1
+          fi
+
+          echo "Staging environment authorized, STAGING_MONGODB_URI secret verified, and expected host configured."
 
       - name: Audit Staging Isolation (Java Preflight)
         env:

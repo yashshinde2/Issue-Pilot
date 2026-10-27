@@ -8,12 +8,16 @@ import com.issuepilot.service.DiscoveryService;
 import com.issuepilot.service.RefreshService;
 import com.issuepilot.service.StagingPreflightService;
 import com.issuepilot.service.StagingPreflightService.PreflightResult;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoDatabase;
+import org.bson.Document;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.lang.reflect.Field;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -245,5 +249,180 @@ public class StagingIsolationPreflightTest {
         assertFalse(result.isPassed());
         assertFalse(result.getChecks().get("staging_cluster_identity_verified"));
         assertTrue(result.getErrors().stream().anyMatch(e -> e.contains("Expected staging cluster identity") && e.contains("points to production cluster")));
+    }
+
+    @Test
+    @DisplayName("11. Regression: Safe Numeric ok validation handles Integer(1), Double(1.0), and Long(1)")
+    public void testNumericOkValidationHandlesVariousTypes() {
+        // Integer(1)
+        Document intDoc = new Document("ok", Integer.valueOf(1));
+        assertTrue(StagingPreflightService.isCommandOk(intDoc), "Integer(1) must be recognized as ok=1");
+        assertTrue(StagingPreflightService.isPingOk(intDoc), "isPingOk must accept Integer(1)");
+
+        // Double(1.0)
+        Document dblDoc = new Document("ok", Double.valueOf(1.0));
+        assertTrue(StagingPreflightService.isCommandOk(dblDoc), "Double(1.0) must be recognized as ok=1");
+        assertTrue(StagingPreflightService.isPingOk(dblDoc), "isPingOk must accept Double(1.0)");
+
+        // Long(1)
+        Document lngDoc = new Document("ok", Long.valueOf(1L));
+        assertTrue(StagingPreflightService.isCommandOk(lngDoc), "Long(1L) must be recognized as ok=1");
+        assertTrue(StagingPreflightService.isPingOk(lngDoc), "isPingOk must accept Long(1L)");
+
+        // Float(1.0f)
+        Document fltDoc = new Document("ok", Float.valueOf(1.0f));
+        assertTrue(StagingPreflightService.isCommandOk(fltDoc), "Float(1.0f) must be recognized as ok=1");
+
+        // Missing ok field
+        Document missingDoc = new Document();
+        assertFalse(StagingPreflightService.isCommandOk(missingDoc), "Missing ok field must evaluate to false");
+        assertFalse(StagingPreflightService.isPingOk(missingDoc), "Missing ok field must evaluate to false");
+
+        // Null ok value
+        Document nullDoc = new Document("ok", null);
+        assertFalse(StagingPreflightService.isCommandOk(nullDoc), "Null ok value must evaluate to false");
+
+        // Null document
+        assertFalse(StagingPreflightService.isCommandOk(null), "Null document must evaluate to false");
+
+        // Non-numeric ok values (strings, booleans, objects)
+        assertFalse(StagingPreflightService.isCommandOk(new Document("ok", "1")), "String '1' must not be recognized as numeric ok=1");
+        assertFalse(StagingPreflightService.isCommandOk(new Document("ok", "true")), "String 'true' must evaluate to false");
+        assertFalse(StagingPreflightService.isCommandOk(new Document("ok", Boolean.TRUE)), "Boolean TRUE must evaluate to false");
+        assertFalse(StagingPreflightService.isCommandOk(new Document("ok", List.of(1))), "List must evaluate to false");
+
+        // Unsuccessful numeric values (0, 0.0, 2, negative)
+        assertFalse(StagingPreflightService.isCommandOk(new Document("ok", Integer.valueOf(0))), "Integer(0) must evaluate to false");
+        assertFalse(StagingPreflightService.isCommandOk(new Document("ok", Double.valueOf(0.0))), "Double(0.0) must evaluate to false");
+        assertFalse(StagingPreflightService.isCommandOk(new Document("ok", Long.valueOf(0L))), "Long(0L) must evaluate to false");
+        assertFalse(StagingPreflightService.isCommandOk(new Document("ok", Integer.valueOf(2))), "Integer(2) must evaluate to false");
+        assertFalse(StagingPreflightService.isCommandOk(new Document("ok", Integer.valueOf(-1))), "Integer(-1) must evaluate to false");
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> T createProxy(Class<T> iface, java.lang.reflect.InvocationHandler handler) {
+        return (T) java.lang.reflect.Proxy.newProxyInstance(iface.getClassLoader(), new Class<?>[]{iface}, handler);
+    }
+
+    private StagingPreflightService createMockedPreflightService(Document pingResponse, boolean throwOnPing) throws Exception {
+        AppProperties props = new AppProperties();
+        setField(props, "mongodbUri", "mongodb+srv://synthetic_user:synthetic_pwd@staging-cluster0.staging.example.net/issue_pilot_staging");
+        setField(props, "mongodbDatabase", "issue_pilot_staging");
+        setField(props, "expectedStagingHost", "staging.example.net");
+
+        MongoConfig mongoConfig = new MongoConfig(props);
+
+        MongoDatabase mockDb = createProxy(MongoDatabase.class, (proxy, method, args) -> {
+            if ("runCommand".equals(method.getName())) {
+                if (throwOnPing) {
+                    throw new RuntimeException("Simulated connection timeout to staging host");
+                }
+                Document cmd = (Document) args[0];
+                if (cmd.containsKey("ping")) {
+                    return pingResponse;
+                }
+                if (cmd.containsKey("connectionStatus")) {
+                    return new Document("ok", 1);
+                }
+            }
+            return null;
+        });
+
+        MongoClient mockClient = createProxy(MongoClient.class, (proxy, method, args) -> {
+            if ("getDatabase".equals(method.getName())) {
+                return mockDb;
+            }
+            return null;
+        });
+
+        setField(mongoConfig, "mongoClient", mockClient);
+
+        return new StagingPreflightService(mongoConfig, props, objectMapper);
+    }
+
+    @Test
+    @DisplayName("12. Regression: Staging Preflight succeeds when ping returns Integer(1)")
+    public void testStagingPreflightSucceedsWithIntegerPingOk() throws Exception {
+        // Simulates the exact GitHub Actions case: MongoDB driver returns Integer(1)
+        StagingPreflightService service = createMockedPreflightService(new Document("ok", Integer.valueOf(1)), false);
+
+        PreflightResult result = service.validateStagingEnvironment(true, "staging.example.net");
+
+        assertTrue(result.isPassed(), "Preflight must pass when ping returns Integer(1)");
+        assertTrue(result.getChecks().get("connectivity_ping"), "connectivity_ping check must pass for Integer(1)");
+        assertTrue(result.getChecks().get("staging_cluster_identity_verified"));
+        assertTrue(result.getChecks().get("cluster_level_isolation"));
+        assertEquals("DEDICATED_STAGING_CLUSTER", result.getClusterIsolationLevel());
+        assertTrue(result.getMessages().stream().anyMatch(m -> m.contains("Successfully pinged target staging database")));
+    }
+
+    @Test
+    @DisplayName("13. Regression: Staging Preflight succeeds when ping returns Double(1.0)")
+    public void testStagingPreflightSucceedsWithDoublePingOk() throws Exception {
+        StagingPreflightService service = createMockedPreflightService(new Document("ok", Double.valueOf(1.0)), false);
+
+        PreflightResult result = service.validateStagingEnvironment(true, "staging.example.net");
+
+        assertTrue(result.isPassed(), "Preflight must pass when ping returns Double(1.0)");
+        assertTrue(result.getChecks().get("connectivity_ping"), "connectivity_ping check must pass for Double(1.0)");
+    }
+
+    @Test
+    @DisplayName("14. Regression: Staging Preflight succeeds when ping returns Long(1L)")
+    public void testStagingPreflightSucceedsWithLongPingOk() throws Exception {
+        StagingPreflightService service = createMockedPreflightService(new Document("ok", Long.valueOf(1L)), false);
+
+        PreflightResult result = service.validateStagingEnvironment(true, "staging.example.net");
+
+        assertTrue(result.isPassed(), "Preflight must pass when ping returns Long(1L)");
+        assertTrue(result.getChecks().get("connectivity_ping"), "connectivity_ping check must pass for Long(1L)");
+    }
+
+    @Test
+    @DisplayName("15. Regression: Staging Preflight fails when ping ok is missing")
+    public void testStagingPreflightFailsWhenPingOkMissing() throws Exception {
+        StagingPreflightService service = createMockedPreflightService(new Document(), false);
+
+        PreflightResult result = service.validateStagingEnvironment(true, "staging.example.net");
+
+        assertFalse(result.isPassed(), "Preflight must fail when ping result is missing 'ok'");
+        assertFalse(result.getChecks().get("connectivity_ping"), "connectivity_ping check must fail");
+        assertTrue(result.getErrors().stream().anyMatch(e -> e.contains("Database ping did not return ok=1")));
+    }
+
+    @Test
+    @DisplayName("16. Regression: Staging Preflight fails when ping ok is non-numeric")
+    public void testStagingPreflightFailsWhenPingOkNonNumeric() throws Exception {
+        StagingPreflightService service = createMockedPreflightService(new Document("ok", "true"), false);
+
+        PreflightResult result = service.validateStagingEnvironment(true, "staging.example.net");
+
+        assertFalse(result.isPassed(), "Preflight must fail when ping ok is a String");
+        assertFalse(result.getChecks().get("connectivity_ping"), "connectivity_ping check must fail");
+        assertTrue(result.getErrors().stream().anyMatch(e -> e.contains("Database ping did not return ok=1")));
+    }
+
+    @Test
+    @DisplayName("17. Regression: Staging Preflight fails when ping ok is unsuccessful (0)")
+    public void testStagingPreflightFailsWhenPingOkZero() throws Exception {
+        StagingPreflightService service = createMockedPreflightService(new Document("ok", Integer.valueOf(0)), false);
+
+        PreflightResult result = service.validateStagingEnvironment(true, "staging.example.net");
+
+        assertFalse(result.isPassed(), "Preflight must fail when ping returns ok=0");
+        assertFalse(result.getChecks().get("connectivity_ping"), "connectivity_ping check must fail");
+        assertTrue(result.getErrors().stream().anyMatch(e -> e.contains("Database ping did not return ok=1")));
+    }
+
+    @Test
+    @DisplayName("18. Fail-Closed: Staging Preflight fails when ping throws exception")
+    public void testStagingPreflightFailsClosedWhenPingThrowsException() throws Exception {
+        StagingPreflightService service = createMockedPreflightService(null, true);
+
+        PreflightResult result = service.validateStagingEnvironment(true, "staging.example.net");
+
+        assertFalse(result.isPassed(), "Preflight must fail closed when ping throws");
+        assertFalse(result.getChecks().get("connectivity_ping"), "connectivity_ping check must fail");
+        assertTrue(result.getErrors().stream().anyMatch(e -> e.contains("Failed to connect or ping target staging database")));
     }
 }

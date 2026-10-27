@@ -146,6 +146,35 @@ public class StagingPreflightService {
         }
     }
 
+    /**
+     * Safely validates the "ok" status in a MongoDB command response document.
+     * Handles numeric representations (Double, Integer, Long, etc.) without ClassCastException,
+     * and strictly rejects missing, non-numeric, or non-1 values.
+     *
+     * @param commandResult the MongoDB command result Document
+     * @return true if the "ok" field is present, numeric, and equals 1; false otherwise
+     */
+    public static boolean isCommandOk(Document commandResult) {
+        if (commandResult == null) {
+            return false;
+        }
+        Object okValue = commandResult.get("ok");
+        if (okValue instanceof Number number) {
+            return Double.compare(number.doubleValue(), 1.0) == 0;
+        }
+        return false;
+    }
+
+    /**
+     * Helper alias for isCommandOk specifically for MongoDB ping results.
+     *
+     * @param pingResult the MongoDB ping response Document
+     * @return true if ping response indicates success (ok=1); false otherwise
+     */
+    public static boolean isPingOk(Document pingResult) {
+        return isCommandOk(pingResult);
+    }
+
     public PreflightResult validateStagingEnvironment() {
         return validateStagingEnvironment(true, null);
     }
@@ -329,12 +358,12 @@ public class StagingPreflightService {
 
             MongoDatabase stagingDb = client.getDatabase(effectiveDb);
             Document pingResult = stagingDb.runCommand(new Document("ping", 1));
-            if (pingResult.getDouble("ok") != null && pingResult.getDouble("ok") == 1.0) {
+            if (isCommandOk(pingResult)) {
                 result.getChecks().put("connectivity_ping", true);
                 result.getMessages().add("Successfully pinged target staging database '" + effectiveDb + "'.");
             } else {
                 result.getChecks().put("connectivity_ping", false);
-                result.getErrors().add("Database ping did not return ok=1: " + pingResult.toJson());
+                result.getErrors().add("Database ping did not return ok=1: " + (pingResult != null ? pingResult.toJson() : "null"));
                 result.setPassed(false);
                 return result;
             }
