@@ -18,8 +18,10 @@ import java.util.*;
  * Validates that an environment is strictly isolated for staging or testing
  * before any ingestion or write operation is permitted.
  *
- * Implements a strict fail-closed policy: any ambiguity, missing staging credentials,
- * missing expected staging cluster identity, inconsistency between URI and configured DB,
+ * Implements a strict fail-closed policy: any ambiguity, missing staging
+ * credentials,
+ * missing expected staging cluster identity, inconsistency between URI and
+ * configured DB,
  * or detection of production identifiers aborts execution immediately.
  */
 @Service
@@ -35,8 +37,7 @@ public class StagingPreflightService {
             "default",
             "admin",
             "local",
-            "config"
-    );
+            "config");
 
     private static final String KNOWN_PRODUCTION_CLUSTER_PATTERN = "cluster0.eueidog.mongodb.net";
     private static final String KNOWN_PRODUCTION_CLUSTER_KEYWORD = "eueidog";
@@ -148,11 +149,13 @@ public class StagingPreflightService {
 
     /**
      * Safely validates the "ok" status in a MongoDB command response document.
-     * Handles numeric representations (Double, Integer, Long, etc.) without ClassCastException,
+     * Handles numeric representations (Double, Integer, Long, etc.) without
+     * ClassCastException,
      * and strictly rejects missing, non-numeric, or non-1 values.
      *
      * @param commandResult the MongoDB command result Document
-     * @return true if the "ok" field is present, numeric, and equals 1; false otherwise
+     * @return true if the "ok" field is present, numeric, and equals 1; false
+     *         otherwise
      */
     public static boolean isCommandOk(Document commandResult) {
         if (commandResult == null) {
@@ -189,10 +192,13 @@ public class StagingPreflightService {
      *
      * Cluster-level isolation is mandatory: connection to the production cluster is
      * unconditionally rejected, even if an isolated database name is used.
-     * An expected staging cluster identity must be explicitly configured and verified.
+     * An expected staging cluster identity must be explicitly configured and
+     * verified.
      *
-     * @param requireIsolatedCluster maintained for compatibility; isolation is always strictly enforced
-     * @param expectedStagingHost required expected host substring or pattern for staging
+     * @param requireIsolatedCluster maintained for compatibility; isolation is
+     *                               always strictly enforced
+     * @param expectedStagingHost    required expected host substring or pattern for
+     *                               staging
      * @return PreflightResult containing check details and pass/fail status
      */
     public PreflightResult validateStagingEnvironment(boolean requireIsolatedCluster, String expectedStagingHost) {
@@ -212,7 +218,8 @@ public class StagingPreflightService {
         // Check URI presence - fail closed
         if (rawUri == null || rawUri.isBlank()) {
             result.getChecks().put("uri_configured", false);
-            result.getErrors().add("CRITICAL VIOLATION: Missing staging MongoDB URI. A dedicated staging URI must be configured. Cannot fall back to local defaults or production credentials.");
+            result.getErrors().add(
+                    "CRITICAL VIOLATION: Missing staging MongoDB URI. A dedicated staging URI must be configured. Cannot fall back to local defaults or production credentials.");
             result.setPassed(false);
             return result;
         }
@@ -239,7 +246,8 @@ public class StagingPreflightService {
         String uriDb = connectionString.getDatabase();
         String configuredDb = properties.getMongodbDatabase();
 
-        // Conflict check: if both URI and configuredDb specify a database, they MUST match
+        // Conflict check: if both URI and configuredDb specify a database, they MUST
+        // match
         if (uriDb != null && !uriDb.isBlank() && configuredDb != null && !configuredDb.isBlank()) {
             if (!uriDb.trim().equalsIgnoreCase(configuredDb.trim())) {
                 result.getChecks().put("database_name_consistent", false);
@@ -258,7 +266,8 @@ public class StagingPreflightService {
 
         if (effectiveDb == null || effectiveDb.isBlank()) {
             result.getChecks().put("database_name_safe", false);
-            result.getErrors().add("CRITICAL VIOLATION: Missing target database name. Staging execution requires an explicitly named database.");
+            result.getErrors().add(
+                    "CRITICAL VIOLATION: Missing target database name. Staging execution requires an explicitly named database.");
             result.setPassed(false);
             return result;
         }
@@ -287,17 +296,18 @@ public class StagingPreflightService {
 
         // 4. Cluster-level isolation check: Unconditionally reject production cluster
         List<String> hosts = connectionString.getHosts();
-        boolean targetsProductionCluster = hosts.stream().anyMatch(h ->
-                h != null && (h.toLowerCase().contains(KNOWN_PRODUCTION_CLUSTER_KEYWORD) ||
-                              h.toLowerCase().contains(KNOWN_PRODUCTION_CLUSTER_PATTERN.toLowerCase()) ||
-                              h.equalsIgnoreCase("cluster0.eueidog.mongodb.net"))
-        );
+        boolean targetsProductionCluster = hosts.stream()
+                .anyMatch(h -> h != null && (h.toLowerCase().contains(KNOWN_PRODUCTION_CLUSTER_KEYWORD) ||
+                        h.toLowerCase().contains(KNOWN_PRODUCTION_CLUSTER_PATTERN.toLowerCase()) ||
+                        h.equalsIgnoreCase("cluster0.eueidog.mongodb.net")));
 
         if (targetsProductionCluster) {
             result.setClusterIsolationLevel("REJECTED_PRODUCTION_CLUSTER");
             result.getChecks().put("cluster_level_isolation", false);
             result.getErrors().add("CRITICAL VIOLATION: Connection points to production Atlas cluster host ('" +
-                    KNOWN_PRODUCTION_CLUSTER_PATTERN + "'). Staging execution is strictly prohibited on the production cluster, even if an isolated database name like '" +
+                    KNOWN_PRODUCTION_CLUSTER_PATTERN
+                    + "'). Staging execution is strictly prohibited on the production cluster, even if an isolated database name like '"
+                    +
                     effectiveDb + "' is specified.");
             result.setPassed(false);
             return result;
@@ -317,16 +327,19 @@ public class StagingPreflightService {
 
         if (expectedHost == null || expectedHost.isBlank()) {
             result.getChecks().put("staging_cluster_identity_verified", false);
-            result.getErrors().add("CRITICAL VIOLATION: Missing expected staging cluster identity. Staging preflight requires a configured, independently verified staging cluster identity or approved staging-host set (EXPECTED_STAGING_HOST).");
+            result.getErrors().add(
+                    "CRITICAL VIOLATION: Missing expected staging cluster identity. Staging preflight requires a configured, independently verified staging cluster identity or approved staging-host set (EXPECTED_STAGING_HOST).");
             result.setPassed(false);
             return result;
         }
 
         // Expected host must not match production
         String lowerExpected = expectedHost.toLowerCase().trim();
-        if (lowerExpected.contains(KNOWN_PRODUCTION_CLUSTER_KEYWORD) || lowerExpected.contains(KNOWN_PRODUCTION_CLUSTER_PATTERN.toLowerCase())) {
+        if (lowerExpected.contains(KNOWN_PRODUCTION_CLUSTER_KEYWORD)
+                || lowerExpected.contains(KNOWN_PRODUCTION_CLUSTER_PATTERN.toLowerCase())) {
             result.getChecks().put("staging_cluster_identity_verified", false);
-            result.getErrors().add("CRITICAL VIOLATION: Expected staging cluster identity ('" + expectedHost + "') points to production cluster. Production cluster cannot be designated as staging.");
+            result.getErrors().add("CRITICAL VIOLATION: Expected staging cluster identity ('" + expectedHost
+                    + "') points to production cluster. Production cluster cannot be designated as staging.");
             result.setPassed(false);
             return result;
         }
@@ -363,7 +376,8 @@ public class StagingPreflightService {
                 result.getMessages().add("Successfully pinged target staging database '" + effectiveDb + "'.");
             } else {
                 result.getChecks().put("connectivity_ping", false);
-                result.getErrors().add("Database ping did not return ok=1: " + (pingResult != null ? pingResult.toJson() : "null"));
+                result.getErrors().add(
+                        "Database ping did not return ok=1: " + (pingResult != null ? pingResult.toJson() : "null"));
                 result.setPassed(false);
                 return result;
             }
@@ -371,7 +385,8 @@ public class StagingPreflightService {
             // 7. Check user privileges and ensure no write access to production
             try {
                 Document connStatus = stagingDb.runCommand(new Document("connectionStatus", 1));
-                logger.debug("Database user connectionStatus inspected: ok={}", connStatus != null ? connStatus.get("ok") : null);
+                logger.debug("Database user connectionStatus inspected: ok={}",
+                        connStatus != null ? connStatus.get("ok") : null);
                 result.getChecks().put("connection_status_inspected", true);
                 result.getMessages().add("Inspected database user connectionStatus.");
             } catch (Exception authEx) {
