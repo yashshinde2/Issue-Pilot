@@ -3,13 +3,19 @@ package com.issuepilot.adapter;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.issuepilot.config.AppProperties;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -19,18 +25,26 @@ import java.util.*;
 @Component
 public class GitLabAdapter implements BaseIssueSourceAdapter {
 
+    private static final Logger logger = LoggerFactory.getLogger(GitLabAdapter.class);
+
     private final AppProperties properties;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final Map<String, Object> rateLimitState = new HashMap<>();
     private String lastSuccessfulCheckAt = null;
+    private final Random random = new Random();
 
+    @Autowired
     public GitLabAdapter(AppProperties properties, ObjectMapper objectMapper) {
+        this(properties, objectMapper, HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(Math.max(10, properties.getGitlabRequestTimeoutSeconds() > 0 ? properties.getGitlabRequestTimeoutSeconds() : 20)))
+                .build());
+    }
+
+    public GitLabAdapter(AppProperties properties, ObjectMapper objectMapper, HttpClient httpClient) {
         this.properties = properties;
         this.objectMapper = objectMapper;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(properties.getGitlabRequestTimeoutSeconds()))
-                .build();
+        this.httpClient = httpClient;
 
         rateLimitState.put("limit", 2000);
         rateLimitState.put("remaining", 2000);
@@ -52,12 +66,22 @@ public class GitLabAdapter implements BaseIssueSourceAdapter {
         return Collections.unmodifiableMap(rateLimitState);
     }
 
+    public String sanitizeErrorMessage(String msg) {
+        if (msg == null) return "unknown error";
+        String token = properties.getGitlabToken();
+        if (token != null && !token.isBlank() && token.length() >= 4) {
+            return msg.replace(token, "[REDACTED_GITLAB_TOKEN]");
+        }
+        return msg;
+    }
+
     private HttpRequest.Builder newRequestBuilder(String url) {
+        int timeoutSec = properties.getGitlabRequestTimeoutSeconds() > 0 ? properties.getGitlabRequestTimeoutSeconds() : 20;
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .header("Accept", "application/json")
                 .header("User-Agent", "IssuePilot/1.1")
-                .timeout(Duration.ofSeconds(properties.getGitlabRequestTimeoutSeconds()));
+                .timeout(Duration.ofSeconds(timeoutSec));
 
         String token = properties.getGitlabToken();
         if (token != null && !token.isBlank()) {
@@ -78,6 +102,71 @@ public class GitLabAdapter implements BaseIssueSourceAdapter {
         });
     }
 
+    /**
+     * Executes HTTP requests with bounded retries, exponential backoff, and jitter
+     * on timeouts and HTTP 5xx errors. Respects Retry-After on 429 responses.
+     */
+    public HttpResponse<String> executeWithRetry(HttpRequest request) throws Exception {
+        int maxRetries = Math.max(0, properties.getGitlabMaxRetries());
+        int attempt = 0;
+        long baseBackoffMs = 300;
+
+        while (true) {
+            attempt++;
+            try {
+                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                extractRateLimit(response);
+
+                int status = response.statusCode();
+
+                // Respect Retry-After on HTTP 429
+                if (status == 429) {
+                    Optional<String> retryAfter = response.headers().firstValue("Retry-After");
+                    long waitMs = 1000;
+                    if (retryAfter.isPresent()) {
+                        try {
+                            waitMs = Long.parseLong(retryAfter.get()) * 1000;
+                        } catch (NumberFormatException ignored) {}
+                    }
+                    if (attempt <= maxRetries && waitMs <= 10000) {
+                        logger.warn("GitLab rate limited (429), waiting {}ms (attempt {}/{})", waitMs, attempt, maxRetries);
+                        Thread.sleep(waitMs);
+                        continue;
+                    }
+                    throw new RateLimitExceededException("GitLab rate limit exceeded", (Long) rateLimitState.get("reset"), 0);
+                }
+
+                // Retry on HTTP 5xx responses (500, 502, 503, 504)
+                if (status >= 500 && status <= 599) {
+                    if (attempt <= maxRetries) {
+                        long jitter = random.nextInt(200);
+                        long sleepMs = (baseBackoffMs * (1L << (attempt - 1))) + jitter;
+                        logger.warn("GitLab server error HTTP {}, retrying in {}ms (attempt {}/{})", status, sleepMs, attempt, maxRetries);
+                        Thread.sleep(sleepMs);
+                        continue;
+                    }
+                    throw new SourceAPIException("GitLab API returned HTTP " + status + " after " + attempt + " attempts", status);
+                }
+
+                return response;
+
+            } catch (IOException e) {
+                if (attempt <= maxRetries) {
+                    long jitter = random.nextInt(200);
+                    long sleepMs = (baseBackoffMs * (1L << (attempt - 1))) + jitter;
+                    logger.warn("GitLab transient network failure ({}: {}), retrying in {}ms (attempt {}/{})",
+                            e.getClass().getSimpleName(), sanitizeErrorMessage(e.getMessage()), sleepMs, attempt, maxRetries);
+                    Thread.sleep(sleepMs);
+                } else {
+                    throw new TransientAPIException("GitLab request timed out / failed after " + attempt + " attempts: " + sanitizeErrorMessage(e.getMessage()));
+                }
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw new TransientAPIException("GitLab request interrupted: " + sanitizeErrorMessage(ie.getMessage()));
+            }
+        }
+    }
+
     @Override
     public Map<String, Object> checkHealth() {
         Map<String, Object> report = new LinkedHashMap<>();
@@ -90,8 +179,7 @@ public class GitLabAdapter implements BaseIssueSourceAdapter {
         try {
             String url = properties.getGitlabApiBaseUrl() + "/issues?per_page=1&scope=all";
             HttpRequest request = newRequestBuilder(url).GET().build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            extractRateLimit(response);
+            HttpResponse<String> response = executeWithRetry(request);
 
             int status = response.statusCode();
             if (status == 200) {
@@ -134,7 +222,7 @@ public class GitLabAdapter implements BaseIssueSourceAdapter {
             report.put("api_version", "v4");
             report.put("rate_limit_info", rateLimitState);
             report.put("last_successful_check_at", lastSuccessfulCheckAt);
-            report.put("error_message", "Connection error: " + e.getMessage());
+            report.put("error_message", "Connection error: " + sanitizeErrorMessage(e.getMessage()));
             report.put("recommended_action", "Check GitLab reachability.");
             report.put("ingestion_enabled", false);
         }
@@ -160,8 +248,7 @@ public class GitLabAdapter implements BaseIssueSourceAdapter {
                     properties.getGitlabApiBaseUrl(), createdAfterParam, encodedQuery, page, perPage, order);
 
             HttpRequest request = newRequestBuilder(url).GET().build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            extractRateLimit(response);
+            HttpResponse<String> response = executeWithRetry(request);
 
             if (response.statusCode() == 429) {
                 throw new RateLimitExceededException("GitLab rate limit exceeded", (Long) rateLimitState.get("reset"), 0);
@@ -185,7 +272,7 @@ public class GitLabAdapter implements BaseIssueSourceAdapter {
         } catch (SourceAPIException e) {
             throw e;
         } catch (Exception e) {
-            throw new TransientAPIException("Error searching GitLab issues: " + e.getMessage());
+            throw new TransientAPIException("Error searching GitLab issues: " + sanitizeErrorMessage(e.getMessage()));
         }
     }
 
@@ -198,8 +285,7 @@ public class GitLabAdapter implements BaseIssueSourceAdapter {
                     properties.getGitlabApiBaseUrl(), encodedProject, issueNumber);
 
             HttpRequest request = newRequestBuilder(url).GET().build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            extractRateLimit(response);
+            HttpResponse<String> response = executeWithRetry(request);
 
             if (response.statusCode() == 404) {
                 return null;
@@ -215,7 +301,7 @@ public class GitLabAdapter implements BaseIssueSourceAdapter {
         } catch (SourceAPIException e) {
             throw e;
         } catch (Exception e) {
-            throw new TransientAPIException("Error getting GitLab issue: " + e.getMessage());
+            throw new TransientAPIException("Error getting GitLab issue: " + sanitizeErrorMessage(e.getMessage()));
         }
     }
 

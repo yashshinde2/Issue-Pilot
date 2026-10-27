@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.issuepilot.config.AppProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
@@ -29,16 +30,37 @@ public class CodebergAdapter implements BaseIssueSourceAdapter {
     private final Map<String, Object> rateLimitState = new HashMap<>();
     private String lastSuccessfulCheckAt = null;
 
+    private volatile boolean globalSearchDisabledOrFailing = false;
+    private volatile String lastGlobalSearchError = null;
+
+    @Autowired
     public CodebergAdapter(AppProperties properties, ObjectMapper objectMapper) {
+        this(properties, objectMapper, HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(Math.max(5, properties.getCodebergRequestTimeoutSeconds())))
+                .build());
+    }
+
+    public CodebergAdapter(AppProperties properties, ObjectMapper objectMapper, HttpClient httpClient) {
         this.properties = properties;
         this.objectMapper = objectMapper;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(properties.getCodebergRequestTimeoutSeconds()))
-                .build();
+        this.httpClient = httpClient;
 
         rateLimitState.put("limit", 1000);
         rateLimitState.put("remaining", 1000);
         rateLimitState.put("reset", System.currentTimeMillis() / 1000 + 60);
+    }
+
+    public void resetGlobalSearchState() {
+        this.globalSearchDisabledOrFailing = false;
+        this.lastGlobalSearchError = null;
+    }
+
+    public boolean isGlobalSearchFailing() {
+        return globalSearchDisabledOrFailing;
+    }
+
+    public String getLastGlobalSearchError() {
+        return lastGlobalSearchError;
     }
 
     @Override
@@ -61,7 +83,7 @@ public class CodebergAdapter implements BaseIssueSourceAdapter {
                 .uri(URI.create(url))
                 .header("Accept", "application/json")
                 .header("User-Agent", "IssuePilot/1.1")
-                .timeout(Duration.ofSeconds(properties.getCodebergRequestTimeoutSeconds()));
+                .timeout(Duration.ofSeconds(Math.max(5, properties.getCodebergRequestTimeoutSeconds() > 0 ? properties.getCodebergRequestTimeoutSeconds() : 15)));
 
         String token = properties.getCodebergToken();
         if (token != null && !token.isBlank()) {
@@ -170,61 +192,97 @@ public class CodebergAdapter implements BaseIssueSourceAdapter {
             }
             cleanQuery = cleanQuery.replaceAll("(?i)(is:issue|is:open|language:|in:title,body|label:\"[^\"]+\"|label:[^\\s]+)", "").trim();
 
-            String encodedQuery = URLEncoder.encode(cleanQuery, StandardCharsets.UTF_8);
-            String url = String.format("%s/repos/issues/search?q=%s&page=%d&limit=%d&state=open&type=issues",
-                    properties.getCodebergApiBaseUrl(), encodedQuery, page, perPage);
+            // 1. Attempt global search if not previously detected as failing in this run
+            if (!globalSearchDisabledOrFailing) {
+                String encodedQuery = URLEncoder.encode(cleanQuery, StandardCharsets.UTF_8);
+                String url = String.format("%s/repos/issues/search?q=%s&page=%d&limit=%d&state=open&type=issues",
+                        properties.getCodebergApiBaseUrl(), encodedQuery, page, perPage);
 
-            HttpRequest request = newRequestBuilder(url).GET().build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            extractRateLimit(response);
+                HttpRequest request = newRequestBuilder(url).GET().build();
+                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                extractRateLimit(response);
 
-            if (response.statusCode() == 429) {
-                throw new RateLimitExceededException("Codeberg rate limit exceeded", (Long) rateLimitState.get("reset"), 0);
-            }
-            if (response.statusCode() == 200) {
-                List<Map<String, Object>> items = objectMapper.readValue(response.body(), new TypeReference<>() {});
-                int total = items.size();
-                Optional<String> totalHeader = response.headers().firstValue("x-total-count");
-                if (totalHeader.isPresent()) {
-                    try { total = Integer.parseInt(totalHeader.get()); } catch (Exception ignored) {}
+                if (response.statusCode() == 429) {
+                    throw new RateLimitExceededException("Codeberg rate limit exceeded", (Long) rateLimitState.get("reset"), 0);
                 }
-                Map<String, Object> result = new LinkedHashMap<>();
-                result.put("total_count", total);
-                result.put("items", items);
-                result.put("rate_limit", rateLimitState);
-                return result;
+
+                if (response.statusCode() == 200) {
+                    List<Map<String, Object>> items = objectMapper.readValue(response.body(), new TypeReference<>() {});
+                    int total = items.size();
+                    Optional<String> totalHeader = response.headers().firstValue("x-total-count");
+                    if (totalHeader.isPresent()) {
+                        try { total = Integer.parseInt(totalHeader.get()); } catch (Exception ignored) {}
+                    }
+                    Map<String, Object> result = new LinkedHashMap<>();
+                    result.put("total_count", total);
+                    result.put("items", items);
+                    result.put("rate_limit", rateLimitState);
+                    result.put("global_search_status", "completed");
+                    result.put("fallback_used", false);
+                    return result;
+                }
+
+                // Treat HTTP 500 as a source endpoint failure, not a valid empty result.
+                // Mark global search as failing for this run so we avoid repeating failing requests across stacks.
+                globalSearchDisabledOrFailing = true;
+                lastGlobalSearchError = "Codeberg global search endpoint failed with HTTP " + response.statusCode();
+                logger.warn("Codeberg global search returned HTTP {}, treating as endpoint failure and falling back to curated repository search (bypassing subsequent global searches in this run)", response.statusCode());
+            } else {
+                logger.debug("Codeberg global search already known to be failing in this run; skipping global search and using curated repository fallback");
             }
 
-            // Fallback when global fulltext search is disabled (Codeberg HTTP 500)
-            logger.info("Codeberg global search returned {}, falling back to curated repository issues", response.statusCode());
+            // 2. Curated repository fallback with bounded requests
             List<String> fallbackRepos = List.of("forgejo/forgejo", "Codeberg/Community");
             List<Map<String, Object>> collectedItems = new ArrayList<>();
+            List<String> fallbackErrors = new ArrayList<>();
+            boolean fallbackSuccess = false;
 
             for (String repoPath : fallbackRepos) {
-                String repoIssuesUrl = String.format("%s/repos/%s/issues?state=open&page=%d&limit=%d",
-                        properties.getCodebergApiBaseUrl(), repoPath, page, perPage);
-                HttpRequest repoReq = newRequestBuilder(repoIssuesUrl).GET().build();
-                HttpResponse<String> repoResp = httpClient.send(repoReq, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-                extractRateLimit(repoResp);
-                if (repoResp.statusCode() == 200) {
-                    List<Map<String, Object>> repoItems = objectMapper.readValue(repoResp.body(), new TypeReference<>() {});
-                    for (Map<String, Object> item : repoItems) {
-                        if (!item.containsKey("repository")) {
-                            String[] p = repoPath.split("/");
-                            item.put("repository", Map.of("full_name", repoPath, "owner", Map.of("username", p[0]), "name", p[1]));
+                try {
+                    String repoIssuesUrl = String.format("%s/repos/%s/issues?state=open&page=%d&limit=%d",
+                            properties.getCodebergApiBaseUrl(), repoPath, page, perPage);
+                    HttpRequest repoReq = newRequestBuilder(repoIssuesUrl).GET().build();
+                    HttpResponse<String> repoResp = httpClient.send(repoReq, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                    extractRateLimit(repoResp);
+
+                    if (repoResp.statusCode() == 200) {
+                        fallbackSuccess = true;
+                        List<Map<String, Object>> repoItems = objectMapper.readValue(repoResp.body(), new TypeReference<>() {});
+                        for (Map<String, Object> item : repoItems) {
+                            if (!item.containsKey("repository")) {
+                                String[] p = repoPath.split("/");
+                                item.put("repository", Map.of("full_name", repoPath, "owner", Map.of("username", p[0]), "name", p[1]));
+                            }
+                            collectedItems.add(item);
+                            if (collectedItems.size() >= perPage) break;
                         }
-                        collectedItems.add(item);
-                        if (collectedItems.size() >= perPage) break;
+                    } else {
+                        fallbackErrors.add("Repo " + repoPath + " returned HTTP " + repoResp.statusCode());
                     }
+                } catch (Exception e) {
+                    fallbackErrors.add("Repo " + repoPath + " request failed: " + e.getMessage());
                 }
                 if (collectedItems.size() >= perPage) break;
             }
 
+            // If fallback also completely failed and produced 0 items, fail source clearly
+            if (!fallbackSuccess && collectedItems.isEmpty() && !fallbackErrors.isEmpty()) {
+                throw new SourceAPIException("Codeberg global search endpoint failed (" + lastGlobalSearchError + ") and curated fallback failed: " + String.join(", ", fallbackErrors), 500);
+            }
+
+            // Report fallback results separately from global-search results and preserve source-level error status
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("total_count", collectedItems.size());
             result.put("items", collectedItems);
             result.put("rate_limit", rateLimitState);
+            result.put("global_search_status", "failed");
+            result.put("global_search_error", lastGlobalSearchError != null ? lastGlobalSearchError : "Codeberg global search endpoint returned HTTP 500");
+            result.put("fallback_used", true);
+            result.put("fallback_status", fallbackSuccess ? "completed" : "failed");
+            result.put("fallback_count", collectedItems.size());
+            result.put("source_error", "Codeberg global search endpoint failed with HTTP 500 (curated repository fallback utilized)");
             return result;
+
         } catch (SourceAPIException e) {
             throw e;
         } catch (Exception e) {

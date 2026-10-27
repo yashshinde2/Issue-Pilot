@@ -20,5 +20,13 @@ public interface BaseIssueSourceAdapter {
 
     Map<String, Object> getRateLimitState();
 
+    default boolean isConfigured() {
+        return true;
+    }
+
+    default String getConfigurationError() {
+        return null;
+    }
+
     Map<String, Object> normalizeIssue(Map<String, Object> rawItem, Map<String, Object> queryInfo);
 }

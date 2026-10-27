@@ -46,85 +46,85 @@ public class AppProperties {
     private String githubApiBaseUrl;
 
     @Value("${INGESTION_ENABLED:true}")
-    private boolean ingestionEnabled;
+    private boolean ingestionEnabled = true;
 
     @Value("${CANDIDATE_POOL_TARGET:3000}")
-    private int candidatePoolTarget;
+    private int candidatePoolTarget = 3000;
 
     @Value("${RECENT_WINDOW_DAYS:30}")
-    private int recentWindowDays;
+    private int recentWindowDays = 30;
 
     @Value("${OLDER_WINDOW_DAYS:90}")
-    private int olderWindowDays;
+    private int olderWindowDays = 90;
 
     @Value("${DISCOVERY_CADENCE_HOURS:24}")
-    private int discoveryCadenceHours;
+    private int discoveryCadenceHours = 24;
 
     @Value("${REFRESH_CADENCE_DAYS:3}")
-    private int refreshCadenceDays;
+    private int refreshCadenceDays = 3;
 
     @Value("${MAX_ISSUES_PER_REPO:15}")
-    private int maxIssuesPerRepo;
+    private int maxIssuesPerRepo = 15;
 
     @Value("${MAX_SEARCH_PAGES_PER_RUN:5}")
-    private int maxSearchPagesPerRun;
+    private int maxSearchPagesPerRun = 5;
 
     @Value("${PER_PAGE_COUNT:30}")
-    private int perPageCount;
+    private int perPageCount = 30;
 
     @Value("${GITHUB_RATE_LIMIT_BUFFER:10}")
-    private int githubRateLimitBuffer;
+    private int githubRateLimitBuffer = 10;
 
     @Value("${GITHUB_REQUEST_TIMEOUT_SECONDS:15}")
-    private int githubRequestTimeoutSeconds;
+    private int githubRequestTimeoutSeconds = 15;
 
     @Value("${GITHUB_MAX_RETRIES:3}")
-    private int githubMaxRetries;
+    private int githubMaxRetries = 3;
 
     @Value("${GITLAB_TOKEN:}")
-    private String gitlabToken;
+    private String gitlabToken = "";
 
     @Value("${GITLAB_API_BASE_URL:https://gitlab.com/api/v4}")
-    private String gitlabApiBaseUrl;
+    private String gitlabApiBaseUrl = "https://gitlab.com/api/v4";
 
     @Value("${GITLAB_RATE_LIMIT_BUFFER:20}")
-    private int gitlabRateLimitBuffer;
+    private int gitlabRateLimitBuffer = 20;
 
     @Value("${GITLAB_REQUEST_TIMEOUT_SECONDS:15}")
-    private int gitlabRequestTimeoutSeconds;
+    private int gitlabRequestTimeoutSeconds = 15;
 
     @Value("${GITLAB_MAX_RETRIES:3}")
-    private int gitlabMaxRetries;
+    private int gitlabMaxRetries = 3;
 
     @Value("${CODEBERG_TOKEN:}")
-    private String codebergToken;
+    private String codebergToken = "";
 
     @Value("${CODEBERG_API_BASE_URL:https://codeberg.org/api/v1}")
-    private String codebergApiBaseUrl;
+    private String codebergApiBaseUrl = "https://codeberg.org/api/v1";
 
     @Value("${CODEBERG_RATE_LIMIT_BUFFER:20}")
-    private int codebergRateLimitBuffer;
+    private int codebergRateLimitBuffer = 20;
 
     @Value("${CODEBERG_REQUEST_TIMEOUT_SECONDS:15}")
-    private int codebergRequestTimeoutSeconds;
+    private int codebergRequestTimeoutSeconds = 15;
 
     @Value("${CODEBERG_MAX_RETRIES:3}")
-    private int codebergMaxRetries;
+    private int codebergMaxRetries = 3;
 
     @Value("${BUGZILLA_BASE_URL:}")
-    private String bugzillaBaseUrl;
+    private String bugzillaBaseUrl = "";
 
     @Value("${BUGZILLA_API_KEY:}")
-    private String bugzillaApiKey;
+    private String bugzillaApiKey = "";
 
     @Value("${BUGZILLA_LOCAL_REQUEST_BUDGET:100}")
-    private int bugzillaLocalRequestBudget;
+    private int bugzillaLocalRequestBudget = 100;
 
     @Value("${BUGZILLA_REQUEST_TIMEOUT_SECONDS:10}")
-    private int bugzillaRequestTimeoutSeconds;
+    private int bugzillaRequestTimeoutSeconds = 10;
 
     @Value("${BUGZILLA_MAX_RETRIES:2}")
-    private int bugzillaMaxRetries;
+    private int bugzillaMaxRetries = 2;
 
     @Value("${SOURCE_ALLOCATION_GITHUB:0.40}")
     private double sourceAllocationGithub;
@@ -221,7 +221,7 @@ public class AppProperties {
     }
 
     public String getGithubApiBaseUrl() {
-        return githubApiBaseUrl;
+        return (githubApiBaseUrl != null && !githubApiBaseUrl.isBlank()) ? githubApiBaseUrl : "https://api.github.com";
     }
 
     public boolean isIngestionEnabled() {
@@ -277,7 +277,7 @@ public class AppProperties {
     }
 
     public String getGitlabApiBaseUrl() {
-        return gitlabApiBaseUrl;
+        return (gitlabApiBaseUrl != null && !gitlabApiBaseUrl.isBlank()) ? gitlabApiBaseUrl : "https://gitlab.com/api/v4";
     }
 
     public int getGitlabRateLimitBuffer() {
@@ -297,7 +297,7 @@ public class AppProperties {
     }
 
     public String getCodebergApiBaseUrl() {
-        return codebergApiBaseUrl;
+        return (codebergApiBaseUrl != null && !codebergApiBaseUrl.isBlank()) ? codebergApiBaseUrl : "https://codeberg.org/api/v1";
     }
 
     public int getCodebergRateLimitBuffer() {
@@ -313,7 +313,7 @@ public class AppProperties {
     }
 
     public String getBugzillaBaseUrl() {
-        return bugzillaBaseUrl;
+        return bugzillaBaseUrl != null ? bugzillaBaseUrl : "";
     }
 
     public String getBugzillaApiKey() {

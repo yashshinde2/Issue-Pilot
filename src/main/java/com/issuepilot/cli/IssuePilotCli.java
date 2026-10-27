@@ -175,11 +175,12 @@ public class IssuePilotCli implements CommandLineRunner, ExitCodeGenerator {
                     String refStatus = (String) refRes.getOrDefault("status", "completed");
 
                     String overall = "completed";
-                    if ("failed".equals(discStatus) || "failed".equals(refStatus) || "partial_failure".equals(discStatus)) {
+                    if ("failed".equals(discStatus) || "failed".equals(refStatus) || "disabled".equals(discStatus)) {
                         overall = "failed";
                         this.exitCode = 1;
-                    } else if ("completed_with_errors".equals(discStatus)) {
-                        overall = "completed_with_errors";
+                    } else if ("partial_success".equals(discStatus) || "completed_with_errors".equals(discStatus)) {
+                        overall = "partial_success";
+                        this.exitCode = 0;
                     }
 
                     Map<String, Object> consolidated = new LinkedHashMap<>();

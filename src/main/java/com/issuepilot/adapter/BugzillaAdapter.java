@@ -25,12 +25,90 @@ public class BugzillaAdapter implements BaseIssueSourceAdapter {
     private int localRequestsUsed = 0;
     private String lastSuccessfulCheckAt = null;
 
+    private boolean configured = false;
+    private String configurationError = null;
+    private String validatedBaseUrl = null;
+    private String validatedHost = null;
+
     public BugzillaAdapter(AppProperties properties, ObjectMapper objectMapper) {
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(properties.getBugzillaRequestTimeoutSeconds()))
+                .connectTimeout(Duration.ofSeconds(Math.max(5, properties.getBugzillaRequestTimeoutSeconds())))
                 .build();
+        validateConfiguration();
+    }
+
+    @jakarta.annotation.PostConstruct
+    public void init() {
+        validateConfiguration();
+    }
+
+    /**
+     * Validates the Bugzilla API base URL configuration at startup and on-demand.
+     * Ensures it is a nonblank, absolute URI with http or https scheme and a valid host.
+     */
+    public synchronized void validateConfiguration() {
+        String base = properties.getBugzillaBaseUrl();
+        if (base == null || base.isBlank()) {
+            this.configured = false;
+            this.configurationError = "Bugzilla base URL is not configured (BUGZILLA_BASE_URL is missing or blank).";
+            this.validatedBaseUrl = null;
+            this.validatedHost = null;
+            return;
+        }
+
+        try {
+            URI uri = URI.create(base.trim());
+            if (!uri.isAbsolute()) {
+                this.configured = false;
+                this.configurationError = "Bugzilla base URL must be an absolute URI with http or https scheme: '" + base + "'";
+                this.validatedBaseUrl = null;
+                this.validatedHost = null;
+                return;
+            }
+            String scheme = uri.getScheme();
+            if (scheme == null || (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))) {
+                this.configured = false;
+                this.configurationError = "Bugzilla base URL must use http or https scheme, got: '" + scheme + "'";
+                this.validatedBaseUrl = null;
+                this.validatedHost = null;
+                return;
+            }
+            String host = uri.getHost();
+            if (host == null || host.isBlank()) {
+                this.configured = false;
+                this.configurationError = "Bugzilla base URL must have a valid host: '" + base + "'";
+                this.validatedBaseUrl = null;
+                this.validatedHost = null;
+                return;
+            }
+            this.configured = true;
+            this.configurationError = null;
+            this.validatedBaseUrl = base.trim().replaceAll("/+$", "");
+            this.validatedHost = host;
+        } catch (Exception e) {
+            this.configured = false;
+            this.configurationError = "Bugzilla base URL is malformed: " + e.getMessage();
+            this.validatedBaseUrl = null;
+            this.validatedHost = null;
+        }
+    }
+
+    @Override
+    public boolean isConfigured() {
+        validateConfiguration();
+        return configured;
+    }
+
+    public String getConfigurationError() {
+        validateConfiguration();
+        return configurationError;
+    }
+
+    public String getValidatedBaseUrl() {
+        validateConfiguration();
+        return validatedBaseUrl;
     }
 
     @Override
@@ -40,16 +118,8 @@ public class BugzillaAdapter implements BaseIssueSourceAdapter {
 
     @Override
     public String getSourceInstance() {
-        String base = properties.getBugzillaBaseUrl();
-        if (base == null || base.isBlank()) {
-            return "bugzilla-instance";
-        }
-        try {
-            URI u = URI.create(base);
-            return (u.getHost() != null && !u.getHost().isBlank()) ? u.getHost() : "bugzilla-instance";
-        } catch (Exception e) {
-            return "bugzilla-instance";
-        }
+        validateConfiguration();
+        return (validatedHost != null && !validatedHost.isBlank()) ? validatedHost : "bugzilla-instance";
     }
 
     @Override
@@ -65,16 +135,20 @@ public class BugzillaAdapter implements BaseIssueSourceAdapter {
         return state;
     }
 
-    private String resolveEndpoint(String path) {
-        String base = properties.getBugzillaBaseUrl();
-        if (base == null || base.isBlank()) {
-            return "";
+    public String resolveEndpoint(String path) {
+        validateConfiguration();
+        if (!configured || validatedBaseUrl == null) {
+            throw new IllegalArgumentException("Bugzilla base URL is not configured or invalid: " + configurationError);
         }
         String cleanPath = path.startsWith("/") ? path.substring(1) : path;
-        if (base.contains("/rest")) {
-            return base.replaceAll("/+$", "") + "/" + cleanPath;
+        if (cleanPath.startsWith("rest/")) {
+            cleanPath = cleanPath.substring(5);
         }
-        return base.replaceAll("/+$", "") + "/rest/" + cleanPath;
+        String normalizedBase = validatedBaseUrl.replaceAll("/+$", "");
+        if (normalizedBase.endsWith("/rest")) {
+            return normalizedBase + "/" + cleanPath;
+        }
+        return normalizedBase + "/rest/" + cleanPath;
     }
 
     private HttpRequest.Builder newRequestBuilder(String url) {
@@ -82,7 +156,7 @@ public class BugzillaAdapter implements BaseIssueSourceAdapter {
                 .uri(URI.create(url))
                 .header("Accept", "application/json")
                 .header("User-Agent", "IssuePilot/1.1")
-                .timeout(Duration.ofSeconds(properties.getBugzillaRequestTimeoutSeconds()));
+                .timeout(Duration.ofSeconds(Math.max(5, properties.getBugzillaRequestTimeoutSeconds())));
 
         String apiKey = properties.getBugzillaApiKey();
         if (apiKey != null && !apiKey.isBlank()) {
@@ -105,11 +179,11 @@ public class BugzillaAdapter implements BaseIssueSourceAdapter {
     @Override
     public Map<String, Object> checkHealth() {
         Map<String, Object> report = new LinkedHashMap<>();
-        String base = properties.getBugzillaBaseUrl();
-        boolean configured = base != null && !base.isBlank();
+        validateConfiguration();
         report.put("source", getSourceName());
         report.put("source_instance", getSourceInstance());
         report.put("configured", configured);
+        report.put("status", configured ? "configured" : "disabled");
 
         if (!configured) {
             report.put("reachable", false);
@@ -118,8 +192,8 @@ public class BugzillaAdapter implements BaseIssueSourceAdapter {
             report.put("api_version", "unknown");
             report.put("rate_limit_info", getRateLimitState());
             report.put("last_successful_check_at", lastSuccessfulCheckAt);
-            report.put("error_message", "Bugzilla base URL not configured.");
-            report.put("recommended_action", "Set BUGZILLA_BASE_URL environment variable.");
+            report.put("error_message", configurationError);
+            report.put("recommended_action", "Set BUGZILLA_BASE_URL to a valid absolute http or https URI.");
             report.put("ingestion_enabled", false);
             return report;
         }
@@ -183,6 +257,17 @@ public class BugzillaAdapter implements BaseIssueSourceAdapter {
 
     @Override
     public Map<String, Object> searchIssues(String query, int page, int perPage, String sort, String order) {
+        validateConfiguration();
+        if (!configured) {
+            Map<String, Object> res = new LinkedHashMap<>();
+            res.put("total_count", 0);
+            res.put("items", Collections.emptyList());
+            res.put("status", "disabled");
+            res.put("error", configurationError);
+            res.put("rate_limit", getRateLimitState());
+            return res;
+        }
+
         checkLocalBudget();
         try {
             int offset = Math.max(0, (page - 1) * perPage);
@@ -229,6 +314,11 @@ public class BugzillaAdapter implements BaseIssueSourceAdapter {
 
     @Override
     public Map<String, Object> getIssue(String owner, String repo, int issueNumber) {
+        validateConfiguration();
+        if (!configured) {
+            return null;
+        }
+
         checkLocalBudget();
         try {
             String url = resolveEndpoint("bug/" + issueNumber);
@@ -284,7 +374,10 @@ public class BugzillaAdapter implements BaseIssueSourceAdapter {
         String product = (String) rawItem.getOrDefault("product", "Bugzilla");
         String component = (String) rawItem.getOrDefault("component", "General");
 
-        String baseWeb = properties.getBugzillaBaseUrl() != null ? properties.getBugzillaBaseUrl().replace("/rest", "").replaceAll("/+$", "") : "https://bugzilla.mozilla.org";
+        validateConfiguration();
+        String baseWeb = (configured && validatedBaseUrl != null)
+                ? validatedBaseUrl.replaceAll("/rest/?$", "").replaceAll("/+$", "")
+                : ("https://" + getSourceInstance());
         String canonicalUrl = baseWeb + "/show_bug.cgi?id=" + bugId;
 
         // Assigned

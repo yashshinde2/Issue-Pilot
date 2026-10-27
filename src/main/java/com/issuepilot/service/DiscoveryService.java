@@ -173,6 +173,25 @@ public class DiscoveryService {
                 continue;
             }
 
+            if (!adapter.isConfigured()) {
+                Map<String, Object> disabledStats = new LinkedHashMap<>();
+                disabledStats.put("discovered", 0);
+                disabledStats.put("inserted", 0);
+                disabledStats.put("updated", 0);
+                disabledStats.put("skipped", 0);
+                disabledStats.put("filtered_state", 0);
+                disabledStats.put("filtered_age", 0);
+                disabledStats.put("filtered_tech", 0);
+                disabledStats.put("filtered_identity", 0);
+                disabledStats.put("errors", Collections.emptyList());
+                disabledStats.put("rate_limit", adapter.getRateLimitState());
+                disabledStats.put("status", "disabled");
+                disabledStats.put("reason", adapter.getConfigurationError() != null ? adapter.getConfigurationError() : "Source disabled/not configured");
+                perSourceSummary.put(src, disabledStats);
+                logger.info("Skipping unconfigured source '{}': {}", src, disabledStats.get("reason"));
+                continue;
+            }
+
             int srcDiscovered = 0;
             int srcInserted = 0;
             int srcUpdated = 0;
@@ -182,6 +201,10 @@ public class DiscoveryService {
             int srcFilteredTech = 0;
             int srcFilteredIdentity = 0;
             List<String> srcErrors = new ArrayList<>();
+            boolean srcFallbackUsed = false;
+            String fallbackStatus = null;
+            String globalSearchStatus = null;
+            String globalSearchError = null;
 
             for (String stack : targetStacks) {
                 if (maxIssuesToDiscover != null && totalDiscovered >= maxIssuesToDiscover) {
@@ -197,6 +220,19 @@ public class DiscoveryService {
 
                     try {
                         Map<String, Object> searchResult = adapter.searchIssues(query, page, itemsPerPage, "updated", "desc");
+                        if (searchResult.containsKey("source_error")) {
+                            String se = (String) searchResult.get("source_error");
+                            if (se != null && !srcErrors.contains(se)) {
+                                srcErrors.add(se);
+                            }
+                        }
+                        if (Boolean.TRUE.equals(searchResult.get("fallback_used"))) {
+                            srcFallbackUsed = true;
+                            fallbackStatus = (String) searchResult.get("fallback_status");
+                            globalSearchStatus = (String) searchResult.get("global_search_status");
+                            globalSearchError = (String) searchResult.get("global_search_error");
+                        }
+
                         @SuppressWarnings("unchecked")
                         List<Map<String, Object>> items = (List<Map<String, Object>>) searchResult.getOrDefault("items", Collections.emptyList());
 
@@ -306,6 +342,11 @@ public class DiscoveryService {
                         break;
                     }
                 }
+
+                // Small pacing to avoid overloading remote platform APIs
+                try {
+                    Thread.sleep(20);
+                } catch (InterruptedException ignored) {}
             }
 
             Map<String, Object> srcStats = new LinkedHashMap<>();
@@ -319,12 +360,16 @@ public class DiscoveryService {
             srcStats.put("filtered_identity", srcFilteredIdentity);
             srcStats.put("errors", srcErrors);
             srcStats.put("rate_limit", adapter.getRateLimitState());
+            if (srcFallbackUsed) {
+                srcStats.put("fallback_used", true);
+                srcStats.put("fallback_status", fallbackStatus);
+                srcStats.put("global_search_status", globalSearchStatus);
+                srcStats.put("global_search_error", globalSearchError);
+            }
 
             String srcStatus = "completed";
             if (!srcErrors.isEmpty()) {
-                srcStatus = srcDiscovered > 0 ? "completed_with_errors" : "failed";
-            } else if (srcDiscovered == 0) {
-                srcStatus = "idle";
+                srcStatus = srcDiscovered > 0 ? "partial" : "failed";
             }
             srcStats.put("status", srcStatus);
             perSourceSummary.put(src, srcStats);
@@ -333,17 +378,46 @@ public class DiscoveryService {
         long elapsedSec = (System.currentTimeMillis() - t0) / 1000;
         String nowIso = DateTimeFormatter.ISO_INSTANT.format(Instant.now());
 
-        // Overall status: Do not mark successful if a platform fails
-        boolean hasSourceFailure = perSourceSummary.values().stream()
-                .anyMatch(s -> "failed".equals(s.get("status")));
-        boolean hasSourcePartial = perSourceSummary.values().stream()
-                .anyMatch(s -> "completed_with_errors".equals(s.get("status")));
+        // Overall status:
+        // Configured adapters are completed, partial, or failed. Disabled sources are excluded from failure checks.
+        boolean hasConfiguredFailure = false;
+        boolean hasConfiguredPartial = false;
+        int configuredSourceCount = 0;
+        int completedSourceCount = 0;
 
-        String overallStatus = "completed";
-        if (hasSourceFailure) {
-            overallStatus = totalDiscovered > 0 ? "partial_failure" : "failed";
-        } else if (hasSourcePartial || !errors.isEmpty()) {
-            overallStatus = "completed_with_errors";
+        for (Map<String, Object> stats : perSourceSummary.values()) {
+            String st = (String) stats.get("status");
+            if ("disabled".equals(st)) {
+                continue;
+            }
+            configuredSourceCount++;
+            if ("failed".equals(st)) {
+                hasConfiguredFailure = true;
+            } else if ("partial".equals(st)) {
+                hasConfiguredPartial = true;
+            } else if ("completed".equals(st)) {
+                completedSourceCount++;
+            }
+        }
+
+        String overallStatus;
+        if (configuredSourceCount == 0) {
+            overallStatus = "disabled";
+        } else if (hasConfiguredFailure) {
+            // Never report total success while a configured source has failed.
+            if (totalDiscovered > 0 && (completedSourceCount > 0 || hasConfiguredPartial)) {
+                overallStatus = "partial_success";
+            } else {
+                overallStatus = "failed";
+            }
+        } else if (hasConfiguredPartial || !errors.isEmpty()) {
+            if (totalDiscovered > 0) {
+                overallStatus = "partial_success";
+            } else {
+                overallStatus = "failed";
+            }
+        } else {
+            overallStatus = "completed";
         }
 
         Map<String, Object> summary = new LinkedHashMap<>();
