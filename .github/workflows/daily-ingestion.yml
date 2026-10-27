@@ -1,11 +1,9 @@
 name: Issue Pilot Daily Ingestion
 
-# Production schedule is disabled until a separate, explicitly approved rollout plan exists.
-# on:
-#   schedule:
-#     - cron: '0 3 * * *'
-
 on:
+  schedule:
+    # 6:00 AM IST (UTC+5:30) is 00:30 UTC every day
+    - cron: '30 0 * * *'
   workflow_dispatch:
     inputs:
       target_env:
@@ -21,8 +19,8 @@ on:
         default: '30'
         type: choice
         options:
-          - '7'
           - '30'
+          - '7'
       source:
         description: 'Target platform source'
         required: false
@@ -113,7 +111,10 @@ jobs:
         run: |
           set -euo pipefail
           echo "Executing fail-closed Java staging isolation audit..."
-          java -Dspring.main.web-application-type=none             -jar target/issue-pilot-*.jar             --preflight-staging             --expected-host="${EXPECTED_STAGING_HOST}"
+          java -Dspring.main.web-application-type=none \
+            -jar target/issue-pilot-*.jar \
+            --preflight-staging \
+            --expected-host="${EXPECTED_STAGING_HOST}"
 
       - name: Run Standalone Ingestion Batch
         env:
@@ -125,23 +126,37 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.PAT_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
           CODEBERG_TOKEN: ${{ secrets.CODEBERG_TOKEN }}
-          BUGZILLA_BASE_URL: ${{ secrets.BUGZILLA_BASE_URL }}
+          BUGZILLA_BASE_URL: ${{ secrets.BUGZILLA_BASE_URL || vars.BUGZILLA_BASE_URL }}
           BUGZILLA_API_KEY: ${{ secrets.BUGZILLA_API_KEY }}
           SCHEDULER_ENABLED: "false"
           INGESTION_ENABLED: "true"
+          DAYS: ${{ inputs.creation_age_days || '30' }}
+          SRC: ${{ inputs.source || 'all' }}
+          PAGES: ${{ inputs.max_pages || '2' }}
+          PER_PAGE: ${{ inputs.per_page || '15' }}
+          BATCH: ${{ inputs.refresh_batch || '50' }}
         run: |
           set -euo pipefail
-          DAYS="${{ inputs.creation_age_days || '30' }}"
-          SRC="${{ inputs.source || 'all' }}"
-          PAGES="${{ inputs.max_pages || '2' }}"
-          PER_PAGE="${{ inputs.per_page || '15' }}"
-          BATCH="${{ inputs.refresh_batch || '50' }}"
+          DAYS="${DAYS:-30}"
+          SRC="${SRC:-all}"
+          PAGES="${PAGES:-2}"
+          PER_PAGE="${PER_PAGE:-15}"
+          BATCH="${BATCH:-50}"
           EXP_HOST="${EXPECTED_STAGING_HOST}"
 
           echo "Starting Issue Pilot ingestion batch (target_env=staging, days=${DAYS}, source=${SRC}, pages=${PAGES}, per_page=${PER_PAGE}, refresh_batch=${BATCH})..."
 
           set +e
-          java -Dspring.main.web-application-type=none             -jar target/issue-pilot-*.jar             --daily-ingestion             --target-env=staging             --expected-host="${EXP_HOST}"             --days="${DAYS}"             --source="${SRC}"             --pages="${PAGES}"             --per-page="${PER_PAGE}"             --refresh-batch="${BATCH}" 2>&1 | tee ingestion_output.txt
+          java -Dspring.main.web-application-type=none \
+            -jar target/issue-pilot-*.jar \
+            --daily-ingestion \
+            --target-env=staging \
+            --expected-host="${EXP_HOST}" \
+            --days="${DAYS}" \
+            --source="${SRC}" \
+            --pages="${PAGES}" \
+            --per-page="${PER_PAGE}" \
+            --refresh-batch="${BATCH}" 2>&1 | tee ingestion_output.txt
           PIPE_STATUS="${PIPESTATUS[0]}"
           set -e
 
@@ -159,13 +174,50 @@ jobs:
             echo "- **Execution Mode**: Standalone CLI runner (non-web)"
             echo "- **Platforms Targeted**: ${{ inputs.source || 'all' }}"
             echo "- **Creation-Age Window**: ${{ inputs.creation_age_days || '30' }} days"
-            echo ""
+
             if [ -f ingestion_output.txt ]; then
-              echo "#### Execution Log Tail"
-              echo '```text'
-              grep -A 50 "DAILY INGESTION COMPLETE" ingestion_output.txt || tail -n 40 ingestion_output.txt
+              OVERALL_STATUS=$(python3 -c "
+          import json
+          try:
+              with open('ingestion_output.txt') as f:
+                  text = f.read()
+              idx = text.find('--- DAILY INGESTION COMPLETE ---')
+              if idx != -1:
+                  data = json.loads(text[idx + len('--- DAILY INGESTION COMPLETE ---'):].strip())
+                  print(data.get('overall_status', 'unknown'))
+              else:
+                  print('unknown')
+          except Exception:
+              print('unknown')
+          " 2>/dev/null || echo "unknown")
+              echo "- **Overall Status**: \`${OVERALL_STATUS}\`"
+              echo ""
+              if [ "${OVERALL_STATUS}" = "partial_success" ]; then
+                echo "> [!WARNING]"
+                echo "> Ingestion completed with **partial_success**. Some platform adapters experienced partial failures or used fallbacks."
+                echo ""
+              fi
+              echo "#### Execution Log Output"
+              echo '```json'
+              python3 -c "
+          import json
+          try:
+              with open('ingestion_output.txt') as f:
+                  text = f.read()
+              idx = text.find('--- DAILY INGESTION COMPLETE ---')
+              if idx != -1:
+                  data = json.loads(text[idx + len('--- DAILY INGESTION COMPLETE ---'):].strip())
+                  print(json.dumps(data, indent=2))
+              else:
+                  raise ValueError()
+          except Exception:
+              with open('ingestion_output.txt') as f:
+                  lines = f.readlines()
+              print(''.join(lines[-40:]).strip())
+          " 2>/dev/null || (grep -A 50 "DAILY INGESTION COMPLETE" ingestion_output.txt || tail -n 40 ingestion_output.txt)
               echo '```'
             else
+              echo ""
               echo "No ingestion output was produced."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
