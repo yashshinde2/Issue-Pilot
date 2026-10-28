@@ -171,6 +171,15 @@ public class AppProperties {
     @Value("${CORS_ORIGINS:*}")
     private String corsOrigins;
 
+    @Value("${APP_JWT_SECRET:}")
+    private String appJwtSecret;
+
+    @Value("${APP_JWT_ISSUER:https://issuepilot.com}")
+    private String appJwtIssuer = "https://issuepilot.com";
+
+    @Value("${APP_JWT_EXPIRATION_SECONDS:86400}")
+    private long appJwtExpirationSeconds = 86400; // 24 hours default
+
     public String getMongodbUri() {
         return mongodbUri;
     }
@@ -394,5 +403,17 @@ public class AppProperties {
 
     public String getCorsOrigins() {
         return corsOrigins;
+    }
+
+    public String getAppJwtSecret() {
+        return appJwtSecret;
+    }
+
+    public String getAppJwtIssuer() {
+        return appJwtIssuer;
+    }
+
+    public long getAppJwtExpirationSeconds() {
+        return appJwtExpirationSeconds;
     }
 }
