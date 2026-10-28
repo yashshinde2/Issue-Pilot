@@ -19,7 +19,15 @@ public class ContributorProfile {
     @JsonProperty("user_id")
     private String userId = "demo-contributor";
 
+    private UserIdentity identity;
+
+    @JsonProperty("onboarding_completed")
+    private boolean onboardingCompleted = false;
+
     private Map<String, ContributorSkill> skills = new HashMap<>();
+
+    @JsonProperty("inferred_skills")
+    private List<InferredSkill> inferredSkills = new java.util.ArrayList<>();
 
     private double capability = 70.0;
 
@@ -58,6 +66,30 @@ public class ContributorProfile {
 
     public void setUserId(String userId) {
         this.userId = userId;
+    }
+
+    public UserIdentity getIdentity() {
+        return identity;
+    }
+
+    public void setIdentity(UserIdentity identity) {
+        this.identity = identity;
+    }
+
+    public boolean isOnboardingCompleted() {
+        return onboardingCompleted;
+    }
+
+    public void setOnboardingCompleted(boolean onboardingCompleted) {
+        this.onboardingCompleted = onboardingCompleted;
+    }
+
+    public List<InferredSkill> getInferredSkills() {
+        return inferredSkills;
+    }
+
+    public void setInferredSkills(List<InferredSkill> inferredSkills) {
+        this.inferredSkills = inferredSkills != null ? inferredSkills : new java.util.ArrayList<>();
     }
 
     public Map<String, ContributorSkill> getSkills() {
@@ -148,6 +180,68 @@ public class ContributorProfile {
         this.lastActiveAt = lastActiveAt;
     }
 
+    /**
+     * Confirms an inferred skill without allowing inferred skills to overwrite
+     * an existing confirmed skill unless explicitly updated.
+     */
+    public void confirmSkill(String technology, double score, double confidence, String level) {
+        if (technology == null || technology.isBlank()) return;
+        if (this.skills == null) {
+            this.skills = new HashMap<>();
+        }
+        ContributorSkill confirmed = new ContributorSkill(technology, score, confidence, level, "user_confirmed");
+        this.skills.put(technology, confirmed);
+
+        // Update status of matching inferred skill if present
+        if (this.inferredSkills != null) {
+            for (InferredSkill inferred : this.inferredSkills) {
+                if (inferred != null && technology.equalsIgnoreCase(inferred.getTechnology())) {
+                    inferred.setStatus("confirmed");
+                }
+            }
+        }
+    }
+
+    /**
+     * Adds an inferred skill suggestion only if the technology is not already confirmed
+     * in the active skills map, ensuring inferences never overwrite confirmed skills.
+     */
+    public boolean addInferredSkillSafely(InferredSkill candidate) {
+        if (candidate == null || candidate.getTechnology() == null || candidate.getTechnology().isBlank()) {
+            return false;
+        }
+        // Do not add or overwrite if already present in confirmed skills
+        if (this.skills != null) {
+            for (String confirmedTech : this.skills.keySet()) {
+                if (candidate.getTechnology().equalsIgnoreCase(confirmedTech)) {
+                    return false; // Confirmed skill takes precedence
+                }
+            }
+        }
+        if (this.inferredSkills == null) {
+            this.inferredSkills = new java.util.ArrayList<>();
+        }
+        for (InferredSkill existing : this.inferredSkills) {
+            if (existing != null && candidate.getTechnology().equalsIgnoreCase(existing.getTechnology())) {
+                // Update evidence or confidence without overwriting confirmed status
+                if (!"confirmed".equals(existing.getStatus())) {
+                    existing.setConfidence(Math.max(existing.getConfidence(), candidate.getConfidence()));
+                    if (candidate.getEvidence() != null) {
+                        for (SkillEvidence ev : candidate.getEvidence()) {
+                            if (!existing.getEvidence().contains(ev)) {
+                                existing.addEvidence(ev);
+                            }
+                        }
+                    }
+                }
+                return true;
+            }
+        }
+        this.inferredSkills.add(candidate);
+        return true;
+    }
+
+    @com.fasterxml.jackson.annotation.JsonIgnore
     public Set<String> getNormalizedTechnologyPreferences() {
         Set<String> result = new LinkedHashSet<>();
         if (skills != null) {

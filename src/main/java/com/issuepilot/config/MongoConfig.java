@@ -186,6 +186,10 @@ public class MongoConfig {
                     Indexes.descending("updated_at"),
                     new IndexOptions().name("idx_user_updated_at")
             );
+            users.createIndex(
+                    Indexes.ascending("identity.provider", "identity.provider_user_id"),
+                    new IndexOptions().name("idx_identity_provider_user").sparse(true)
+            );
 
             // 3. recommendations collection indexes
             var recs = db.getCollection("recommendations");
