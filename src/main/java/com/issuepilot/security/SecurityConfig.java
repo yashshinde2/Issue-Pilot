@@ -142,6 +142,9 @@ public class SecurityConfig {
                     "/api/health/**",
                     "/api/simulator/**",
                     "/api/issues/**",
+                    "/api/auth/github/login",
+                    "/api/auth/github/callback",
+                    "/api/auth/exchange",
                     "/",
                     "/index.html",
                     "/error",
@@ -149,6 +152,8 @@ public class SecurityConfig {
                     "/static/**"
                 ).permitAll()
                 .requestMatchers(
+                    "/api/auth/me",
+                    "/api/auth/logout",
                     "/api/votes/**",
                     "/api/feedback/**",
                     "/api/users/**",

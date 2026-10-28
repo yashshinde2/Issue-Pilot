@@ -37,6 +37,14 @@ public class UserRepository {
         return cleanDoc(doc);
     }
 
+    public Map<String, Object> findByProviderIdentity(String provider, String providerUserId) {
+        if (mongoTemplate == null || provider == null || providerUserId == null) return null;
+        Document filter = new Document("identity.provider", provider.trim())
+                .append("identity.provider_user_id", providerUserId.trim());
+        Document doc = mongoTemplate.getCollection("users").find(filter).first();
+        return cleanDoc(doc);
+    }
+
     public Map<String, Object> createUser(ContributorProfile profile) {
         if (mongoTemplate == null) {
             throw new IllegalStateException("MongoDB Atlas connection unavailable.");
@@ -50,7 +58,7 @@ public class UserRepository {
         profile.setCreatedAt(nowIso);
         profile.setUpdatedAt(nowIso);
 
-        Map<String, Object> map = objectMapper.convertValue(profile, new TypeReference<>() {});
+        Map<String, Object> map = objectMapper.convertValue(profile, new TypeReference<Map<String, Object>>() {});
         Document doc = new Document(map);
         mongoTemplate.getCollection("users").insertOne(doc);
         return cleanDoc(doc);
@@ -65,7 +73,8 @@ public class UserRepository {
         }
 
         String nowIso = DateTimeFormatter.ISO_INSTANT.format(Instant.now());
-        Document updateFields = new Document(updates);
+        Map<String, Object> serializedUpdates = objectMapper.convertValue(updates, new TypeReference<Map<String, Object>>() {});
+        Document updateFields = new Document(serializedUpdates);
         updateFields.remove("_id");
         updateFields.remove("user_id");
         updateFields.put("updated_at", nowIso);
@@ -78,12 +87,76 @@ public class UserRepository {
         return getUser(userId);
     }
 
+    /**
+     * Atomically provisions or updates an authenticated OAuth user profile without
+     * overwriting confirmed skills or preferences.
+     *
+     * Uses MongoDB findOneAndUpdate with upsert to prevent duplicate accounts
+     * during concurrent first-time logins.
+     */
+    public Map<String, Object> provisionOrUpdateOAuthUser(
+            String provider,
+            String providerUserId,
+            String username,
+            String displayName,
+            String avatarUrl,
+            String profileUrl,
+            String email
+    ) {
+        if (mongoTemplate == null) {
+            throw new IllegalStateException("MongoDB Atlas connection unavailable.");
+        }
+        if (provider == null || provider.isBlank() || providerUserId == null || providerUserId.isBlank()) {
+            throw new IllegalArgumentException("Provider and providerUserId are required for OAuth provisioning.");
+        }
+
+        String canonicalUserId = provider.trim().toLowerCase() + ":" + providerUserId.trim();
+        String nowIso = DateTimeFormatter.ISO_INSTANT.format(Instant.now());
+
+        Document identityDoc = new Document("provider", provider.trim().toLowerCase())
+                .append("provider_user_id", providerUserId.trim())
+                .append("username", username != null ? username.trim() : "")
+                .append("display_name", displayName != null ? displayName.trim() : "")
+                .append("avatar_url", avatarUrl != null ? avatarUrl.trim() : "")
+                .append("profile_url", profileUrl != null ? profileUrl.trim() : "")
+                .append("email", email != null ? email.trim() : "");
+
+        Document setFields = new Document("identity", identityDoc)
+                .append("updated_at", nowIso)
+                .append("last_active_at", nowIso);
+
+        Document setOnInsert = new Document("user_id", canonicalUserId)
+                .append("capability", 70.0)
+                .append("skills", new Document())
+                .append("inferred_skills", Collections.emptyList())
+                .append("preferences", new Document())
+                .append("onboarding_completed", false)
+                .append("accepted_count", 0)
+                .append("rejected_count", 0)
+                .append("completed_count", 0)
+                .append("similarity_to_history", 75.0)
+                .append("has_feedback_history", false)
+                .append("created_at", nowIso);
+
+        Document updateDoc = new Document("$set", setFields).append("$setOnInsert", setOnInsert);
+
+        Document filter = new Document("identity.provider", provider.trim().toLowerCase())
+                .append("identity.provider_user_id", providerUserId.trim());
+
+        com.mongodb.client.model.FindOneAndUpdateOptions options = new com.mongodb.client.model.FindOneAndUpdateOptions()
+                .upsert(true)
+                .returnDocument(com.mongodb.client.model.ReturnDocument.AFTER);
+
+        Document result = mongoTemplate.getCollection("users").findOneAndUpdate(filter, updateDoc, options);
+        return cleanDoc(result);
+    }
+
     public Map<String, Object> upsertUser(ContributorProfile profile) {
         if (mongoTemplate == null) {
             throw new IllegalStateException("MongoDB Atlas connection unavailable.");
         }
         String nowIso = DateTimeFormatter.ISO_INSTANT.format(Instant.now());
-        Map<String, Object> map = objectMapper.convertValue(profile, new TypeReference<>() {});
+        Map<String, Object> map = objectMapper.convertValue(profile, new TypeReference<Map<String, Object>>() {});
         map.remove("user_id");
         map.remove("_id");
         map.remove("created_at");
@@ -148,7 +221,9 @@ public class UserRepository {
                 try {
                     ContributorProfile p = objectMapper.convertValue(clean, ContributorProfile.class);
                     activeProfiles.add(p);
-                } catch (Exception ignored) {}
+                } catch (Exception ex) {
+                    // Ignore malformed or unparseable profiles in query results
+                }
             }
         }
         return activeProfiles;

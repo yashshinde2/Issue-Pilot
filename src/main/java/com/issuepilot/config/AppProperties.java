@@ -180,6 +180,24 @@ public class AppProperties {
     @Value("${APP_JWT_EXPIRATION_SECONDS:86400}")
     private long appJwtExpirationSeconds = 86400; // 24 hours default
 
+    @Value("${GITHUB_CLIENT_ID:}")
+    private String githubClientId;
+
+    @Value("${GITHUB_CLIENT_SECRET:}")
+    private String githubClientSecret;
+
+    @Value("${GITHUB_OAUTH_REDIRECT_URI:http://localhost:8000/api/auth/github/callback}")
+    private String githubOAuthRedirectUri = "http://localhost:8000/api/auth/github/callback";
+
+    @Value("${FRONTEND_APP_URL:http://localhost:3000}")
+    private String frontendAppUrl = "http://localhost:3000";
+
+    @Value("${GITHUB_OAUTH_TOKEN_URL:https://github.com/login/oauth/access_token}")
+    private String githubOAuthTokenUrl = "https://github.com/login/oauth/access_token";
+
+    @Value("${GITHUB_USER_API_URL:https://api.github.com/user}")
+    private String githubUserApiUrl = "https://api.github.com/user";
+
     public String getMongodbUri() {
         return mongodbUri;
     }
@@ -415,5 +433,29 @@ public class AppProperties {
 
     public long getAppJwtExpirationSeconds() {
         return appJwtExpirationSeconds;
+    }
+
+    public String getGithubClientId() {
+        return githubClientId;
+    }
+
+    public String getGithubClientSecret() {
+        return githubClientSecret;
+    }
+
+    public String getGithubOAuthRedirectUri() {
+        return githubOAuthRedirectUri;
+    }
+
+    public String getFrontendAppUrl() {
+        return frontendAppUrl;
+    }
+
+    public String getGithubOAuthTokenUrl() {
+        return githubOAuthTokenUrl;
+    }
+
+    public String getGithubUserApiUrl() {
+        return githubUserApiUrl;
     }
 }
