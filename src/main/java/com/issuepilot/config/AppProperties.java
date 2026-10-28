@@ -174,6 +174,9 @@ public class AppProperties {
     @Value("${APP_JWT_SECRET:}")
     private String appJwtSecret;
 
+    @Value("${APP_ENCRYPTION_KEY:}")
+    private String appEncryptionKey;
+
     @Value("${APP_JWT_ISSUER:https://issuepilot.com}")
     private String appJwtIssuer = "https://issuepilot.com";
 
@@ -425,6 +428,10 @@ public class AppProperties {
 
     public String getAppJwtSecret() {
         return appJwtSecret;
+    }
+
+    public String getAppEncryptionKey() {
+        return appEncryptionKey;
     }
 
     public String getAppJwtIssuer() {

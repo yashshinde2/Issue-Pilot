@@ -6,6 +6,7 @@ import com.issuepilot.repository.UserRepository;
 import com.issuepilot.security.GitHubOAuthService;
 import com.issuepilot.security.OAuthStateStore;
 import com.issuepilot.security.TokenService;
+import com.issuepilot.security.UserCredentialService;
 import com.issuepilot.security.UserIdentityResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,6 +44,7 @@ public class AuthController {
     private final OAuthStateStore oAuthStateStore;
     private final TokenService tokenService;
     private final UserRepository userRepository;
+    private final UserCredentialService userCredentialService;
     private final MongoConfig mongoConfig;
     private final AppProperties properties;
     private final UserIdentityResolver userIdentityResolver;
@@ -52,6 +54,7 @@ public class AuthController {
             OAuthStateStore oAuthStateStore,
             TokenService tokenService,
             UserRepository userRepository,
+            UserCredentialService userCredentialService,
             MongoConfig mongoConfig,
             AppProperties properties,
             UserIdentityResolver userIdentityResolver
@@ -60,6 +63,7 @@ public class AuthController {
         this.oAuthStateStore = oAuthStateStore;
         this.tokenService = tokenService;
         this.userRepository = userRepository;
+        this.userCredentialService = userCredentialService;
         this.mongoConfig = mongoConfig;
         this.properties = properties;
         this.userIdentityResolver = userIdentityResolver;
@@ -146,7 +150,16 @@ public class AuthController {
                 );
             }
 
-            // 4. Issue Issue Pilot Application Session JWT
+            // 4. Securely encrypt and store GitHub OAuth token in user_tokens collection
+            userCredentialService.storeCredential(
+                    canonicalUserId,
+                    "github",
+                    providerUserId,
+                    githubAccessToken,
+                    "read:user"
+            );
+
+            // 5. Issue Issue Pilot Application Session JWT
             String applicationJwt = tokenService.issueToken(
                     canonicalUserId,
                     username,
@@ -248,6 +261,26 @@ public class AuthController {
         response.put("status", "success");
         response.put("user_id", userId);
         response.put("message", "Logged out successfully. Please dispose of the client-side session token.");
+        return response;
+    }
+
+    /**
+     * Disconnects the third-party OAuth account and securely revokes stored credentials.
+     * Requires valid Bearer application session token.
+     */
+    @PostMapping("/github/disconnect")
+    public Map<String, Object> disconnectGitHub(Authentication authentication) {
+        String userId = userIdentityResolver.resolveUserId(authentication);
+        if (userId == null || userId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Active security principal is required.");
+        }
+        boolean revoked = userCredentialService.revokeCredential(userId, "github");
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("status", "success");
+        response.put("user_id", userId);
+        response.put("provider", "github");
+        response.put("disconnected", revoked);
+        response.put("message", revoked ? "GitHub credentials removed successfully." : "No active GitHub credentials found.");
         return response;
     }
 }

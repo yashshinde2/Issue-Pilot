@@ -240,7 +240,18 @@ public class MongoConfig {
                     new IndexOptions().name("idx_job_status")
             );
 
-            logger.info("MongoDB Atlas indexes for all 5 collections verified and ready.");
+            // 6. user_tokens collection indexes
+            var userTokens = db.getCollection("user_tokens");
+            userTokens.createIndex(
+                    Indexes.ascending("canonical_user_id"),
+                    new IndexOptions().name("idx_user_tokens_canonical_user_id").unique(true)
+            );
+            userTokens.createIndex(
+                    Indexes.ascending("provider", "provider_user_id"),
+                    new IndexOptions().name("idx_user_tokens_provider_user").sparse(true)
+            );
+
+            logger.info("MongoDB Atlas indexes for all 6 collections verified and ready.");
         } catch (Exception e) {
             logger.error("Failed to initialize MongoDB indexes: {}", e.getMessage());
         }

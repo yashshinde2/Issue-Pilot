@@ -52,6 +52,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @TestPropertySource(properties = {
         "APP_JWT_SECRET=test_very_secure_secret_key_with_at_least_32_bytes_of_entropy_12345",
+        "APP_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         "APP_JWT_ISSUER=https://issuepilot-test.com",
         "APP_JWT_EXPIRATION_SECONDS=3600",
         "GITHUB_CLIENT_ID=test-github-client-id",
@@ -80,6 +81,9 @@ public class GitHubOAuthProvisioningTest {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private com.issuepilot.security.UserCredentialService userCredentialService;
 
     @MockBean
     private GitHubOAuthService gitHubOAuthService;
@@ -296,5 +300,78 @@ public class GitHubOAuthProvisioningTest {
                 .andExpect(jsonPath("$.status").value("success"))
                 .andExpect(jsonPath("$.user_id").value("github:12345"))
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("dispose of the client-side session token")));
+    }
+
+    @Test
+    @DisplayName("Callback securely encrypts and stores GitHub OAuth token in user_tokens collection")
+    public void testCallbackEncryptsAndStoresCredential() throws Exception {
+        String state = oAuthStateStore.generateState();
+        String code = "valid-mock-auth-code-12345";
+        String mockGithubToken = "gho_encrypted_mock_token_abc987";
+        String providerUserId = "5555501";
+        String canonicalUserId = "github:" + providerUserId;
+
+        when(gitHubOAuthService.exchangeCodeForAccessToken(code)).thenReturn(mockGithubToken);
+        when(gitHubOAuthService.fetchAuthenticatedUserProfile(mockGithubToken)).thenReturn(Map.of(
+                "id", Long.parseLong(providerUserId),
+                "login", "secure_user",
+                "name", "Secure User",
+                "email", "secure@example.com"
+        ));
+
+        mockMvc.perform(get("/api/auth/github/callback")
+                        .param("code", code)
+                        .param("state", state))
+                .andExpect(status().isFound());
+
+        // Verify credential is saved and decryptable
+        assertTrue(userCredentialService.hasCredential(canonicalUserId, "github"));
+        var decryptedOpt = userCredentialService.getDecryptedToken(canonicalUserId, "github");
+        assertTrue(decryptedOpt.isPresent());
+        assertEquals(mockGithubToken, decryptedOpt.get());
+    }
+
+    @Test
+    @DisplayName("POST /api/auth/github/disconnect removes stored credential")
+    public void testDisconnectEndpointRevokesCredential() throws Exception {
+        String canonicalUserId = "github:4444401";
+        String mockGithubToken = "gho_token_to_disconnect";
+
+        userCredentialService.storeCredential(canonicalUserId, "github", "4444401", mockGithubToken, "read:user");
+        assertTrue(userCredentialService.hasCredential(canonicalUserId, "github"));
+
+        String jwt = tokenService.issueToken(canonicalUserId, "disconnect_user", List.of("ROLE_USER"));
+
+        mockMvc.perform(post("/api/auth/github/disconnect")
+                        .header("Authorization", "Bearer " + jwt))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("success"))
+                .andExpect(jsonPath("$.disconnected").value(true));
+
+        assertFalse(userCredentialService.hasCredential(canonicalUserId, "github"));
+    }
+
+    @Test
+    @DisplayName("GET /api/auth/me does not leak stored credentials or encryption fields")
+    public void testAuthMeDoesNotLeakCredentials() throws Exception {
+        String canonicalUserId = "github:3333301";
+        String mockGithubToken = "gho_secret_token_never_leak";
+
+        userCredentialService.storeCredential(canonicalUserId, "github", "3333301", mockGithubToken, "read:user");
+
+        String jwt = tokenService.issueToken(canonicalUserId, "privacy_user", List.of("ROLE_USER"));
+
+        MvcResult result = mockMvc.perform(get("/api/auth/me")
+                        .header("Authorization", "Bearer " + jwt))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.authenticated").value(true))
+                .andExpect(jsonPath("$.user_id").value(canonicalUserId))
+                .andReturn();
+
+        String responseBody = result.getResponse().getContentAsString();
+        assertFalse(responseBody.contains(mockGithubToken), "Plaintext token must never be in /api/auth/me response");
+        assertFalse(responseBody.contains("encrypted_access_token"), "Encrypted token field must never be in /api/auth/me response");
+        assertFalse(responseBody.contains("nonce"), "Nonce must never be in /api/auth/me response");
+        assertFalse(responseBody.contains("token"), "No token properties should exist in /api/auth/me");
     }
 }
