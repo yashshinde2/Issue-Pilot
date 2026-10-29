@@ -48,6 +48,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "APP_JWT_ISSUER=https://issuepilot-test.com",
         "APP_JWT_EXPIRATION_SECONDS=3600"
 })
+@SuppressWarnings("null")
 public class TokenAuthenticationIntegrationTest {
 
     static {

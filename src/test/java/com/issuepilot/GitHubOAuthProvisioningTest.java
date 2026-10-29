@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -58,6 +58,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "GITHUB_OAUTH_REDIRECT_URI=http://localhost:8000/api/auth/github/callback",
         "FRONTEND_APP_URL=http://localhost:3000"
 })
+@SuppressWarnings("null")
 public class GitHubOAuthProvisioningTest {
 
     static {
@@ -83,7 +84,7 @@ public class GitHubOAuthProvisioningTest {
     @Autowired
     private com.issuepilot.security.UserCredentialService userCredentialService;
 
-    @MockBean
+    @MockitoBean
     private GitHubOAuthService gitHubOAuthService;
 
     @BeforeEach
@@ -185,7 +186,7 @@ public class GitHubOAuthProvisioningTest {
                 .andReturn();
 
         String responseBody = exchangeResult.getResponse().getContentAsString();
-        Map<String, Object> map = objectMapper.readValue(responseBody, Map.class);
+        Map<String, Object> map = objectMapper.readValue(responseBody, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
         String jwtToken = (String) map.get("access_token");
         assertNotNull(jwtToken);
 

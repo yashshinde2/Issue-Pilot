@@ -11,13 +11,18 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.util.*;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
- * Controller providing protected endpoints for contributor profile analysis and skill suggestions.
+ * Controller providing protected endpoints for contributor profile analysis and
+ * skill suggestions.
  *
  * Requirements:
- * - Endpoints derive target identity exclusively from validated application principal.
+ * - Endpoints derive target identity exclusively from validated application
+ * principal.
  * - Client-supplied user IDs are rejected as authority.
  * - Bounded analysis with clear status responses.
  */
@@ -34,8 +39,7 @@ public class ProfileController {
             GitHubProfileAnalyzerService analyzerService,
             UserRepository userRepository,
             UserIdentityResolver userIdentityResolver,
-            ObjectMapper objectMapper
-    ) {
+            ObjectMapper objectMapper) {
         this.analyzerService = analyzerService;
         this.userRepository = userRepository;
         this.userIdentityResolver = userIdentityResolver;
@@ -66,7 +70,8 @@ public class ProfileController {
     }
 
     /**
-     * Retrieves currently persisted inferred skills and analysis metadata for the authenticated user.
+     * Retrieves currently persisted inferred skills and analysis metadata for the
+     * authenticated user.
      */
     @GetMapping("/inferred-skills")
     public Map<String, Object> getInferredSkills(Authentication authentication) {
@@ -86,7 +91,9 @@ public class ProfileController {
                     inferredSkills = profile.getInferredSkills();
                     updatedAt = profile.getUpdatedAt();
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                // Return default empty list if document format is invalid
+            }
         }
 
         Map<String, Object> response = new LinkedHashMap<>();
@@ -97,4 +104,3 @@ public class ProfileController {
         return response;
     }
 }
-

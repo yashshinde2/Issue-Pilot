@@ -44,6 +44,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "GITHUB_ANALYZER_MAX_REPOSITORIES=15",
         "GITHUB_ANALYZER_EXCLUDE_FORKS=true"
 })
+@SuppressWarnings("null")
 public class GitHubProfileAnalyzerTest {
 
     static {

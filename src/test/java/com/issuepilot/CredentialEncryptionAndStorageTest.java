@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Base64;
+import java.util.Objects;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Phase 4A: Test suite for AES-256-GCM Credential Encryption and Secure Storage.
  */
+@SuppressWarnings("null")
 public class CredentialEncryptionAndStorageTest {
 
     static {
@@ -148,7 +150,7 @@ public class CredentialEncryptionAndStorageTest {
         CredentialEncryptionService.EncryptedResult result = encryptionService.encrypt(token, provider, canonicalUserId);
 
         // Switch key to another valid 256-bit key
-        ReflectionTestUtils.setField(properties, "appEncryptionKey", SECOND_HEX_KEY);
+        ReflectionTestUtils.setField(Objects.requireNonNull(properties), "appEncryptionKey", SECOND_HEX_KEY);
 
         assertThrows(SecurityException.class, () ->
                 encryptionService.decrypt(result.getNonce(), result.getCiphertext(), provider, canonicalUserId)
@@ -158,12 +160,12 @@ public class CredentialEncryptionAndStorageTest {
     @Test
     @DisplayName("Missing, blank, or improperly sized encryption key fails closed")
     public void testMissingOrInvalidKeyFailsClosed() {
-        ReflectionTestUtils.setField(properties, "appEncryptionKey", null);
+        ReflectionTestUtils.setField(Objects.requireNonNull(properties), "appEncryptionKey", null);
         assertThrows(IllegalStateException.class, () ->
                 encryptionService.encrypt("gho_token", "github", "github:10008")
         );
 
-        ReflectionTestUtils.setField(properties, "appEncryptionKey", "too_short_key");
+        ReflectionTestUtils.setField(Objects.requireNonNull(properties), "appEncryptionKey", "too_short_key");
         assertThrows(IllegalStateException.class, () ->
                 encryptionService.encrypt("gho_token", "github", "github:10008")
         );
@@ -176,7 +178,7 @@ public class CredentialEncryptionAndStorageTest {
         for (int i = 0; i < 32; i++) keyBytes[i] = (byte) (i + 1);
         String base64Key = Base64.getEncoder().encodeToString(keyBytes);
 
-        ReflectionTestUtils.setField(properties, "appEncryptionKey", base64Key);
+        ReflectionTestUtils.setField(Objects.requireNonNull(properties), "appEncryptionKey", base64Key);
 
         String token = "gho_token_base64_key";
         String canonicalUserId = "github:10009";
