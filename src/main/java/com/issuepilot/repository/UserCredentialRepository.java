@@ -112,7 +112,8 @@ public class UserCredentialRepository {
                 );
                 return;
             } catch (Exception e) {
-                logger.warn("MongoDB operation failed, falling back to in-memory store: {}", e.getMessage());
+                logger.error("MongoDB Atlas credential write failed: {}", e.getMessage());
+                throw new IllegalStateException("Failed to persist OAuth credentials to MongoDB Atlas.", e);
             }
         }
 
@@ -132,11 +133,10 @@ public class UserCredentialRepository {
                 Document doc = mongoOperations.getCollection(COLLECTION_NAME)
                         .find(new Document("canonical_user_id", canonicalUserId.trim()))
                         .first();
-                if (doc != null) {
-                    return Optional.of(fromDocument(doc));
-                }
+                return Optional.ofNullable(fromDocument(doc));
             } catch (Exception e) {
-                logger.warn("MongoDB read failed, checking in-memory store: {}", e.getMessage());
+                logger.error("MongoDB Atlas credential read failed: {}", e.getMessage());
+                throw new IllegalStateException("Failed to read OAuth credentials from MongoDB Atlas.", e);
             }
         }
 
@@ -152,19 +152,18 @@ public class UserCredentialRepository {
             return false;
         }
 
-        boolean deleted = false;
         if (mongoOperations != null) {
             try {
                 var res = mongoOperations.getCollection(COLLECTION_NAME)
                         .deleteOne(new Document("canonical_user_id", canonicalUserId.trim()));
-                deleted = res.getDeletedCount() > 0;
+                return res.getDeletedCount() > 0;
             } catch (Exception e) {
-                logger.warn("MongoDB delete failed: {}", e.getMessage());
+                logger.error("MongoDB Atlas credential delete failed: {}", e.getMessage());
+                throw new IllegalStateException("Failed to delete OAuth credentials from MongoDB Atlas.", e);
             }
         }
 
-        boolean memDeleted = inMemoryStore.remove(canonicalUserId.trim()) != null;
-        return deleted || memDeleted;
+        return inMemoryStore.remove(canonicalUserId.trim()) != null;
     }
 
     /**

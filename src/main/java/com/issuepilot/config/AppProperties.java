@@ -201,6 +201,18 @@ public class AppProperties {
     @Value("${GITHUB_USER_API_URL:https://api.github.com/user}")
     private String githubUserApiUrl = "https://api.github.com/user";
 
+    @Value("${GITHUB_ANALYZER_MAX_REPOSITORIES:15}")
+    private int githubAnalyzerMaxRepositories = 15;
+
+    @Value("${GITHUB_ANALYZER_EXCLUDE_FORKS:true}")
+    private boolean githubAnalyzerExcludeForks = true;
+
+    @Value("${GITHUB_ANALYZER_TIMEOUT_SECONDS:10}")
+    private int githubAnalyzerTimeoutSeconds = 10;
+
+    @Value("${GITHUB_ANALYZER_MAX_RETRIES:2}")
+    private int githubAnalyzerMaxRetries = 2;
+
     public String getMongodbUri() {
         return mongodbUri;
     }
@@ -464,5 +476,21 @@ public class AppProperties {
 
     public String getGithubUserApiUrl() {
         return githubUserApiUrl;
+    }
+
+    public int getGithubAnalyzerMaxRepositories() {
+        return githubAnalyzerMaxRepositories;
+    }
+
+    public boolean isGithubAnalyzerExcludeForks() {
+        return githubAnalyzerExcludeForks;
+    }
+
+    public int getGithubAnalyzerTimeoutSeconds() {
+        return githubAnalyzerTimeoutSeconds;
+    }
+
+    public int getGithubAnalyzerMaxRetries() {
+        return githubAnalyzerMaxRetries;
     }
 }
