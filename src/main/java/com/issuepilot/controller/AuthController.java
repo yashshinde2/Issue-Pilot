@@ -23,6 +23,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Controller handling GitHub OAuth 2.0 authentication, session handoff, and identity introspection.
@@ -102,20 +103,20 @@ public class AuthController {
             logger.warn("GitHub OAuth access denied or error: {}", error);
             String redirectUrl = properties.getFrontendAppUrl() + "/auth/callback?error="
                     + URLEncoder.encode(errorDescription != null ? errorDescription : error, StandardCharsets.UTF_8);
-            return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(redirectUrl)).build();
+            return ResponseEntity.status(HttpStatus.FOUND).location(Objects.requireNonNull(URI.create(redirectUrl))).build();
         }
 
         if (state == null || !oAuthStateStore.validateAndRemoveState(state)) {
             logger.warn("OAuth state validation failed: missing, mismatched, expired, or reused state token.");
             String redirectUrl = properties.getFrontendAppUrl() + "/auth/callback?error="
                     + URLEncoder.encode("Invalid or expired OAuth state session. Please try logging in again.", StandardCharsets.UTF_8);
-            return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(redirectUrl)).build();
+            return ResponseEntity.status(HttpStatus.FOUND).location(Objects.requireNonNull(URI.create(redirectUrl))).build();
         }
 
         if (code == null || code.isBlank()) {
             String redirectUrl = properties.getFrontendAppUrl() + "/auth/callback?error="
                     + URLEncoder.encode("Missing GitHub authorization code.", StandardCharsets.UTF_8);
-            return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(redirectUrl)).build();
+            return ResponseEntity.status(HttpStatus.FOUND).location(Objects.requireNonNull(URI.create(redirectUrl))).build();
         }
 
         try {
@@ -174,13 +175,13 @@ public class AuthController {
                     + URLEncoder.encode(exchangeCode, StandardCharsets.UTF_8)
                     + "&new_user=" + isNewUser;
 
-            return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(redirectUrl)).build();
+            return ResponseEntity.status(HttpStatus.FOUND).location(Objects.requireNonNull(URI.create(redirectUrl))).build();
 
         } catch (Exception e) {
             logger.error("GitHub OAuth authentication failed: {}", e.getMessage());
             String redirectUrl = properties.getFrontendAppUrl() + "/auth/callback?error="
                     + URLEncoder.encode("Authentication failed: " + e.getMessage(), StandardCharsets.UTF_8);
-            return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(redirectUrl)).build();
+            return ResponseEntity.status(HttpStatus.FOUND).location(Objects.requireNonNull(URI.create(redirectUrl))).build();
         }
     }
 

@@ -1,17 +1,13 @@
 package com.issuepilot;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.issuepilot.model.ContributorProfile;
-import com.issuepilot.model.ContributorSkill;
 import com.issuepilot.model.InferredSkill;
 import com.issuepilot.model.SkillEvidence;
 import com.issuepilot.model.UserIdentity;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;

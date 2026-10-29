@@ -1,12 +1,10 @@
 package com.issuepilot;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.issuepilot.config.AppProperties;
 import com.issuepilot.config.EnvLoader;
 import com.issuepilot.security.TokenService;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
-import com.nimbusds.jose.JWSSigner;
 import com.nimbusds.jose.crypto.MACSigner;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
@@ -15,7 +13,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -65,9 +62,6 @@ public class TokenAuthenticationIntegrationTest {
 
     @Autowired
     private TokenService tokenService;
-
-    @Autowired
-    private AppProperties appProperties;
 
     @Test
     @DisplayName("TokenService issues valid JWT and authenticates against protected endpoint")

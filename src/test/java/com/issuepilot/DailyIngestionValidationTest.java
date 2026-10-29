@@ -14,7 +14,6 @@ import com.issuepilot.config.MongoConfig;
 import com.issuepilot.model.ContributorProfile;
 import com.issuepilot.model.ContributorSkill;
 import com.issuepilot.repository.IssueRepository;
-import com.issuepilot.repository.JobRepository;
 import com.issuepilot.repository.UserRepository;
 import com.issuepilot.service.DiscoveryService;
 import com.issuepilot.service.RefreshService;
@@ -30,7 +29,6 @@ import org.springframework.data.mongodb.core.MongoOperations;
 
 import java.io.IOException;
 import java.lang.reflect.Proxy;
-import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;

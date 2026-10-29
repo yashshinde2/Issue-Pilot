@@ -94,7 +94,7 @@ public class GitHubOAuthService {
 
             HttpEntity<MultiValueMap<String, String>> request = new HttpEntity<>(body, headers);
             ResponseEntity<String> response = restTemplate.postForEntity(
-                    properties.getGithubOAuthTokenUrl(),
+                    java.util.Objects.requireNonNull(properties.getGithubOAuthTokenUrl()),
                     request,
                     String.class
             );
@@ -147,8 +147,8 @@ public class GitHubOAuthService {
 
             HttpEntity<Void> request = new HttpEntity<>(headers);
             ResponseEntity<String> response = restTemplate.exchange(
-                    properties.getGithubUserApiUrl(),
-                    HttpMethod.GET,
+                    java.util.Objects.requireNonNull(properties.getGithubUserApiUrl()),
+                    java.util.Objects.requireNonNull(HttpMethod.GET),
                     request,
                     String.class
             );

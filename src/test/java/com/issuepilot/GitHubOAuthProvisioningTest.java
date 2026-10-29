@@ -1,7 +1,6 @@
 package com.issuepilot;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.issuepilot.config.AppProperties;
 import com.issuepilot.config.EnvLoader;
 import com.issuepilot.model.ContributorSkill;
 import com.issuepilot.repository.UserRepository;
@@ -11,7 +10,6 @@ import com.issuepilot.security.TokenService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;

@@ -16,7 +16,6 @@ import org.springframework.http.*;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.RestTemplate;
 
 import java.nio.charset.StandardCharsets;
@@ -173,10 +172,10 @@ public class GitHubProfileAnalyzerService {
         String url = properties.getGithubApiBaseUrl() + "/user/repos?type=owner&sort=updated&per_page=" + Math.min(maxRepos, 100);
 
         HttpHeaders headers = createAuthHeaders(githubToken);
-        HttpEntity<Void> entity = new HttpEntity<>(headers);
+        HttpEntity<Void> entity = new HttpEntity<>(Objects.requireNonNull(headers));
 
         try {
-            ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+            ResponseEntity<String> response = restTemplate.exchange(url, Objects.requireNonNull(HttpMethod.GET), entity, String.class);
             checkRateLimit(response.getHeaders());
 
             if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
@@ -221,15 +220,20 @@ public class GitHubProfileAnalyzerService {
     private void analyzeRepositoryLanguages(String repoFullName, String githubToken, Map<String, InferredSkillAccumulator> accumulators) {
         String url = properties.getGithubApiBaseUrl() + "/repos/" + repoFullName + "/languages";
         HttpHeaders headers = createAuthHeaders(githubToken);
-        HttpEntity<Void> entity = new HttpEntity<>(headers);
+        HttpEntity<Void> entity = new HttpEntity<>(Objects.requireNonNull(headers));
 
         try {
-            ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+            ResponseEntity<String> response = restTemplate.exchange(url, Objects.requireNonNull(HttpMethod.GET), entity, String.class);
             checkRateLimit(response.getHeaders());
 
             if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
                 Map<String, Number> langBytes = objectMapper.readValue(response.getBody(), new TypeReference<Map<String, Number>>() {});
-                long totalBytes = langBytes.values().stream().mapToLong(Number::longValue).sum();
+                long totalBytes = 0;
+                for (Number val : langBytes.values()) {
+                    if (val != null) {
+                        totalBytes += val.longValue();
+                    }
+                }
 
                 for (Map.Entry<String, Number> entry : langBytes.entrySet()) {
                     String rawLang = entry.getKey();
@@ -284,10 +288,10 @@ public class GitHubProfileAnalyzerService {
     private String fetchFileContent(String repoFullName, String filePath, String githubToken) {
         String url = properties.getGithubApiBaseUrl() + "/repos/" + repoFullName + "/contents/" + filePath;
         HttpHeaders headers = createAuthHeaders(githubToken);
-        HttpEntity<Void> entity = new HttpEntity<>(headers);
+        HttpEntity<Void> entity = new HttpEntity<>(Objects.requireNonNull(headers));
 
         try {
-            ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+            ResponseEntity<String> response = restTemplate.exchange(url, Objects.requireNonNull(HttpMethod.GET), entity, String.class);
             checkRateLimit(response.getHeaders());
 
             if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
@@ -543,11 +547,13 @@ public class GitHubProfileAnalyzerService {
     }
 
     private void handleRateLimitOrForbidden(HttpClientErrorException.Forbidden e) {
-        String remaining = e.getResponseHeaders() != null ? e.getResponseHeaders().getFirst("X-RateLimit-Remaining") : null;
+        HttpHeaders respHeaders = (e != null) ? e.getResponseHeaders() : null;
+        String remaining = (respHeaders != null) ? respHeaders.getFirst("X-RateLimit-Remaining") : null;
         if ("0".equals(remaining)) {
-            throw new IllegalStateException("GitHub rate limit reached: " + e.getMessage(), e);
+            String msg = (e != null && e.getMessage() != null) ? e.getMessage() : "Forbidden";
+            throw new IllegalStateException("GitHub rate limit reached: " + msg, e);
         }
-        logger.warn("Access forbidden or restricted by GitHub: {}", e.getMessage());
+        logger.warn("Access forbidden or restricted by GitHub: {}", (e != null) ? e.getMessage() : "Forbidden");
     }
 
     /**
@@ -574,87 +580,5 @@ public class GitHubProfileAnalyzerService {
 
         userRepository.upsertUser(profile);
         logger.info("Persisted {} inferred skills for user '{}'.", profile.getInferredSkills().size(), canonicalUserId);
-    }
-
-    /**
-     * Helper accumulator to combine evidence and calculate bounded confidence.
-     */
-    private static class InferredSkillAccumulator {
-        private final String technology;
-        private final String category;
-        private final Set<SkillEvidence> evidenceSet = new LinkedHashSet<>();
-        private final Set<String> observedRepositories = new HashSet<>();
-        private long totalBytes = 0;
-        private double maxBytePercentage = 0.0;
-        private boolean foundInProductionManifest = false;
-        private boolean foundInDevManifest = false;
-
-        public InferredSkillAccumulator(String technology, String category) {
-            this.technology = technology;
-            this.category = category;
-        }
-
-        public void addEvidence(SkillEvidence evidence, double bytePercent, long bytes) {
-            this.evidenceSet.add(evidence);
-            this.observedRepositories.add(evidence.getRepository());
-            this.totalBytes += bytes;
-            this.maxBytePercentage = Math.max(this.maxBytePercentage, bytePercent);
-        }
-
-        public void addManifestEvidence(SkillEvidence evidence, boolean isDev) {
-            this.evidenceSet.add(evidence);
-            this.observedRepositories.add(evidence.getRepository());
-            if (isDev) {
-                this.foundInDevManifest = true;
-            } else {
-                this.foundInProductionManifest = true;
-            }
-        }
-
-        /**
-         * Documented Confidence Scoring Formula:
-         * - Language evidence base: 0.50
-         *   + 0.20 if >= 50% repo bytes or in >= 3 repos
-         *   + 0.10 if >= 20% repo bytes or in >= 2 repos
-         * - Manifest evidence base: 0.70
-         *   + 0.15 if in >= 2 repos
-         *   - 0.15 if only in devDependencies
-         * - Combination bonus: + 0.10 if technology is supported by both language and manifest
-         * - Bounds: strictly clamped between 0.10 and 0.95.
-         */
-        public double calculateConfidence() {
-            double confidence = 0.50;
-
-            if (foundInProductionManifest) {
-                confidence = 0.70;
-                if (observedRepositories.size() >= 2) {
-                    confidence += 0.15;
-                }
-            } else if (foundInDevManifest) {
-                confidence = 0.55;
-            } else if (totalBytes > 0) {
-                if (maxBytePercentage >= 50.0 || observedRepositories.size() >= 3) {
-                    confidence = 0.75;
-                } else if (maxBytePercentage >= 20.0 || observedRepositories.size() >= 2) {
-                    confidence = 0.65;
-                } else if (maxBytePercentage < 5.0 && observedRepositories.size() == 1) {
-                    confidence = 0.40;
-                }
-            }
-
-            // Multiple repos or both sources bonus
-            if (foundInProductionManifest && totalBytes > 0) {
-                confidence += 0.10;
-            }
-
-            return Math.max(0.10, Math.min(0.95, Math.round(confidence * 100.0) / 100.0));
-        }
-
-        public InferredSkill toInferredSkill() {
-            InferredSkill skill = new InferredSkill(technology, category, calculateConfidence());
-            skill.setStatus("pending_confirmation");
-            skill.setEvidence(new ArrayList<>(evidenceSet));
-            return skill;
-        }
     }
 }
