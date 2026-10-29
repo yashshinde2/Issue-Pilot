@@ -51,6 +51,7 @@ public class GitHubProfileAnalyzerService {
     private final ObjectMapper objectMapper;
     private final RestTemplate restTemplate;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public GitHubProfileAnalyzerService(
             UserCredentialService userCredentialService,
             UserRepository userRepository,
@@ -406,7 +407,7 @@ public class GitHubProfileAnalyzerService {
     }
 
     private void parseGoMod(String repo, String path, String content, Map<String, InferredSkillAccumulator> acc) {
-        Pattern pattern = Pattern.compile("(?m)^\\s*([a-zA-Z0-9_./-]+)\\s+v[0-9]");
+        Pattern pattern = Pattern.compile("(?m)^\\s*(?:require\\s+)?([a-zA-Z0-9_./-]+)\\s+v[0-9]");
         Matcher matcher = pattern.matcher(content);
         while (matcher.find()) {
             String module = matcher.group(1).toLowerCase();

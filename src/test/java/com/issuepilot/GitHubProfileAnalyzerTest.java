@@ -6,6 +6,7 @@ import com.issuepilot.config.EnvLoader;
 import com.issuepilot.model.ContributorProfile;
 import com.issuepilot.model.ContributorSkill;
 import com.issuepilot.model.InferredSkill;
+import com.issuepilot.model.SkillEvidence;
 import com.issuepilot.repository.UserCredentialRepository;
 import com.issuepilot.repository.UserRepository;
 import com.issuepilot.security.CredentialEncryptionService;
