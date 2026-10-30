@@ -6,8 +6,6 @@ import com.issuepilot.model.ContributorProfile;
 import com.issuepilot.model.ContributorSkill;
 import com.issuepilot.model.InferredSkill;
 import com.issuepilot.repository.IssueRepository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -25,8 +23,6 @@ import java.util.*;
  */
 @Service
 public class TechnologyMatchingService {
-
-    private static final Logger logger = LoggerFactory.getLogger(TechnologyMatchingService.class);
 
     public enum MatchPriority {
         CONFIRMED_SKILL,

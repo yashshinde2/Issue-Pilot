@@ -16,7 +16,6 @@ import org.springframework.core.io.ClassPathResource;
 import java.io.InputStream;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -26,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * Validates Section 3 and Phase 2 conformance requirements across all 4 platforms:
  * GitHub, GitLab, Codeberg / Forgejo, and Bugzilla.
  */
+@SuppressWarnings("null")
 public class PlatformAdapterConformanceTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();

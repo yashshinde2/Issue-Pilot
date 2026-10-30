@@ -6,7 +6,6 @@ import com.issuepilot.config.EnvLoader;
 import com.issuepilot.config.MongoConfig;
 import com.issuepilot.controller.RecommendationController.RecommendationRequest;
 import com.issuepilot.model.ContributorProfile;
-import com.issuepilot.model.ContributorSkill;
 import com.issuepilot.model.InferredSkill;
 import com.issuepilot.model.SkillEvidence;
 import com.issuepilot.repository.IssueRepository;
@@ -44,6 +43,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "APP_JWT_ISSUER=https://issuepilot-test.com",
         "APP_JWT_EXPIRATION_SECONDS=3600"
 })
+@SuppressWarnings("null")
 public class TechnologyAwareDiscoveryAndRecommendationTest {
 
     static {

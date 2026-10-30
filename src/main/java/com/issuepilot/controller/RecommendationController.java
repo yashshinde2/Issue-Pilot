@@ -294,7 +294,9 @@ public class RecommendationController {
                 ? req.run_id
                 : "run_" + System.currentTimeMillis() + "_" + UUID.randomUUID().toString().substring(0, 6);
 
-        String userId = (String) profile.get("user_id");
+        String userId = (profile != null && profile.containsKey("user_id") && profile.get("user_id") != null)
+                ? profile.get("user_id").toString()
+                : "anonymous_user";
 
         if (mongoConfig.isConnected() && !req.demo_mode) {
             try {

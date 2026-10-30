@@ -8,9 +8,7 @@ import com.issuepilot.config.AlgorithmConstants;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
-import java.util.Objects;
 
 /**
  * Generic Typed Evidence Envelope conforming to Algorithm V2.3 specification Section 2.

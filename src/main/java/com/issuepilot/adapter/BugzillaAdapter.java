@@ -22,7 +22,7 @@ public class BugzillaAdapter implements BaseIssueSourceAdapter {
 
     private final AppProperties properties;
     private final ObjectMapper objectMapper;
-    private final HttpClient httpClient;
+    private HttpClient httpClient;
     private int localRequestsUsed = 0;
     private String lastSuccessfulCheckAt = null;
 

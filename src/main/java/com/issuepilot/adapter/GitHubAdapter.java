@@ -22,7 +22,7 @@ public class GitHubAdapter implements BaseIssueSourceAdapter {
 
     private final AppProperties properties;
     private final ObjectMapper objectMapper;
-    private final HttpClient httpClient;
+    private HttpClient httpClient;
     private final Map<String, Object> rateLimitState = new HashMap<>();
     private String lastSuccessfulCheckAt = null;
 
