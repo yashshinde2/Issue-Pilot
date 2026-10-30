@@ -22,6 +22,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -58,7 +59,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "GITHUB_OAUTH_REDIRECT_URI=http://localhost:8000/api/auth/github/callback",
         "FRONTEND_APP_URL=http://localhost:3000"
 })
-@SuppressWarnings("null")
 public class GitHubOAuthProvisioningTest {
 
     static {
@@ -120,12 +120,12 @@ public class GitHubOAuthProvisioningTest {
         // 1. Missing state
         mockMvc.perform(get("/api/auth/github/callback").param("code", "valid-code"))
                 .andExpect(status().isFound())
-                .andExpect(header().string("Location", org.hamcrest.Matchers.containsString("error=")));
+                .andExpect(header().string("Location", Objects.requireNonNull(org.hamcrest.Matchers.containsString("error="))));
 
         // 2. Mismatched / unrecorded state
         mockMvc.perform(get("/api/auth/github/callback").param("code", "valid-code").param("state", "fake-state"))
                 .andExpect(status().isFound())
-                .andExpect(header().string("Location", org.hamcrest.Matchers.containsString("error=")));
+                .andExpect(header().string("Location", Objects.requireNonNull(org.hamcrest.Matchers.containsString("error="))));
 
         // 3. Reused state
         String validState = oAuthStateStore.generateState();
@@ -138,12 +138,12 @@ public class GitHubOAuthProvisioningTest {
 
         mockMvc.perform(get("/api/auth/github/callback").param("code", "code-1").param("state", validState))
                 .andExpect(status().isFound())
-                .andExpect(header().string("Location", org.hamcrest.Matchers.containsString("exchange_code=")));
+                .andExpect(header().string("Location", Objects.requireNonNull(org.hamcrest.Matchers.containsString("exchange_code="))));
 
         // Attempting to reuse the exact same state must fail
         mockMvc.perform(get("/api/auth/github/callback").param("code", "code-2").param("state", validState))
                 .andExpect(status().isFound())
-                .andExpect(header().string("Location", org.hamcrest.Matchers.containsString("error=")));
+                .andExpect(header().string("Location", Objects.requireNonNull(org.hamcrest.Matchers.containsString("error="))));
     }
 
     @Test
@@ -178,7 +178,7 @@ public class GitHubOAuthProvisioningTest {
 
         // Redeem exchange code via POST /api/auth/exchange
         MvcResult exchangeResult = mockMvc.perform(post("/api/auth/exchange")
-                        .contentType(MediaType.APPLICATION_JSON)
+                        .contentType(Objects.requireNonNull(MediaType.APPLICATION_JSON))
                         .content("{\"exchange_code\":\"" + exchangeCode + "\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("success"))
@@ -298,7 +298,7 @@ public class GitHubOAuthProvisioningTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("success"))
                 .andExpect(jsonPath("$.user_id").value("github:12345"))
-                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("dispose of the client-side session token")));
+                .andExpect(jsonPath("$.message").value(Objects.requireNonNull(org.hamcrest.Matchers.containsString("dispose of the client-side session token"))));
     }
 
     @Test

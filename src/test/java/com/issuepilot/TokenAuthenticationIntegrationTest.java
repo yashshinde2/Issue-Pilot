@@ -20,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
+import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -48,7 +49,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "APP_JWT_ISSUER=https://issuepilot-test.com",
         "APP_JWT_EXPIRATION_SECONDS=3600"
 })
-@SuppressWarnings("null")
 public class TokenAuthenticationIntegrationTest {
 
     static {
@@ -188,7 +188,7 @@ public class TokenAuthenticationIntegrationTest {
                         .header("Authorization", "Bearer " + aliceToken))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.status").value(403))
-                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("Access denied")));
+                .andExpect(jsonPath("$.message").value(Objects.requireNonNull(org.hamcrest.Matchers.containsString("Access denied"))));
     }
 
     @Test

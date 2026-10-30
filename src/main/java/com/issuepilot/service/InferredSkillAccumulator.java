@@ -9,7 +9,7 @@ import java.util.*;
  * Accumulator that aggregates language statistics and manifest evidence for a single technology,
  * computing a deterministic, bounded confidence score.
  */
-class InferredSkillAccumulator {
+public class InferredSkillAccumulator {
 
     private final String technology;
     private final String category;

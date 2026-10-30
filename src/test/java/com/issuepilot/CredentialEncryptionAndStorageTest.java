@@ -23,7 +23,6 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Phase 4A: Test suite for AES-256-GCM Credential Encryption and Secure Storage.
  */
-@SuppressWarnings("null")
 public class CredentialEncryptionAndStorageTest {
 
     static {
@@ -180,13 +179,13 @@ public class CredentialEncryptionAndStorageTest {
 
         ReflectionTestUtils.setField(Objects.requireNonNull(properties), "appEncryptionKey", base64Key);
 
-        String token = "gho_token_base64_key";
-        String canonicalUserId = "github:10009";
-        String provider = "github";
+        String b64Token = "gho_token_base64_key";
+        String b64UserId = "github:10009";
+        String b64Provider = "github";
 
-        CredentialEncryptionService.EncryptedResult result = encryptionService.encrypt(token, provider, canonicalUserId);
-        String decrypted = encryptionService.decrypt(result.getNonce(), result.getCiphertext(), provider, canonicalUserId);
-        assertEquals(token, decrypted);
+        CredentialEncryptionService.EncryptedResult result = encryptionService.encrypt(b64Token, b64Provider, b64UserId);
+        String decrypted = encryptionService.decrypt(result.getNonce(), result.getCiphertext(), b64Provider, b64UserId);
+        assertEquals(b64Token, decrypted);
     }
 
     @Test

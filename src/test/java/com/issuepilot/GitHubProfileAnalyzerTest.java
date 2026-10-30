@@ -44,7 +44,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "GITHUB_ANALYZER_MAX_REPOSITORIES=15",
         "GITHUB_ANALYZER_EXCLUDE_FORKS=true"
 })
-@SuppressWarnings("null")
 public class GitHubProfileAnalyzerTest {
 
     static {
@@ -81,13 +80,30 @@ public class GitHubProfileAnalyzerTest {
                 userRepository,
                 appProperties,
                 objectMapper,
-                mockRestTemplate
-        );
+                mockRestTemplate);
     }
 
     private String encodeBase64Content(String text) {
         String b64 = Base64.getEncoder().encodeToString(text.getBytes(StandardCharsets.UTF_8));
         return "{\"content\":\"" + b64 + "\",\"encoding\":\"base64\"}";
+    }
+
+    @SuppressWarnings("null")
+    private void mockGet(String urlPart, String responseBody) {
+        when(mockRestTemplate.exchange(contains(urlPart), eq(HttpMethod.GET), any(), eq(String.class)))
+                .thenReturn(ResponseEntity.ok(responseBody));
+    }
+
+    @SuppressWarnings("null")
+    private void mockGetNotFound(String urlPart) {
+        when(mockRestTemplate.exchange(contains(urlPart), eq(HttpMethod.GET), any(), eq(String.class)))
+                .thenThrow(new HttpClientErrorException(HttpStatus.NOT_FOUND));
+    }
+
+    @SuppressWarnings("null")
+    private void mockGetWithHeaders(String urlPart, String responseBody, HttpHeaders headers) {
+        when(mockRestTemplate.exchange(contains(urlPart), eq(HttpMethod.GET), any(), eq(String.class)))
+                .thenReturn(new ResponseEntity<>(responseBody, headers, HttpStatus.OK));
     }
 
     @Test
@@ -98,18 +114,14 @@ public class GitHubProfileAnalyzerTest {
 
         // Mock repos: python-only repo
         List<Map<String, Object>> repos = List.of(
-                Map.of("full_name", "user/repo-python", "fork", false, "private", false)
-        );
-        when(mockRestTemplate.exchange(contains("/user/repos"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenReturn(ResponseEntity.ok(objectMapper.valueToTree(repos).toString()));
+                Map.of("full_name", "user/repo-python", "fork", false, "private", false));
+        mockGet("/user/repos", objectMapper.valueToTree(repos).toString());
 
         // Mock languages: 100% Python
-        when(mockRestTemplate.exchange(contains("/repos/user/repo-python/languages"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenReturn(ResponseEntity.ok("{\"Python\": 50000}"));
+        mockGet("/repos/user/repo-python/languages", "{\"Python\": 50000}");
 
         // All manifest files return 404
-        when(mockRestTemplate.exchange(contains("/contents/"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenThrow(new HttpClientErrorException(HttpStatus.NOT_FOUND));
+        mockGetNotFound("/contents/");
 
         GitHubProfileAnalyzerService.AnalysisResult result = analyzerService.analyzeUserProfile(canonicalUserId);
 
@@ -125,9 +137,12 @@ public class GitHubProfileAnalyzerTest {
         assertTrue(pythonOpt.get().getConfidence() >= 0.50 && pythonOpt.get().getConfidence() <= 0.95);
 
         // Verify FastAPI, Django, NumPy are strictly NOT inferred
-        boolean containsFastApi = result.inferredSkills().stream().anyMatch(s -> "FastAPI".equalsIgnoreCase(s.getTechnology()));
-        boolean containsDjango = result.inferredSkills().stream().anyMatch(s -> "Django".equalsIgnoreCase(s.getTechnology()));
-        boolean containsNumPy = result.inferredSkills().stream().anyMatch(s -> "NumPy".equalsIgnoreCase(s.getTechnology()));
+        boolean containsFastApi = result.inferredSkills().stream()
+                .anyMatch(s -> "FastAPI".equalsIgnoreCase(s.getTechnology()));
+        boolean containsDjango = result.inferredSkills().stream()
+                .anyMatch(s -> "Django".equalsIgnoreCase(s.getTechnology()));
+        boolean containsNumPy = result.inferredSkills().stream()
+                .anyMatch(s -> "NumPy".equalsIgnoreCase(s.getTechnology()));
 
         assertFalse(containsFastApi, "Python alone must NOT imply FastAPI");
         assertFalse(containsDjango, "Python alone must NOT imply Django");
@@ -141,29 +156,19 @@ public class GitHubProfileAnalyzerTest {
         userCredentialService.storeCredential(canonicalUserId, "github", "20002", "gho_mock_token_2", "read:user");
 
         List<Map<String, Object>> repos = List.of(
-                Map.of("full_name", "user/backend-app", "fork", false, "private", false)
-        );
-        when(mockRestTemplate.exchange(contains("/user/repos"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenReturn(ResponseEntity.ok(objectMapper.valueToTree(repos).toString()));
-
-        when(mockRestTemplate.exchange(contains("/languages"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenReturn(ResponseEntity.ok("{\"Python\": 40000}"));
+                Map.of("full_name", "user/backend-app", "fork", false, "private", false));
+        mockGet("/user/repos", objectMapper.valueToTree(repos).toString());
+        mockGet("/languages", "{\"Python\": 40000}");
 
         // requirements.txt contains fastapi and numpy
         String reqTxt = "fastapi>=0.100.0\nnumpy==1.24.3\nrequests\n";
-        when(mockRestTemplate.exchange(contains("/contents/requirements.txt"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenReturn(ResponseEntity.ok(encodeBase64Content(reqTxt)));
+        mockGet("/contents/requirements.txt", encodeBase64Content(reqTxt));
 
-        when(mockRestTemplate.exchange(contains("/contents/package.json"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenThrow(new HttpClientErrorException(HttpStatus.NOT_FOUND));
-        when(mockRestTemplate.exchange(contains("/contents/pyproject.toml"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenThrow(new HttpClientErrorException(HttpStatus.NOT_FOUND));
-        when(mockRestTemplate.exchange(contains("/contents/Cargo.toml"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenThrow(new HttpClientErrorException(HttpStatus.NOT_FOUND));
-        when(mockRestTemplate.exchange(contains("/contents/go.mod"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenThrow(new HttpClientErrorException(HttpStatus.NOT_FOUND));
-        when(mockRestTemplate.exchange(contains("/contents/pom.xml"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenThrow(new HttpClientErrorException(HttpStatus.NOT_FOUND));
+        mockGetNotFound("/contents/package.json");
+        mockGetNotFound("/contents/pyproject.toml");
+        mockGetNotFound("/contents/Cargo.toml");
+        mockGetNotFound("/contents/go.mod");
+        mockGetNotFound("/contents/pom.xml");
 
         GitHubProfileAnalyzerService.AnalysisResult result = analyzerService.analyzeUserProfile(canonicalUserId);
 
@@ -189,37 +194,28 @@ public class GitHubProfileAnalyzerTest {
         userCredentialService.storeCredential(canonicalUserId, "github", "20003", "gho_mock_token_3", "read:user");
 
         List<Map<String, Object>> repos = List.of(
-                Map.of("full_name", "user/polyglot", "fork", false, "private", false)
-        );
-        when(mockRestTemplate.exchange(contains("/user/repos"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenReturn(ResponseEntity.ok(objectMapper.valueToTree(repos).toString()));
-        when(mockRestTemplate.exchange(contains("/languages"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenReturn(ResponseEntity.ok("{}"));
+                Map.of("full_name", "user/polyglot", "fork", false, "private", false));
+        mockGet("/user/repos", objectMapper.valueToTree(repos).toString());
+        mockGet("/languages", "{}");
 
         // package.json with react
         String pkgJson = "{\"dependencies\": {\"react\": \"^18.2.0\"}}";
-        when(mockRestTemplate.exchange(contains("/contents/package.json"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenReturn(ResponseEntity.ok(encodeBase64Content(pkgJson)));
+        mockGet("/contents/package.json", encodeBase64Content(pkgJson));
 
         // Cargo.toml with tokio
         String cargoToml = "[dependencies]\ntokio = \"1.0\"\n";
-        when(mockRestTemplate.exchange(contains("/contents/Cargo.toml"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenReturn(ResponseEntity.ok(encodeBase64Content(cargoToml)));
+        mockGet("/contents/Cargo.toml", encodeBase64Content(cargoToml));
 
         // go.mod with gin
         String goMod = "module example.com/app\nrequire github.com/gin-gonic/gin v1.9.0\n";
-        when(mockRestTemplate.exchange(contains("/contents/go.mod"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenReturn(ResponseEntity.ok(encodeBase64Content(goMod)));
+        mockGet("/contents/go.mod", encodeBase64Content(goMod));
 
         // pom.xml with spring-boot
         String pomXml = "<project><dependencies><dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency></dependencies></project>";
-        when(mockRestTemplate.exchange(contains("/contents/pom.xml"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenReturn(ResponseEntity.ok(encodeBase64Content(pomXml)));
+        mockGet("/contents/pom.xml", encodeBase64Content(pomXml));
 
-        when(mockRestTemplate.exchange(contains("/contents/requirements.txt"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenThrow(new HttpClientErrorException(HttpStatus.NOT_FOUND));
-        when(mockRestTemplate.exchange(contains("/contents/pyproject.toml"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenThrow(new HttpClientErrorException(HttpStatus.NOT_FOUND));
+        mockGetNotFound("/contents/requirements.txt");
+        mockGetNotFound("/contents/pyproject.toml");
 
         GitHubProfileAnalyzerService.AnalysisResult result = analyzerService.analyzeUserProfile(canonicalUserId);
 
@@ -243,14 +239,10 @@ public class GitHubProfileAnalyzerTest {
         List<Map<String, Object>> repos = List.of(
                 Map.of("full_name", "user/forked-repo", "fork", true, "private", false),
                 Map.of("full_name", "user/private-repo", "fork", false, "private", true),
-                Map.of("full_name", "user/own-repo", "fork", false, "private", false)
-        );
-        when(mockRestTemplate.exchange(contains("/user/repos"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenReturn(ResponseEntity.ok(objectMapper.valueToTree(repos).toString()));
-        when(mockRestTemplate.exchange(contains("/languages"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenReturn(ResponseEntity.ok("{\"Rust\": 1000}"));
-        when(mockRestTemplate.exchange(contains("/contents/"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenThrow(new HttpClientErrorException(HttpStatus.NOT_FOUND));
+                Map.of("full_name", "user/own-repo", "fork", false, "private", false));
+        mockGet("/user/repos", objectMapper.valueToTree(repos).toString());
+        mockGet("/languages", "{\"Rust\": 1000}");
+        mockGetNotFound("/contents/");
 
         GitHubProfileAnalyzerService.AnalysisResult result = analyzerService.analyzeUserProfile(canonicalUserId);
 
@@ -271,14 +263,10 @@ public class GitHubProfileAnalyzerTest {
         userRepository.upsertUser(profile);
 
         List<Map<String, Object>> repos = List.of(
-                Map.of("full_name", "user/python-repo", "fork", false, "private", false)
-        );
-        when(mockRestTemplate.exchange(contains("/user/repos"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenReturn(ResponseEntity.ok(objectMapper.valueToTree(repos).toString()));
-        when(mockRestTemplate.exchange(contains("/languages"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenReturn(ResponseEntity.ok("{\"Python\": 10000}"));
-        when(mockRestTemplate.exchange(contains("/contents/"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenThrow(new HttpClientErrorException(HttpStatus.NOT_FOUND));
+                Map.of("full_name", "user/python-repo", "fork", false, "private", false));
+        mockGet("/user/repos", objectMapper.valueToTree(repos).toString());
+        mockGet("/languages", "{\"Python\": 10000}");
+        mockGetNotFound("/contents/");
 
         analyzerService.analyzeUserProfile(canonicalUserId);
 
@@ -312,8 +300,7 @@ public class GitHubProfileAnalyzerTest {
         headers.set("X-RateLimit-Remaining", "0");
         headers.set("X-RateLimit-Reset", "1700000000");
 
-        when(mockRestTemplate.exchange(contains("/user/repos"), eq(HttpMethod.GET), any(), eq(String.class)))
-                .thenReturn(new ResponseEntity<>("[]", headers, HttpStatus.OK));
+        mockGetWithHeaders("/user/repos", "[]", headers);
 
         assertThrows(IllegalStateException.class, () -> analyzerService.analyzeUserProfile(canonicalUserId));
     }
@@ -339,9 +326,10 @@ public class GitHubProfileAnalyzerTest {
 
         String jwtUserA = tokenService.issueToken(userA, "userA", List.of("ROLE_USER"));
 
-        // User A attempts to analyze - principal resolves to userA, which has no credentials
+        // User A attempts to analyze - principal resolves to userA, which has no
+        // credentials
         mockMvc.perform(post("/api/profile/analyze")
-                        .header("Authorization", "Bearer " + jwtUserA))
+                .header("Authorization", "Bearer " + jwtUserA))
                 .andExpect(status().isUnauthorized());
     }
 
@@ -361,7 +349,7 @@ public class GitHubProfileAnalyzerTest {
         String jwt = tokenService.issueToken(canonicalUserId, "user_ts", List.of("ROLE_USER"));
 
         mockMvc.perform(get("/api/profile/inferred-skills")
-                        .header("Authorization", "Bearer " + jwt))
+                .header("Authorization", "Bearer " + jwt))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.user_id").value(canonicalUserId))
                 .andExpect(jsonPath("$.count").value(1))
