@@ -11,6 +11,8 @@ import com.issuepilot.repository.UserRepository;
 import com.issuepilot.security.UserIdentityResolver;
 import com.issuepilot.service.CppRankingClient;
 import com.issuepilot.service.LiveVerifier;
+import com.issuepilot.service.TechnologyMatchingService;
+import com.issuepilot.model.ContributorProfile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -39,6 +41,34 @@ public class RecommendationController {
     private final SimulatorController simulatorController;
     private final ObjectMapper objectMapper;
     private final UserIdentityResolver userIdentityResolver;
+    private final TechnologyMatchingService technologyMatchingService;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public RecommendationController(
+            MongoConfig mongoConfig,
+            AppProperties properties,
+            IssueRepository issueRepository,
+            UserRepository userRepository,
+            RecommendationRepository recommendationRepository,
+            CppRankingClient cppRankingClient,
+            LiveVerifier liveVerifier,
+            SimulatorController simulatorController,
+            ObjectMapper objectMapper,
+            UserIdentityResolver userIdentityResolver,
+            TechnologyMatchingService technologyMatchingService
+    ) {
+        this.mongoConfig = mongoConfig;
+        this.properties = properties;
+        this.issueRepository = issueRepository;
+        this.userRepository = userRepository;
+        this.recommendationRepository = recommendationRepository;
+        this.cppRankingClient = cppRankingClient;
+        this.liveVerifier = liveVerifier;
+        this.simulatorController = simulatorController;
+        this.objectMapper = objectMapper;
+        this.userIdentityResolver = userIdentityResolver;
+        this.technologyMatchingService = technologyMatchingService != null ? technologyMatchingService : new TechnologyMatchingService();
+    }
 
     public RecommendationController(
             MongoConfig mongoConfig,
@@ -52,16 +82,9 @@ public class RecommendationController {
             ObjectMapper objectMapper,
             UserIdentityResolver userIdentityResolver
     ) {
-        this.mongoConfig = mongoConfig;
-        this.properties = properties;
-        this.issueRepository = issueRepository;
-        this.userRepository = userRepository;
-        this.recommendationRepository = recommendationRepository;
-        this.cppRankingClient = cppRankingClient;
-        this.liveVerifier = liveVerifier;
-        this.simulatorController = simulatorController;
-        this.objectMapper = objectMapper;
-        this.userIdentityResolver = userIdentityResolver;
+        this(mongoConfig, properties, issueRepository, userRepository, recommendationRepository,
+                cppRankingClient, liveVerifier, simulatorController, objectMapper, userIdentityResolver,
+                new TechnologyMatchingService());
     }
 
     public static class RecommendationRequest {
@@ -149,24 +172,27 @@ public class RecommendationController {
         }
 
         // 2. Resolve Candidate Pool
+        ContributorProfile contributorProfile = null;
+        if (profile != null) {
+            try {
+                contributorProfile = objectMapper.convertValue(profile, ContributorProfile.class);
+            } catch (Exception ignored) {}
+        }
+
         List<Map<String, Object>> candidates = new ArrayList<>();
         String dataSource = "atlas_candidates";
 
         if (req.demo_mode || !req.prefer_live_atlas) {
             dataSource = "sample_demonstration_candidates";
-            candidates = new ArrayList<>(simulatorController.getSampleIssues());
+            List<Map<String, Object>> rawSamples = new ArrayList<>(simulatorController.getSampleIssues());
+            candidates = technologyMatchingService.prioritizeCandidates(rawSamples, contributorProfile, req, 100);
         } else {
             try {
-                candidates = issueRepository.queryIssues(
-                        "open",
-                        false,
-                        req.technology_filter,
-                        req.min_difficulty,
-                        req.max_difficulty,
-                        null,
-                        req.source_filter,
-                        100,
-                        0
+                candidates = technologyMatchingService.fetchCandidatePool(
+                        issueRepository,
+                        contributorProfile,
+                        req,
+                        100
                 );
             } catch (Exception e) {
                 throw new ResponseStatusException(
@@ -250,6 +276,16 @@ public class RecommendationController {
         List<Map<String, Object>> deliveredRecs = backfillResult.getDeliveredRecommendations();
         List<Map<String, Object>> auditedRecords = backfillResult.getAuditedRecords();
         Map<String, Object> metrics = backfillResult.getMetrics();
+
+        // Enrich with explainable technology matching reasons
+        if (contributorProfile != null) {
+            for (Map<String, Object> rec : deliveredRecs) {
+                technologyMatchingService.enrichWithExplanations(rec, contributorProfile);
+            }
+            for (Map<String, Object> rec : auditedRecords) {
+                technologyMatchingService.enrichWithExplanations(rec, contributorProfile);
+            }
+        }
 
         // 5. Save Audit Snapshots to MongoDB Atlas for Idempotency and Reproducibility
         // Note: Demo mode is strictly isolated and does NOT persist recommendations to Atlas

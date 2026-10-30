@@ -207,6 +207,89 @@ public class IssueRepository {
         return results;
     }
 
+    public List<Map<String, Object>> queryIssuesMultiTech(
+            String state,
+            Boolean isAssigned,
+            Collection<String> technologies,
+            Double minDifficulty,
+            Double maxDifficulty,
+            String search,
+            String source,
+            int limit,
+            int skip
+    ) {
+        if (mongoTemplate == null) return Collections.emptyList();
+
+        Document query = new Document();
+
+        if (source != null && !source.isBlank() && !source.equalsIgnoreCase("all")) {
+            query.append("source", source.toLowerCase().trim());
+        }
+
+        if (state != null && !state.isBlank() && !state.equalsIgnoreCase("all")) {
+            query.append("state", state.toLowerCase().trim());
+            if (state.equalsIgnoreCase("open")) {
+                query.append("stale_status", new Document("$nin", Arrays.asList("closed", "unavailable")));
+            }
+        }
+
+        if (isAssigned != null) {
+            query.append("is_assigned", isAssigned);
+        }
+
+        query.append("issue_url", new Document("$exists", true).append("$ne", ""));
+
+        if (technologies != null && !technologies.isEmpty()) {
+            List<Document> orList = new ArrayList<>();
+            for (String tech : technologies) {
+                if (tech != null && !tech.isBlank()) {
+                    Pattern pat = Pattern.compile("^" + Pattern.quote(tech.trim()) + "$", Pattern.CASE_INSENSITIVE);
+                    orList.add(new Document("detected_technologies", pat));
+                    orList.add(new Document("technologies.technology", pat));
+                }
+            }
+            if (!orList.isEmpty()) {
+                query.append("$or", orList);
+            }
+        }
+
+        Document diffConditions = new Document();
+        if (minDifficulty != null) {
+            diffConditions.append("$gte", minDifficulty);
+        }
+        if (maxDifficulty != null) {
+            diffConditions.append("$lte", maxDifficulty);
+        }
+        if (!diffConditions.isEmpty()) {
+            query.append("difficulty_evidence.technical_complexity", diffConditions);
+        }
+
+        if (search != null && !search.isBlank()) {
+            Pattern searchPat = Pattern.compile(Pattern.quote(search.trim()), Pattern.CASE_INSENSITIVE);
+            List<Document> searchOr = Arrays.asList(
+                    new Document("title", searchPat),
+                    new Document("repository_full_name", searchPat)
+            );
+            if (query.containsKey("$or")) {
+                query.append("$and", Arrays.asList(new Document("$or", searchOr)));
+            } else {
+                query.append("$or", searchOr);
+            }
+        }
+
+        List<Map<String, Object>> results = new ArrayList<>();
+        var cursor = mongoTemplate.getCollection("issues")
+                .find(query)
+                .sort(new Document("updated_at", -1))
+                .skip(skip)
+                .limit(limit);
+
+        for (Document d : cursor) {
+            results.add(cleanDoc(d));
+        }
+        return results;
+    }
+
     public long countIssues() {
         if (mongoTemplate == null) return 0;
         return mongoTemplate.getCollection("issues").countDocuments();

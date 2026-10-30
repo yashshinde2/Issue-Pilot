@@ -29,6 +29,9 @@ public class ContributorProfile {
     @JsonProperty("inferred_skills")
     private List<InferredSkill> inferredSkills = new java.util.ArrayList<>();
 
+    @JsonProperty("dismissed_skills")
+    private Set<String> dismissedSkills = new LinkedHashSet<>();
+
     private double capability = 70.0;
 
     @JsonProperty("accepted_count")
@@ -98,6 +101,17 @@ public class ContributorProfile {
 
     public void setSkills(Map<String, ContributorSkill> skills) {
         this.skills = skills != null ? skills : new HashMap<>();
+    }
+
+    public Set<String> getDismissedSkills() {
+        if (dismissedSkills == null) {
+            dismissedSkills = new LinkedHashSet<>();
+        }
+        return dismissedSkills;
+    }
+
+    public void setDismissedSkills(Set<String> dismissedSkills) {
+        this.dismissedSkills = dismissedSkills != null ? new LinkedHashSet<>(dismissedSkills) : new LinkedHashSet<>();
     }
 
     public double getCapability() {
@@ -181,22 +195,55 @@ public class ContributorProfile {
     }
 
     /**
-     * Confirms an inferred skill without allowing inferred skills to overwrite
+     * Confirms a skill without allowing inferred skills to overwrite
      * an existing confirmed skill unless explicitly updated.
      */
     public void confirmSkill(String technology, double score, double confidence, String level) {
-        if (technology == null || technology.isBlank()) return;
+        if (technology == null || technology.isBlank()) {
+            return;
+        }
+        String norm = TechnologyDetectionHelper.normalizeTechnology(technology);
+        String finalTech = (norm != null) ? norm : technology.trim();
+
         if (this.skills == null) {
             this.skills = new HashMap<>();
         }
-        ContributorSkill confirmed = new ContributorSkill(technology, score, confidence, level, "user_confirmed");
-        this.skills.put(technology, confirmed);
+        ContributorSkill userSkill = new ContributorSkill(finalTech, score, confidence, level, "user_confirmed");
+        this.skills.put(finalTech, userSkill);
+
+        // Remove from dismissed skills if previously dismissed
+        if (this.dismissedSkills != null) {
+            this.dismissedSkills.remove(finalTech);
+        }
 
         // Update status of matching inferred skill if present
         if (this.inferredSkills != null) {
             for (InferredSkill inferred : this.inferredSkills) {
-                if (inferred != null && technology.equalsIgnoreCase(inferred.getTechnology())) {
+                if (inferred != null && finalTech.equalsIgnoreCase(inferred.getTechnology())) {
                     inferred.setStatus("confirmed");
+                }
+            }
+        }
+    }
+
+    /**
+     * Dismisses an inferred skill suggestion and prevents re-analysis from
+     * silently re-adding it without new evidence.
+     */
+    public void dismissSkill(String technology) {
+        if (technology == null || technology.isBlank()) {
+            return;
+        }
+        String norm = TechnologyDetectionHelper.normalizeTechnology(technology);
+        String finalTech = (norm != null) ? norm : technology.trim();
+
+        getDismissedSkills().add(finalTech);
+
+        // Update status of matching inferred skill if present
+        if (this.inferredSkills != null) {
+            for (InferredSkill inferred : this.inferredSkills) {
+                if (inferred != null && finalTech.equalsIgnoreCase(inferred.getTechnology())) {
+                    inferred.setStatus("dismissed");
                 }
             }
         }
@@ -210,6 +257,9 @@ public class ContributorProfile {
         if (candidate == null || candidate.getTechnology() == null || candidate.getTechnology().isBlank()) {
             return false;
         }
+        if (this.inferredSkills == null) {
+            this.inferredSkills = new java.util.ArrayList<>();
+        }
         // Do not add or overwrite if already present in confirmed skills
         if (this.skills != null) {
             for (String confirmedTech : this.skills.keySet()) {
@@ -218,13 +268,26 @@ public class ContributorProfile {
                 }
             }
         }
-        if (this.inferredSkills == null) {
-            this.inferredSkills = new java.util.ArrayList<>();
+        // Check if previously dismissed by user
+        if (this.dismissedSkills != null) {
+            for (String dismissedTech : this.dismissedSkills) {
+                if (candidate.getTechnology().equalsIgnoreCase(dismissedTech)) {
+                    for (InferredSkill existing : this.inferredSkills) {
+                        if (existing != null && candidate.getTechnology().equalsIgnoreCase(existing.getTechnology())) {
+                            existing.setStatus("dismissed");
+                            return true;
+                        }
+                    }
+                    candidate.setStatus("dismissed");
+                    this.inferredSkills.add(candidate);
+                    return true;
+                }
+            }
         }
         for (InferredSkill existing : this.inferredSkills) {
             if (existing != null && candidate.getTechnology().equalsIgnoreCase(existing.getTechnology())) {
-                // Update evidence or confidence without overwriting confirmed status
-                if (!"confirmed".equals(existing.getStatus())) {
+                // Update evidence or confidence without overwriting confirmed or dismissed status
+                if (!"confirmed".equals(existing.getStatus()) && !"dismissed".equals(existing.getStatus())) {
                     existing.setConfidence(Math.max(existing.getConfidence(), candidate.getConfidence()));
                     if (candidate.getEvidence() != null) {
                         for (SkillEvidence ev : candidate.getEvidence()) {
@@ -271,6 +334,18 @@ public class ContributorProfile {
                     for (String token : str.split("[,; ]+")) {
                         String norm = TechnologyDetectionHelper.normalizeTechnology(token);
                         if (norm != null) result.add(norm);
+                    }
+                }
+            }
+        }
+        if (dismissedSkills != null && !dismissedSkills.isEmpty()) {
+            for (String dismissed : dismissedSkills) {
+                if (dismissed != null) {
+                    String norm = TechnologyDetectionHelper.normalizeTechnology(dismissed);
+                    if (norm != null) {
+                        result.remove(norm);
+                    } else {
+                        result.remove(dismissed);
                     }
                 }
             }
