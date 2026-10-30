@@ -487,10 +487,7 @@ public class AlgorithmV23DataContractTest {
 
         // 5. Independence from vanity metrics: stars, forks, and open issues CANNOT change H
         Double baselineH = measured.computeHealthScore();
-        int arbitraryStars = 50000;
-        int arbitraryForks = 12000;
-        int arbitraryOpenIssues = 900;
-        // Evidence model V2 does not have stars/forks/open_issues fields, guaranteeing separation.
+        // Evidence model V2 strictly omits stars, forks, and open_issues fields, guaranteeing separation.
         assertEquals(baselineH, measured.computeHealthScore());
     }
 }
