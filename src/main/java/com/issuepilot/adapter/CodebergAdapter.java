@@ -430,12 +430,27 @@ public class CodebergAdapter implements BaseIssueSourceAdapter {
         healthEvidence.put("recent_releases", 75.0);
 
         String id = "codeberg_" + repoFullName.replace("/", "_") + "_" + issueNumber;
+        String canonicalRepoKey = repoFullName;
+        String issueKey = com.issuepilot.model.CanonicalIssueKey.build("codeberg", getSourceInstance(), canonicalRepoKey, String.valueOf(issueNumber));
+
+        // Human vs Bot detection
+        boolean isAuthorBot = false;
+        Object userObj = rawItem.get("user");
+        if (userObj instanceof Map) {
+            String login = (String) ((Map<?, ?>) userObj).get("login");
+            if (login != null && (login.toLowerCase().contains("bot") || login.toLowerCase().endsWith("-bot"))) {
+                isAuthorBot = true;
+            }
+        }
 
         Map<String, Object> normalized = new LinkedHashMap<>();
         normalized.put("id", id);
+        normalized.put("issue_key", issueKey);
+        normalized.put("canonical_repository_key", canonicalRepoKey);
         normalized.put("native_id", String.valueOf(rawItem.getOrDefault("id", issueNumber)));
         normalized.put("source", "codeberg");
-        normalized.put("source_instance", "codeberg.org");
+        normalized.put("source_instance", getSourceInstance());
+        normalized.put("is_author_bot", isAuthorBot);
         normalized.put("repository_full_name", repoFullName);
         normalized.put("repository_owner", repoOwner);
         normalized.put("repository_name", repoName);

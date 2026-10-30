@@ -367,8 +367,99 @@ int main() {
         report_test("Deterministic Ranking Reproducibility Across 10 Runs", identical_all_runs, 1.0, identical_all_runs ? 1.0 : 0.0);
     }
 
-    std::cout << "\nALL 24 UNIT TEST CHECKS (ACROSS 18 TEST SCENARIOS) PASSED SUCCESSFULLY!\n";
-    std::cout << "Executed: " << total_assertions << " | Passed: " << passed_assertions << " | Failed: 0\n";
+    // =========================================================================
+    // PHASE 1: DATA CONTRACTS AND CANONICAL EVIDENCE MODEL TESTS
+    // =========================================================================
+    {
+        // Test 19: Canonical Four-Part Issue Key Construction & Parsing
+        std::string key = issue_pilot::build_issue_key("gitlab", "gitlab.example.org", "org/repo", "101");
+        report_test("Issue Key Builder Output", key == "gitlab|gitlab.example.org|org/repo|101", 1.0, key == "gitlab|gitlab.example.org|org/repo|101" ? 1.0 : 0.0);
+
+        std::string s, inst, repo, nat;
+        bool parse_ok = issue_pilot::parse_issue_key(key, s, inst, repo, nat);
+        bool parse_match = parse_ok && s == "gitlab" && inst == "gitlab.example.org" && repo == "org/repo" && nat == "101";
+        report_test("Issue Key Parser Exact Match", parse_match, 1.0, parse_match ? 1.0 : 0.0);
+
+        // Invalid key segments
+        std::string s_bad, inst_bad, repo_bad, nat_bad;
+        bool parse_3_parts = issue_pilot::parse_issue_key("github|api.github.com|owner/repo", s_bad, inst_bad, repo_bad, nat_bad);
+        report_test("Reject 3-Part Issue Key", !parse_3_parts, 1.0, !parse_3_parts ? 1.0 : 0.0);
+
+        bool parse_empty_segment = issue_pilot::parse_issue_key("github||owner/repo|1", s_bad, inst_bad, repo_bad, nat_bad);
+        report_test("Reject Empty Segment in Issue Key", !parse_empty_segment, 1.0, !parse_empty_segment ? 1.0 : 0.0);
+
+        // Test 20: Evidence<T> Known-Zero vs Unavailable Semantics & Confidence Rejection
+        auto ev_zero = issue_pilot::Evidence<double>::known_zero(0.85, "github", "api.github.com", "direct_count", 0.0);
+        bool zero_sem_ok = ev_zero.available && ev_zero.value == 0.0 && std::abs(ev_zero.confidence - 0.85) < 0.0001;
+        report_test("Evidence Known-Zero Semantics", zero_sem_ok, 1.0, zero_sem_ok ? 1.0 : 0.0);
+
+        auto ev_unavail = issue_pilot::Evidence<double>::unavailable("endpoint unsupported", "bugzilla", "bugzilla.mozilla.org");
+        bool unavail_sem_ok = (!ev_unavail.available) && ev_unavail.confidence == 0.0 && ev_unavail.approximation_reason == "endpoint unsupported";
+        report_test("Evidence Unavailable Semantics", unavail_sem_ok, 1.0, unavail_sem_ok ? 1.0 : 0.0);
+
+        bool threw_on_invalid_conf = false;
+        try {
+            issue_pilot::validate_confidence(1.25);
+        } catch (const std::invalid_argument&) {
+            threw_on_invalid_conf = true;
+        }
+        report_test("Strict Rejection of Confidence > 1.0", threw_on_invalid_conf, 1.0, threw_on_invalid_conf ? 1.0 : 0.0);
+
+        bool threw_on_negative_conf = false;
+        try {
+            issue_pilot::validate_confidence(-0.10);
+        } catch (const std::invalid_argument&) {
+            threw_on_negative_conf = true;
+        }
+        report_test("Strict Rejection of Confidence < 0.0", threw_on_negative_conf, 1.0, threw_on_negative_conf ? 1.0 : 0.0);
+
+        // Case insensitivity, whitespace trimming, and delimiter injection in issue_key
+        std::string trimmed_built = issue_pilot::build_issue_key("  GitHub  ", " api.github.com ", " owner/repo ", " 42 ");
+        report_test("Issue Key Trimming & Case Normalization", trimmed_built == "github|api.github.com|owner/repo|42", 1.0, trimmed_built == "github|api.github.com|owner/repo|42" ? 1.0 : 0.0);
+
+        bool threw_on_delimiter_injection = false;
+        try {
+            issue_pilot::build_issue_key("git|hub", "api.github.com", "repo", "1");
+        } catch (const std::invalid_argument&) {
+            threw_on_delimiter_injection = true;
+        }
+        report_test("Reject Delimiter Injection in Issue Key", threw_on_delimiter_injection, 1.0, threw_on_delimiter_injection ? 1.0 : 0.0);
+
+        // Test 21: Schema and Algorithm Version Constants
+        bool versions_ok = (std::string(issue_pilot::versions::ALGORITHM_VERSION) == "2.3.0") &&
+                           (std::string(issue_pilot::versions::FEATURE_SCHEMA_VERSION) == "2.3.0");
+        report_test("Algorithm & Feature Schema Versioning", versions_ok, 1.0, versions_ok ? 1.0 : 0.0);
+
+        // Test 22: JSON Round-Trip with Issue Key
+        std::string test_json = R"({
+            "profile": {"user_id": "u1", "capability": 70.0, "skills": {"Python": 80.0}},
+            "candidates": [{
+                "id": "c1",
+                "issue_key": "codeberg|codeberg.org|forge/repo|55",
+                "source": "codeberg",
+                "source_instance": "codeberg.org",
+                "canonical_repository_key": "forge/repo",
+                "native_id": "55",
+                "issue_number": 55,
+                "state": "open",
+                "issue_url": "https://codeberg.org/forge/repo/issues/55",
+                "technologies": [{"technology": "Python", "raw_relevance": 1.0}]
+            }]
+        })";
+        issue_pilot::ContributorProfile parsed_prof;
+        issue_pilot::RankingWeights parsed_w;
+        std::vector<issue_pilot::IssueRecord> parsed_cands;
+        std::string err;
+        bool parsed = issue_pilot::JsonAdapter::parse_request(test_json, parsed_prof, parsed_w, parsed_cands, err);
+        bool cand_parsed_ok = parsed && parsed_cands.size() == 1 &&
+                              parsed_cands[0].get_issue_key() == "codeberg|codeberg.org|forge/repo|55" &&
+                              parsed_cands[0].source == "codeberg" &&
+                              parsed_cands[0].source_instance == "codeberg.org";
+        report_test("JsonAdapter Parse Issue Key & Source", cand_parsed_ok, 1.0, cand_parsed_ok ? 1.0 : 0.0);
+    }
+
+    std::cout << "\nALL UNIT TEST CHECKS (INCLUDING PHASE 1 CONTRACTS) PASSED SUCCESSFULLY!\n";
+    std::cout << "Executed: " << total_assertions << " | Passed: " << passed_assertions << " | Failed: " << (total_assertions - passed_assertions) << "\n";
     std::cout << "========================================\n";
-    return 0;
+    return (total_assertions == passed_assertions) ? 0 : 1;
 }

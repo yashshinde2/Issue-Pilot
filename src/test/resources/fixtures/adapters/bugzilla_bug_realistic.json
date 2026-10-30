@@ -1,0 +1,15 @@
+{
+  "id": 1899123,
+  "summary": "Crash in WebRender when processing zero-sized WebGL canvas",
+  "status": "NEW",
+  "resolution": "",
+  "product": "Core",
+  "component": "Graphics: WebRender",
+  "creation_time": "2026-10-18T11:15:00Z",
+  "last_change_time": "2026-10-29T16:45:00Z",
+  "assigned_to": "nobody@mozilla.org",
+  "keywords": ["crash", "webrender"],
+  "comments_count": 4,
+  "creator": "reporter@example.com"
+}
+

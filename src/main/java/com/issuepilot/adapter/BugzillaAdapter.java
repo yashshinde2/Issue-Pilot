@@ -31,11 +31,15 @@ public class BugzillaAdapter implements BaseIssueSourceAdapter {
     private String validatedHost = null;
 
     public BugzillaAdapter(AppProperties properties, ObjectMapper objectMapper) {
+        this(properties, objectMapper, HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(Math.max(5, properties.getBugzillaRequestTimeoutSeconds())))
+                .build());
+    }
+
+    public BugzillaAdapter(AppProperties properties, ObjectMapper objectMapper, HttpClient httpClient) {
         this.properties = properties;
         this.objectMapper = objectMapper;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(Math.max(5, properties.getBugzillaRequestTimeoutSeconds())))
-                .build();
+        this.httpClient = httpClient;
         validateConfiguration();
     }
 
@@ -436,10 +440,14 @@ public class BugzillaAdapter implements BaseIssueSourceAdapter {
 
         String instanceClean = getSourceInstance().replace("/", "_").replace(":", "_").replace(".", "_");
         String id = "bz_" + instanceClean + "_" + bugId;
+        String canonicalRepoKey = product + ":" + component;
+        String issueKey = com.issuepilot.model.CanonicalIssueKey.build("bugzilla", getSourceInstance(), canonicalRepoKey, String.valueOf(bugId));
 
         // Note: Do NOT fabricate repository metadata for Bugzilla records
         Map<String, Object> normalized = new LinkedHashMap<>();
         normalized.put("id", id);
+        normalized.put("issue_key", issueKey);
+        normalized.put("canonical_repository_key", canonicalRepoKey);
         normalized.put("native_id", String.valueOf(bugId));
         normalized.put("source", "bugzilla");
         normalized.put("source_instance", getSourceInstance());

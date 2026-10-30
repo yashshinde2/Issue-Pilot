@@ -419,12 +419,31 @@ public class GitLabAdapter implements BaseIssueSourceAdapter {
         healthEvidence.put("recent_releases", 75.0);
 
         String id = "gitlab_" + projectPath.replace("/", "_") + "_" + issueNumber;
+        String canonicalRepoKey = projectPath;
+        String issueKey = com.issuepilot.model.CanonicalIssueKey.build("gitlab", getSourceInstance(), canonicalRepoKey, String.valueOf(issueNumber));
+
+        // Human vs Bot detection
+        boolean isAuthorBot = false;
+        Object authorObj = rawItem.get("author");
+        String authorUsername = "";
+        if (authorObj instanceof Map) {
+            Object u = ((Map<?, ?>) authorObj).get("username");
+            authorUsername = u != null ? u.toString() : "";
+            Boolean botFlag = (Boolean) ((Map<?, ?>) authorObj).get("bot");
+            if (Boolean.TRUE.equals(botFlag) || authorUsername.toLowerCase().contains("bot")) {
+                isAuthorBot = true;
+            }
+        }
 
         Map<String, Object> normalized = new LinkedHashMap<>();
         normalized.put("id", id);
+        normalized.put("issue_key", issueKey);
+        normalized.put("canonical_repository_key", canonicalRepoKey);
         normalized.put("native_id", String.valueOf(rawItem.getOrDefault("id", issueNumber)));
         normalized.put("source", "gitlab");
-        normalized.put("source_instance", "gitlab.com");
+        normalized.put("source_instance", getSourceInstance());
+        normalized.put("is_author_bot", isAuthorBot);
+        normalized.put("author_username", authorUsername);
         normalized.put("repository_full_name", projectPath);
         normalized.put("repository_owner", repoOwner);
         normalized.put("repository_name", repoName);

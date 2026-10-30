@@ -1,0 +1,81 @@
+{
+  "golden_fixtures": {
+    "known_zero": {
+      "value": 0.0,
+      "available": true,
+      "confidence": 0.9,
+      "source": "github",
+      "source_instance": "api.github.com",
+      "method": "complete_comment_query",
+      "sample_size": 10,
+      "coverage": 1.0,
+      "observed_at": "2026-10-30T12:00:00Z",
+      "window_start": "2026-10-23T12:00:00Z",
+      "window_end": "2026-10-30T12:00:00Z",
+      "pagination_complete": true,
+      "schema_version": "2.3.0"
+    },
+    "unavailable_unsupported_signal": {
+      "value": null,
+      "available": false,
+      "confidence": 0.0,
+      "source": "bugzilla",
+      "source_instance": "bugzilla.mozilla.org",
+      "method": "native_api",
+      "pagination_complete": false,
+      "approximation_reason": "Bugzilla lacks native commit and repository health evidence",
+      "schema_version": "2.3.0"
+    },
+    "unavailable_incomplete_pagination": {
+      "value": null,
+      "available": false,
+      "confidence": 0.0,
+      "source": "gitlab",
+      "source_instance": "gitlab.com",
+      "method": "merge_request_query",
+      "pagination_complete": false,
+      "approximation_reason": "Pagination incomplete: HTTP 429 rate limit encountered at page 2",
+      "schema_version": "2.3.0"
+    },
+    "measured_positive": {
+      "value": 85.0,
+      "available": true,
+      "confidence": 0.81,
+      "source": "github",
+      "source_instance": "api.github.com",
+      "method": "median_calculation",
+      "sample_size": 12,
+      "coverage": 1.0,
+      "observed_at": "2026-10-30T12:00:00Z",
+      "window_start": "2026-10-01T00:00:00Z",
+      "window_end": "2026-10-30T12:00:00Z",
+      "pagination_complete": true,
+      "schema_version": "2.3.0",
+      "confidence_factors": {
+        "c_sample": 1.0,
+        "c_coverage": 1.0,
+        "c_directness": 0.9,
+        "source_cap": 0.9
+      }
+    },
+    "structured_difficulty": {
+      "value": {
+        "scope_change_size": 25.0,
+        "technical_complexity": 50.0,
+        "dependency_arch_impact": 25.0,
+        "coordination_complexity": 25.0
+      },
+      "available": true,
+      "confidence": 0.8,
+      "source": "codeberg",
+      "source_instance": "codeberg.org",
+      "method": "structured_anchor_analysis",
+      "sample_size": 4,
+      "coverage": 1.0,
+      "observed_at": "2026-10-30T12:00:00Z",
+      "pagination_complete": true,
+      "schema_version": "2.3.0"
+    }
+  }
+}
+

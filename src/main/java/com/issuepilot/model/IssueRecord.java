@@ -13,6 +13,12 @@ public class IssueRecord {
 
     private String id;
 
+    @JsonProperty("issue_key")
+    private String issueKey;
+
+    @JsonProperty("canonical_repository_key")
+    private String canonicalRepositoryKey;
+
     @JsonProperty("native_id")
     private String nativeId;
 
@@ -93,6 +99,21 @@ public class IssueRecord {
 
     @JsonProperty("freshness_evidence")
     private EvidenceModels.FreshnessEvidence freshnessEvidence = new EvidenceModels.FreshnessEvidence();
+
+    @JsonProperty("difficulty_evidence_v2")
+    private Evidence<EvidenceModelsV2.DifficultyEvidenceV2> difficultyEvidenceV2;
+
+    @JsonProperty("responsiveness_evidence_v2")
+    private Evidence<EvidenceModelsV2.ResponsivenessEvidenceV2> responsivenessEvidenceV2;
+
+    @JsonProperty("health_evidence_v2")
+    private Evidence<EvidenceModelsV2.RepositoryHealthEvidenceV2> healthEvidenceV2;
+
+    @JsonProperty("freshness_evidence_v2")
+    private Evidence<EvidenceModelsV2.FreshnessEvidenceV2> freshnessEvidenceV2;
+
+    @JsonProperty("algorithm_metadata")
+    private AlgorithmMetadata algorithmMetadata = AlgorithmMetadata.current();
 
     @JsonProperty("stale_status")
     private String staleStatus = "active";
@@ -232,4 +253,80 @@ public class IssueRecord {
     public void setLastVerified(String lastVerified) { this.lastVerified = lastVerified; }
     public String getRefreshStatus() { return refreshStatus; }
     public void setRefreshStatus(String refreshStatus) { this.refreshStatus = refreshStatus; }
+
+    public String getIssueKey() {
+        if (issueKey != null && !issueKey.isBlank()) {
+            return issueKey;
+        }
+        String src = (source != null && !source.isBlank()) ? source : "github";
+        String inst = (sourceInstance != null && !sourceInstance.isBlank()) ? sourceInstance : "api.github.com";
+        String repo = (canonicalRepositoryKey != null && !canonicalRepositoryKey.isBlank()) ? canonicalRepositoryKey :
+                      (repositoryFullName != null && !repositoryFullName.isBlank()) ? repositoryFullName :
+                      (product != null ? (product + (component != null ? "/" + component : "")) : "unknown/unknown");
+        String natId = (nativeId != null && !nativeId.isBlank()) ? nativeId :
+                       (sourceIssueId != null && !sourceIssueId.isBlank()) ? sourceIssueId :
+                       (issueNumber != null ? String.valueOf(issueNumber) : "0");
+        return CanonicalIssueKey.build(src, inst, repo, natId);
+    }
+
+    public void setIssueKey(String issueKey) {
+        this.issueKey = issueKey;
+    }
+
+    public String getCanonicalRepositoryKey() {
+        if (canonicalRepositoryKey != null && !canonicalRepositoryKey.isBlank()) {
+            return canonicalRepositoryKey;
+        }
+        if (repositoryFullName != null && !repositoryFullName.isBlank()) {
+            return repositoryFullName;
+        }
+        if (product != null) {
+            return product + (component != null ? "/" + component : "");
+        }
+        return "";
+    }
+
+    public void setCanonicalRepositoryKey(String canonicalRepositoryKey) {
+        this.canonicalRepositoryKey = canonicalRepositoryKey;
+    }
+
+    public Evidence<EvidenceModelsV2.DifficultyEvidenceV2> getDifficultyEvidenceV2() {
+        return difficultyEvidenceV2;
+    }
+
+    public void setDifficultyEvidenceV2(Evidence<EvidenceModelsV2.DifficultyEvidenceV2> difficultyEvidenceV2) {
+        this.difficultyEvidenceV2 = difficultyEvidenceV2;
+    }
+
+    public Evidence<EvidenceModelsV2.ResponsivenessEvidenceV2> getResponsivenessEvidenceV2() {
+        return responsivenessEvidenceV2;
+    }
+
+    public void setResponsivenessEvidenceV2(Evidence<EvidenceModelsV2.ResponsivenessEvidenceV2> responsivenessEvidenceV2) {
+        this.responsivenessEvidenceV2 = responsivenessEvidenceV2;
+    }
+
+    public Evidence<EvidenceModelsV2.RepositoryHealthEvidenceV2> getHealthEvidenceV2() {
+        return healthEvidenceV2;
+    }
+
+    public void setHealthEvidenceV2(Evidence<EvidenceModelsV2.RepositoryHealthEvidenceV2> healthEvidenceV2) {
+        this.healthEvidenceV2 = healthEvidenceV2;
+    }
+
+    public Evidence<EvidenceModelsV2.FreshnessEvidenceV2> getFreshnessEvidenceV2() {
+        return freshnessEvidenceV2;
+    }
+
+    public void setFreshnessEvidenceV2(Evidence<EvidenceModelsV2.FreshnessEvidenceV2> freshnessEvidenceV2) {
+        this.freshnessEvidenceV2 = freshnessEvidenceV2;
+    }
+
+    public AlgorithmMetadata getAlgorithmMetadata() {
+        return algorithmMetadata;
+    }
+
+    public void setAlgorithmMetadata(AlgorithmMetadata algorithmMetadata) {
+        this.algorithmMetadata = algorithmMetadata;
+    }
 }

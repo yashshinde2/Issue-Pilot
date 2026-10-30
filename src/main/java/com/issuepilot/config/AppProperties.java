@@ -358,6 +358,10 @@ public class AppProperties {
         return bugzillaBaseUrl != null ? bugzillaBaseUrl : "";
     }
 
+    public void setBugzillaBaseUrl(String bugzillaBaseUrl) {
+        this.bugzillaBaseUrl = bugzillaBaseUrl;
+    }
+
     public String getBugzillaApiKey() {
         return bugzillaApiKey;
     }
@@ -428,6 +432,10 @@ public class AppProperties {
 
     public String getCppEnginePath() {
         return cppEnginePath;
+    }
+
+    public void setCppEnginePath(String cppEnginePath) {
+        this.cppEnginePath = cppEnginePath;
     }
 
     public String getCppRankingEnginePath() {

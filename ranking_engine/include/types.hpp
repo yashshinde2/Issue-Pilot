@@ -3,8 +3,173 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <sstream>
+#include <algorithm>
+#include <cmath>
+#include "unicode_nfc.hpp"
 
 namespace issue_pilot {
+
+namespace versions {
+static constexpr const char* ALGORITHM_VERSION = "2.3.0";
+static constexpr const char* FEATURE_SCHEMA_VERSION = "2.3.0";
+static constexpr const char* TECHNOLOGY_REGISTRY_VERSION = "1.0.0";
+static constexpr const char* LABEL_TAXONOMY_VERSION = "1.0.0";
+} // namespace versions
+
+// Trims leading and trailing whitespace
+inline std::string trim_str(const std::string& str) {
+    size_t first = str.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return "";
+    size_t last = str.find_last_not_of(" \t\r\n");
+    return str.substr(first, (last - first + 1));
+}
+
+inline std::string to_lower_str(std::string str) {
+    std::transform(str.begin(), str.end(), str.begin(), [](unsigned char c){ return std::tolower(c); });
+    return str;
+}
+
+// Canonical Four-Part Issue Key Helper Functions
+inline std::string build_issue_key(const std::string& source,
+                                   const std::string& source_instance,
+                                   const std::string& canonical_repository_key,
+                                   const std::string& native_issue_id) {
+    std::string s = to_lower_str(trim_str(source));
+    std::string inst = unicode::to_nfc(trim_str(source_instance));
+    std::string repo = unicode::to_nfc(trim_str(canonical_repository_key));
+    std::string nat = unicode::to_nfc(trim_str(native_issue_id));
+    if (s.empty() || inst.empty() || repo.empty() || nat.empty()) {
+        throw std::invalid_argument("Issue key segments must not be empty");
+    }
+    if (s.find('|') != std::string::npos || inst.find('|') != std::string::npos ||
+        repo.find('|') != std::string::npos || nat.find('|') != std::string::npos) {
+        throw std::invalid_argument("Issue key segments must not contain '|'");
+    }
+    return s + "|" + inst + "|" + repo + "|" + nat;
+}
+
+inline bool parse_issue_key(const std::string& key,
+                            std::string& out_source,
+                            std::string& out_source_instance,
+                            std::string& out_canonical_repo,
+                            std::string& out_native_id) {
+    std::string trimmed_key = trim_str(key);
+    if (trimmed_key.empty()) return false;
+    std::vector<std::string> parts;
+    std::string token;
+    std::istringstream tokenStream(trimmed_key);
+    while (std::getline(tokenStream, token, '|')) {
+        parts.push_back(token);
+    }
+    if (!trimmed_key.empty() && trimmed_key.back() == '|') {
+        parts.push_back("");
+    }
+    if (parts.size() != 4) return false;
+    for (size_t i = 0; i < parts.size(); ++i) {
+        parts[i] = unicode::to_nfc(trim_str(parts[i]));
+        if (parts[i].empty()) return false;
+    }
+    out_source = to_lower_str(parts[0]);
+    out_source_instance = parts[1];
+    out_canonical_repo = parts[2];
+    out_native_id = parts[3];
+    return true;
+}
+
+inline double validate_confidence(double conf) {
+    if (std::isnan(conf) || std::isinf(conf) || conf < 0.0 || conf > 1.0) {
+        throw std::invalid_argument("Confidence must be a finite number in [0.0, 1.0], got: " + std::to_string(conf));
+    }
+    return conf;
+}
+
+// Generic Typed Evidence Envelope (Algorithm V2.3 Section 2)
+template <typename T>
+struct Evidence {
+    T value{};
+    bool available{false};
+    double confidence{0.0}; // [0, 1]
+    std::string source;
+    std::string source_instance;
+    std::string method;
+    int sample_size{0};
+    double coverage{0.0};
+    std::string observed_at;
+    std::string window_start;
+    std::string window_end;
+    bool pagination_complete{true};
+    std::string approximation_reason;
+    std::vector<std::string> evidence_refs;
+    std::string schema_version{"2.3.0"};
+
+    static Evidence<T> of(const T& val, double conf, const std::string& src, const std::string& inst, const std::string& mth) {
+        Evidence<T> e;
+        e.value = val;
+        e.available = true;
+        e.confidence = validate_confidence(conf);
+        e.source = src;
+        e.source_instance = inst;
+        e.method = mth;
+        e.pagination_complete = true;
+        return e;
+    }
+
+    static Evidence<T> known_zero(double conf, const std::string& src, const std::string& inst, const std::string& mth, const T& zero_val) {
+        Evidence<T> e;
+        e.value = zero_val;
+        e.available = true;
+        e.confidence = validate_confidence(conf);
+        e.source = src;
+        e.source_instance = inst;
+        e.method = mth;
+        e.pagination_complete = true;
+        return e;
+    }
+
+    static Evidence<T> unavailable(const std::string& reason, const std::string& src, const std::string& inst) {
+        Evidence<T> e;
+        e.available = false;
+        e.confidence = 0.0;
+        e.source = src;
+        e.source_instance = inst;
+        e.approximation_reason = reason;
+        e.pagination_complete = false;
+        return e;
+    }
+};
+
+// V2.3 Difficulty Evidence: 4 signals with weights SC (30%), TC (30%), DI (20%), CC (20%)
+struct DifficultyEvidenceV2 {
+    double scope_change_size{50.0};      // SC
+    double technical_complexity{50.0};    // TC
+    double dependency_arch_impact{50.0};  // DI
+    double coordination_complexity{50.0}; // CC
+};
+
+// V2.3 Responsiveness Evidence: RT (30%), RR (30%), PR (25%), MA (15%)
+struct ResponsivenessEvidenceV2 {
+    double response_time_score{80.0};
+    double response_rate_score{80.0};
+    double pr_review_score{80.0};
+    double recent_maintainer_act{80.0};
+};
+
+// V2.3 Repository Health Evidence: C90 (30%), PR30 (25%), AU90 (25%), MA90 (20%)
+struct RepositoryHealthEvidenceV2 {
+    double c90_score{80.0};
+    double pr30_score{80.0};
+    double au90_score{80.0};
+    double ma90_score{80.0};
+};
+
+// V2.3 Freshness Evidence: AgeScore (40%), ActivityScore (60%)
+struct FreshnessEvidenceV2 {
+    double age_score{80.0};
+    double activity_score{80.0};
+    double age_days{0.0};
+    double idle_days{0.0};
+};
 
 // Technology Relevance for an Issue
 struct TechnologyRelevance {
@@ -99,6 +264,10 @@ struct FreshnessEvidence {
 // Issue Candidate Record
 struct IssueRecord {
     std::string id;
+    std::string issue_key;
+    std::string source{"github"};
+    std::string source_instance{"api.github.com"};
+    std::string canonical_repository_key;
     std::string native_id;
     std::string repository_full_name;
     int issue_number{0};
@@ -113,10 +282,26 @@ struct IssueRecord {
 
     bool skill_available{true};
     std::vector<TechnologyRelevance> technologies;
+
+    // V1 Evidence models (preserved for backward compatibility)
     DifficultyEvidence difficulty_evidence;
     ResponsivenessEvidence responsiveness_evidence;
     RepositoryHealthEvidence health_evidence;
     FreshnessEvidence freshness_evidence;
+
+    // V2.3 Typed Evidence Envelopes
+    Evidence<DifficultyEvidenceV2> difficulty_evidence_v2;
+    Evidence<ResponsivenessEvidenceV2> responsiveness_evidence_v2;
+    Evidence<RepositoryHealthEvidenceV2> health_evidence_v2;
+    Evidence<FreshnessEvidenceV2> freshness_evidence_v2;
+
+    std::string get_issue_key() const {
+        if (!issue_key.empty()) return issue_key;
+        std::string repo = !canonical_repository_key.empty() ? canonical_repository_key : repository_full_name;
+        if (repo.empty()) repo = "unknown/unknown";
+        std::string nat = !native_id.empty() ? native_id : std::to_string(issue_number);
+        return source + "|" + source_instance + "|" + repo + "|" + nat;
+    }
 
     bool is_eligible() const {
         if (state != "open") return false;

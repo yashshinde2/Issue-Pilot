@@ -26,11 +26,15 @@ public class GitHubAdapter implements BaseIssueSourceAdapter {
     private String lastSuccessfulCheckAt = null;
 
     public GitHubAdapter(AppProperties properties, ObjectMapper objectMapper) {
+        this(properties, objectMapper, HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(properties.getGithubRequestTimeoutSeconds()))
+                .build());
+    }
+
+    public GitHubAdapter(AppProperties properties, ObjectMapper objectMapper, HttpClient httpClient) {
         this.properties = properties;
         this.objectMapper = objectMapper;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(properties.getGithubRequestTimeoutSeconds()))
-                .build();
+        this.httpClient = httpClient;
 
         rateLimitState.put("limit", 60);
         rateLimitState.put("remaining", 60);
@@ -319,12 +323,36 @@ public class GitHubAdapter implements BaseIssueSourceAdapter {
         healthEvidence.put("recent_releases", 80.0);
 
         String id = "github_" + repoFullName.replace("/", "_") + "_" + issueNumber;
+        String canonicalRepoKey = repoFullName;
+        String issueKey = com.issuepilot.model.CanonicalIssueKey.build("github", getSourceInstance(), canonicalRepoKey, String.valueOf(issueNumber));
+
+        // Human vs Bot classification
+        boolean isAuthorBot = false;
+        Object userObj = rawItem.get("user");
+        if (userObj instanceof Map) {
+            String login = (String) ((Map<?, ?>) userObj).get("login");
+            String type = (String) ((Map<?, ?>) userObj).get("type");
+            if ((login != null && login.toLowerCase().endsWith("[bot]")) || "Bot".equalsIgnoreCase(type)) {
+                isAuthorBot = true;
+            }
+        }
+
+        // Maintainer role from author_association (OWNER, MEMBER, COLLABORATOR)
+        String authorAssociation = (String) rawItem.get("author_association");
+        boolean isMaintainer = "OWNER".equalsIgnoreCase(authorAssociation) ||
+                               "MEMBER".equalsIgnoreCase(authorAssociation) ||
+                               "COLLABORATOR".equalsIgnoreCase(authorAssociation);
 
         Map<String, Object> normalized = new LinkedHashMap<>();
         normalized.put("id", id);
+        normalized.put("issue_key", issueKey);
+        normalized.put("canonical_repository_key", canonicalRepoKey);
         normalized.put("native_id", String.valueOf(rawItem.getOrDefault("id", issueNumber)));
         normalized.put("source", "github");
-        normalized.put("source_instance", "api.github.com");
+        normalized.put("source_instance", getSourceInstance());
+        normalized.put("is_author_bot", isAuthorBot);
+        normalized.put("author_association", authorAssociation != null ? authorAssociation : "NONE");
+        normalized.put("is_maintainer", isMaintainer);
         normalized.put("repository_full_name", repoFullName);
         normalized.put("repository_owner", repoOwner);
         normalized.put("repository_name", repoName);

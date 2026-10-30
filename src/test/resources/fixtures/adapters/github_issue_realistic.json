@@ -1,0 +1,32 @@
+{
+  "id": 1000101,
+  "number": 42,
+  "title": "Fix concurrent map write in Go scheduler",
+  "body": "Nontrivial concurrency bug in scheduler sync. Mutex lock contention observed under high load.",
+  "html_url": "https://github.com/kubernetes/kubernetes/issues/42",
+  "state": "open",
+  "author_association": "MEMBER",
+  "comments": 3,
+  "created_at": "2026-10-20T12:00:00Z",
+  "updated_at": "2026-10-28T12:00:00Z",
+  "closed_at": null,
+  "repository": {
+    "full_name": "kubernetes/kubernetes",
+    "name": "kubernetes",
+    "owner": {
+      "login": "kubernetes"
+    }
+  },
+  "labels": [
+    {"name": "sig/scheduling"},
+    {"name": "kind/bug"},
+    {"name": "concurrency"}
+  ],
+  "assignee": null,
+  "assignees": [],
+  "user": {
+    "login": "alice_dev",
+    "type": "User"
+  }
+}
+

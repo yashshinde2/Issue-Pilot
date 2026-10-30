@@ -1,0 +1,30 @@
+{
+  "id": 554433,
+  "number": 88,
+  "title": "Support Git LFS batch transfer API",
+  "body": "Implement LFS batch API with SHA256 verification and streaming response.",
+  "state": "open",
+  "created_at": "2026-10-21T09:00:00Z",
+  "updated_at": "2026-10-27T17:00:00Z",
+  "closed_at": null,
+  "html_url": "https://codeberg.org/forgejo/forgejo/issues/88",
+  "comments": 2,
+  "labels": [
+    {"name": "kind/feature"},
+    {"name": "protocol/git-lfs"}
+  ],
+  "assignee": null,
+  "assignees": [],
+  "repository": {
+    "full_name": "forgejo/forgejo",
+    "name": "forgejo",
+    "owner": {
+      "login": "forgejo"
+    }
+  },
+  "user": {
+    "login": "committer1",
+    "type": "User"
+  }
+}
+

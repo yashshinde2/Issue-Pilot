@@ -40,4 +40,6 @@ CTestTestfile.cmake
 Thumbs.db
 
 /my.txt
-/Issue_Pilot_Unified_Ranking_and_Vote_Affinity_Algorithm_V2.md
+Issue_Pilot_Production_Algorithm_Specification_V2_3.md
+issue_pilot_v23_reference_tests.py
+

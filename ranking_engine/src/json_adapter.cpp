@@ -309,6 +309,18 @@ bool JsonAdapter::parse_request(const std::string& json_str,
         for (const auto& item : root.get("candidates").arr_val) {
             IssueRecord issue;
             issue.id = item.get("id").as_str();
+            if (item.has("issue_key")) {
+                issue.issue_key = item.get("issue_key").as_str();
+            }
+            if (item.has("source")) {
+                issue.source = item.get("source").as_str("github");
+            }
+            if (item.has("source_instance")) {
+                issue.source_instance = item.get("source_instance").as_str("api.github.com");
+            }
+            if (item.has("canonical_repository_key")) {
+                issue.canonical_repository_key = item.get("canonical_repository_key").as_str();
+            }
             issue.native_id = item.get("native_id").as_str();
             issue.repository_full_name = item.get("repository_full_name").as_str();
             issue.issue_number = item.get("issue_number").as_int();
@@ -410,6 +422,9 @@ std::string JsonAdapter::serialize_results(const std::vector<RankingResult>& res
         ss << "    {\n";
         ss << "      \"rank\": " << r.rank << ",\n";
         ss << "      \"id\": \"" << escape_json(r.issue.id) << "\",\n";
+        ss << "      \"issue_key\": \"" << escape_json(r.issue.get_issue_key()) << "\",\n";
+        ss << "      \"source\": \"" << escape_json(r.issue.source) << "\",\n";
+        ss << "      \"source_instance\": \"" << escape_json(r.issue.source_instance) << "\",\n";
         ss << "      \"issue_number\": " << r.issue.issue_number << ",\n";
         ss << "      \"title\": \"" << escape_json(r.issue.title) << "\",\n";
         ss << "      \"repository_full_name\": \"" << escape_json(r.issue.repository_full_name) << "\",\n";
