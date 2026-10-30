@@ -68,6 +68,46 @@ bool JsonAdapter::parse_request(const std::string& json_str,
                 out_profile.skills[kv.first] = s;
             }
         }
+
+        if (prof.has("skill_evidence_v2") && prof.get("skill_evidence_v2").type == JsonValue::V_OBJ) {
+            for (const auto& kv : prof.get("skill_evidence_v2").obj_val) {
+                if (kv.second.type == JsonValue::V_OBJ) {
+                    const auto& obj = kv.second;
+                    ContributorSkillEvidenceV2 ev;
+                    ev.technology = obj.has("technology") ? obj.get("technology").as_str(kv.first) : kv.first;
+                    ev.unique_contributed_repositories = obj.get("unique_contributed_repositories").as_int(0);
+                    ev.repo_available = obj.get("repo_available").as_bool(false);
+                    ev.standalone_commits = obj.get("standalone_commits").as_int(0);
+                    ev.standalone_commits_available = obj.get("standalone_commits_available").as_bool(false);
+                    ev.unique_authored_prs = obj.get("unique_authored_prs").as_int(0);
+                    ev.pr_volume_available = obj.get("pr_volume_available").as_bool(false);
+                    ev.merged_decided_prs = obj.get("merged_decided_prs").as_int(0);
+                    ev.decided_prs = obj.get("decided_prs").as_int(0);
+                    ev.merge_rate_available = obj.get("merge_rate_available").as_bool(false);
+                    ev.months_since_last_activity = obj.get("months_since_last_activity").as_double(0.0);
+                    ev.recency_available = obj.get("recency_available").as_bool(false);
+                    ev.profile_coverage = obj.get("profile_coverage").as_double(1.0);
+                    ev.source_quality = obj.get("source_quality").as_double(1.0);
+                    ev.profile_coverage_known = obj.get("profile_coverage_known").as_bool(true);
+                    ev.source_quality_known = obj.get("source_quality_known").as_bool(true);
+                    ev.has_questionnaire = obj.get("has_questionnaire").as_bool(false);
+                    ev.questionnaire_level = obj.get("questionnaire_level").as_str();
+                    ev.questionnaire_score = obj.get("questionnaire_score").as_double(0.0);
+
+                    out_profile.skill_evidence_v2[kv.first] = ev;
+
+                    auto res = ev.compute_skill();
+                    if (res.available) {
+                        ContributorSkill cs;
+                        cs.technology = ev.technology;
+                        cs.score = res.score;
+                        cs.confidence = res.confidence;
+                        cs.source = res.source;
+                        out_profile.skills[kv.first] = cs;
+                    }
+                }
+            }
+        }
     }
 
     // Weights (optional)

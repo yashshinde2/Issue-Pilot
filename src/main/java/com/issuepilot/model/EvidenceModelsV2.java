@@ -300,5 +300,272 @@ public final class EvidenceModelsV2 {
         public Integer getTrialsComplete() { return trialsComplete; }
         public void setTrialsComplete(Integer trialsComplete) { this.trialsComplete = trialsComplete; }
     }
+
+    /**
+     * V2.3 Contributor Skill Evidence per Technology conforming strictly to Sections 5.2 and 5.3.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public static class ContributorSkillEvidenceV2 {
+        @JsonProperty("technology")
+        private String technology;
+
+        @JsonProperty("unique_contributed_repositories")
+        private Integer uniqueContributedRepositories;
+
+        @JsonProperty("repo_available")
+        private Boolean repoAvailable = false;
+
+        @JsonProperty("standalone_commits")
+        private Integer standaloneCommits;
+
+        @JsonProperty("standalone_commits_available")
+        private Boolean standaloneCommitsAvailable = false;
+
+        @JsonProperty("unique_authored_prs")
+        private Integer uniqueAuthoredPrs;
+
+        @JsonProperty("pr_volume_available")
+        private Boolean prVolumeAvailable = false;
+
+        @JsonProperty("merged_decided_prs")
+        private Integer mergedDecidedPrs;
+
+        @JsonProperty("decided_prs")
+        private Integer decidedPrs;
+
+        @JsonProperty("merge_rate_available")
+        private Boolean mergeRateAvailable = false;
+
+        @JsonProperty("months_since_last_activity")
+        private Double monthsSinceLastActivity;
+
+        @JsonProperty("recency_available")
+        private Boolean recencyAvailable = false;
+
+        @JsonProperty("profile_coverage")
+        private Double profileCoverage = 1.0;
+
+        @JsonProperty("source_quality")
+        private Double sourceQuality = 1.0;
+
+        @JsonProperty("profile_coverage_known")
+        private Boolean profileCoverageKnown = true;
+
+        @JsonProperty("source_quality_known")
+        private Boolean sourceQualityKnown = true;
+
+        // Questionnaire self-report
+        @JsonProperty("has_questionnaire")
+        private Boolean hasQuestionnaire = false;
+
+        @JsonProperty("questionnaire_level")
+        private String questionnaireLevel;
+
+        @JsonProperty("questionnaire_score")
+        private Double questionnaireScore;
+
+        public ContributorSkillEvidenceV2() {}
+
+        public static double sat(double x, double k) {
+            if (x <= 0.0) return 0.0;
+            return 100.0 * (1.0 - Math.exp(-x / k));
+        }
+
+        public static double recencyDecay(double months) {
+            if (months < 0.0) months = 0.0;
+            return 100.0 * Math.exp(-months / 12.0);
+        }
+
+        public static double mergeRate(int merged, int decided) {
+            return 100.0 * ((double) merged + 2.0) / ((double) decided + 4.0);
+        }
+
+        public static Double questionnaireLevelToScore(String level) {
+            if (level == null) return null;
+            return switch (level.trim().toLowerCase(java.util.Locale.ROOT)) {
+                case "beginner" -> 20.0;
+                case "basic" -> 40.0;
+                case "intermediate" -> 60.0;
+                case "advanced" -> 75.0;
+                case "expert" -> 90.0;
+                default -> null;
+            };
+        }
+
+        public record SkillComputationResult(
+                boolean available,
+                double score,
+                double confidence,
+                String source,
+                double nominalCoverageAt,
+                int effectiveEpisodes,
+                String explanation
+        ) {
+            public static SkillComputationResult unavailable(double nominalCoverageAt, String reason) {
+                return new SkillComputationResult(false, 0.0, 0.0, "unavailable", nominalCoverageAt, 0, reason);
+            }
+
+            public static SkillComputationResult unavailable(String reason) {
+                return unavailable(0.0, reason);
+            }
+        }
+
+        public SkillComputationResult computeSkill() {
+            // Check questionnaire score
+            Double qScore = null;
+            if (Boolean.TRUE.equals(hasQuestionnaire)) {
+                if (questionnaireScore != null && !Double.isNaN(questionnaireScore)) {
+                    qScore = questionnaireScore;
+                } else if (questionnaireLevel != null) {
+                    qScore = questionnaireLevelToScore(questionnaireLevel);
+                }
+            }
+
+            // Observed skill components
+            double sumAvailableWeights = 0.0;
+            double weightedSum = 0.0;
+
+            if (Boolean.TRUE.equals(repoAvailable) && uniqueContributedRepositories != null) {
+                double rScore = sat(uniqueContributedRepositories, 4.0);
+                weightedSum += 0.15 * rScore;
+                sumAvailableWeights += 0.15;
+            }
+
+            if (Boolean.TRUE.equals(standaloneCommitsAvailable) && standaloneCommits != null) {
+                double cScore = sat(standaloneCommits, 80.0);
+                weightedSum += 0.20 * cScore;
+                sumAvailableWeights += 0.20;
+            }
+
+            if (Boolean.TRUE.equals(prVolumeAvailable) && uniqueAuthoredPrs != null) {
+                double prScore = sat(uniqueAuthoredPrs, 8.0);
+                weightedSum += 0.20 * prScore;
+                sumAvailableWeights += 0.20;
+            }
+
+            if (Boolean.TRUE.equals(mergeRateAvailable) && decidedPrs != null && decidedPrs >= 5 && mergedDecidedPrs != null) {
+                double mrScore = mergeRate(mergedDecidedPrs, decidedPrs);
+                weightedSum += 0.30 * mrScore;
+                sumAvailableWeights += 0.30;
+            }
+
+            if (Boolean.TRUE.equals(recencyAvailable) && monthsSinceLastActivity != null) {
+                double recScore = recencyDecay(monthsSinceLastActivity);
+                weightedSum += 0.15 * recScore;
+                sumAvailableWeights += 0.15;
+            }
+
+            boolean observedAvailable = false;
+            double skillObs = 0.0;
+            double cObs = 0.0;
+            int nEff = 0;
+
+            if (Boolean.TRUE.equals(profileCoverageKnown) && Boolean.TRUE.equals(sourceQualityKnown) && sumAvailableWeights >= 0.40) {
+                skillObs = weightedSum / sumAvailableWeights;
+                observedAvailable = true;
+
+                int prCount = (Boolean.TRUE.equals(prVolumeAvailable) && uniqueAuthoredPrs != null) ? Math.max(0, uniqueAuthoredPrs) : 0;
+                int commitCount = (Boolean.TRUE.equals(standaloneCommitsAvailable) && standaloneCommits != null) ? Math.max(0, standaloneCommits) : 0;
+                nEff = prCount + commitCount;
+
+                double pCov = profileCoverage != null ? Math.max(0.0, Math.min(1.0, profileCoverage)) : 1.0;
+                double sQual = sourceQuality != null ? Math.max(0.0, Math.min(1.0, sourceQuality)) : 1.0;
+                cObs = Math.min(1.0, (double) nEff / 10.0) * pCov * sQual;
+            }
+
+            // Case 1: Pure questionnaire
+            if (!observedAvailable && qScore != null) {
+                return new SkillComputationResult(
+                        true, qScore, 0.40, "self_reported", sumAvailableWeights, nEff,
+                        "Observed evidence below coverage threshold; scored via self-reported questionnaire."
+                );
+            }
+
+            // Case 2: Blended observed + questionnaire
+            if (observedAvailable && qScore != null) {
+                double qConf = 0.40;
+                double qWeight = Math.min(0.20, qConf / (cObs + qConf));
+                double finalScore = (1.0 - qWeight) * skillObs + qWeight * qScore;
+                double finalConf = (1.0 - qWeight) * cObs + qWeight * qConf;
+                return new SkillComputationResult(
+                        true, finalScore, finalConf, "blended", sumAvailableWeights, nEff,
+                        String.format(java.util.Locale.ROOT, "Blended observed (%.2f) and questionnaire (%.2f) with q_weight=%.4f", skillObs, qScore, qWeight)
+                );
+            }
+
+            // Case 3: Pure observed
+            if (observedAvailable) {
+                return new SkillComputationResult(
+                        true, skillObs, cObs, "observed", sumAvailableWeights, nEff,
+                        String.format(java.util.Locale.ROOT, "Observed skill score %.2f with confidence %.4f over %d episodes.", skillObs, cObs, nEff)
+                );
+            }
+
+            // Case 4: Neither available
+            return SkillComputationResult.unavailable(
+                    sumAvailableWeights,
+                    String.format(java.util.Locale.ROOT, "Nominal coverage A_t = %.2f < 0.40 and no questionnaire report available.", sumAvailableWeights)
+            );
+        }
+
+        // Getters and setters
+        public String getTechnology() { return technology; }
+        public void setTechnology(String technology) { this.technology = technology; }
+
+        public Integer getUniqueContributedRepositories() { return uniqueContributedRepositories; }
+        public void setUniqueContributedRepositories(Integer uniqueContributedRepositories) { this.uniqueContributedRepositories = uniqueContributedRepositories; }
+
+        public Boolean getRepoAvailable() { return repoAvailable; }
+        public void setRepoAvailable(Boolean repoAvailable) { this.repoAvailable = repoAvailable; }
+
+        public Integer getStandaloneCommits() { return standaloneCommits; }
+        public void setStandaloneCommits(Integer standaloneCommits) { this.standaloneCommits = standaloneCommits; }
+
+        public Boolean getStandaloneCommitsAvailable() { return standaloneCommitsAvailable; }
+        public void setStandaloneCommitsAvailable(Boolean standaloneCommitsAvailable) { this.standaloneCommitsAvailable = standaloneCommitsAvailable; }
+
+        public Integer getUniqueAuthoredPrs() { return uniqueAuthoredPrs; }
+        public void setUniqueAuthoredPrs(Integer uniqueAuthoredPrs) { this.uniqueAuthoredPrs = uniqueAuthoredPrs; }
+
+        public Boolean getPrVolumeAvailable() { return prVolumeAvailable; }
+        public void setPrVolumeAvailable(Boolean prVolumeAvailable) { this.prVolumeAvailable = prVolumeAvailable; }
+
+        public Integer getMergedDecidedPrs() { return mergedDecidedPrs; }
+        public void setMergedDecidedPrs(Integer mergedDecidedPrs) { this.mergedDecidedPrs = mergedDecidedPrs; }
+
+        public Integer getDecidedPrs() { return decidedPrs; }
+        public void setDecidedPrs(Integer decidedPrs) { this.decidedPrs = decidedPrs; }
+
+        public Boolean getMergeRateAvailable() { return mergeRateAvailable; }
+        public void setMergeRateAvailable(Boolean mergeRateAvailable) { this.mergeRateAvailable = mergeRateAvailable; }
+
+        public Double getMonthsSinceLastActivity() { return monthsSinceLastActivity; }
+        public void setMonthsSinceLastActivity(Double monthsSinceLastActivity) { this.monthsSinceLastActivity = monthsSinceLastActivity; }
+
+        public Boolean getRecencyAvailable() { return recencyAvailable; }
+        public void setRecencyAvailable(Boolean recencyAvailable) { this.recencyAvailable = recencyAvailable; }
+
+        public Double getProfileCoverage() { return profileCoverage; }
+        public void setProfileCoverage(Double profileCoverage) { this.profileCoverage = profileCoverage; }
+
+        public Double getSourceQuality() { return sourceQuality; }
+        public void setSourceQuality(Double sourceQuality) { this.sourceQuality = sourceQuality; }
+
+        public Boolean getProfileCoverageKnown() { return profileCoverageKnown; }
+        public void setProfileCoverageKnown(Boolean profileCoverageKnown) { this.profileCoverageKnown = profileCoverageKnown; }
+
+        public Boolean getSourceQualityKnown() { return sourceQualityKnown; }
+        public void setSourceQualityKnown(Boolean sourceQualityKnown) { this.sourceQualityKnown = sourceQualityKnown; }
+
+        public Boolean getHasQuestionnaire() { return hasQuestionnaire; }
+        public void setHasQuestionnaire(Boolean hasQuestionnaire) { this.hasQuestionnaire = hasQuestionnaire; }
+
+        public String getQuestionnaireLevel() { return questionnaireLevel; }
+        public void setQuestionnaireLevel(String questionnaireLevel) { this.questionnaireLevel = questionnaireLevel; }
+
+        public Double getQuestionnaireScore() { return questionnaireScore; }
+        public void setQuestionnaireScore(Double questionnaireScore) { this.questionnaireScore = questionnaireScore; }
+    }
 }
 

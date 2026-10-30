@@ -3,8 +3,10 @@ package com.issuepilot.service;
 import com.issuepilot.adapter.TechnologyDetectionHelper;
 import com.issuepilot.model.ContributorProfile;
 import com.issuepilot.model.ContributorSkill;
+import com.issuepilot.model.EvidenceModelsV2.ContributorSkillEvidenceV2;
 import com.issuepilot.model.InferredSkill;
 import com.issuepilot.model.RecommendationRequest;
+import com.issuepilot.model.TechnologyRelevance;
 import com.issuepilot.repository.IssueRepository;
 import org.springframework.stereotype.Service;
 
@@ -624,5 +626,120 @@ public class TechnologyMatchingService {
             Map<String, Object> writableScores = (Map<String, Object>) scMap;
             writableScores.put("technology_match_reasons", reasons);
         }
+    }
+
+    public record SkillMatchResultV2(
+            boolean available,
+            double skillScore,
+            double confidence,
+            double coverage,
+            Map<String, ContributorSkillEvidenceV2.SkillComputationResult> perTechnologyResults,
+            String explanation
+    ) {
+        public static SkillMatchResultV2 unavailable(String explanation) {
+            return new SkillMatchResultV2(false, 0.0, 0.0, 0.0, Collections.emptyMap(), explanation);
+        }
+    }
+
+    /**
+     * Computes V2.3 Multi-Technology Aggregation and Skill Match conforming strictly to Section 5.3.
+     *
+     * Rules:
+     * - Let rel_t be issue technology relevance.
+     * - Let T_obs be technologies with contributor Skill_t available.
+     * - SkillCoverage = sum_{t in T_obs} rel_t.
+     * - Require SkillCoverage >= 0.50; otherwise Skill S is unavailable.
+     * - S = sum_{t in T_obs} (rel_t * Skill_t) / SkillCoverage.
+     * - C_S = sum_{t in T_obs} (rel_t * c_t) (unnormalized issue relevance).
+     * - Effective difficulty capability cap_eff = S, C_cap_eff = C_S.
+     */
+    public SkillMatchResultV2 calculateSkillMatchV2(
+            Map<String, ContributorSkillEvidenceV2> skillEvidenceMap,
+            Map<String, ContributorSkill> fallbackSkillsMap,
+            List<TechnologyRelevance> issueTechnologies
+    ) {
+        if (issueTechnologies == null || issueTechnologies.isEmpty()) {
+            return SkillMatchResultV2.unavailable("Issue has no detected technologies.");
+        }
+
+        double sumRaw = 0.0;
+        for (TechnologyRelevance tr : issueTechnologies) {
+            if (tr != null && tr.getRawRelevance() > 0.0) {
+                sumRaw += tr.getRawRelevance();
+            }
+        }
+        if (sumRaw <= 0.0) {
+            return SkillMatchResultV2.unavailable("Issue technology raw relevance sum is zero.");
+        }
+
+        double skillCoverage = 0.0;
+        double weightedSkillSum = 0.0;
+        double confidenceSum = 0.0;
+        Map<String, ContributorSkillEvidenceV2.SkillComputationResult> perTechResults = new LinkedHashMap<>();
+
+        for (TechnologyRelevance tr : issueTechnologies) {
+            if (tr == null || tr.getTechnology() == null) continue;
+            double rel_t = tr.getNormalizedRelevance() > 0.0 ? tr.getNormalizedRelevance() : (tr.getRawRelevance() / sumRaw);
+            String canon = tr.getTechnology();
+            String canonLower = canon.toLowerCase(Locale.ROOT);
+
+            boolean found = false;
+            double sVal = 0.0;
+            double cVal = 0.0;
+            ContributorSkillEvidenceV2.SkillComputationResult compResult = null;
+
+            // 1. Check skillEvidenceMap
+            if (skillEvidenceMap != null) {
+                for (Map.Entry<String, ContributorSkillEvidenceV2> entry : skillEvidenceMap.entrySet()) {
+                    if (entry.getKey().equalsIgnoreCase(canonLower) ||
+                        (entry.getValue().getTechnology() != null && entry.getValue().getTechnology().equalsIgnoreCase(canonLower))) {
+                        compResult = entry.getValue().computeSkill();
+                        if (compResult.available()) {
+                            sVal = compResult.score();
+                            cVal = compResult.confidence();
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // 2. Fallback to fallbackSkillsMap
+            if (!found && fallbackSkillsMap != null) {
+                for (Map.Entry<String, ContributorSkill> entry : fallbackSkillsMap.entrySet()) {
+                    if (entry.getKey().equalsIgnoreCase(canonLower) ||
+                        (entry.getValue().getTechnology() != null && entry.getValue().getTechnology().equalsIgnoreCase(canonLower))) {
+                        sVal = entry.getValue().getScore();
+                        cVal = entry.getValue().getConfidence();
+                        found = true;
+                        compResult = new ContributorSkillEvidenceV2.SkillComputationResult(
+                                true, sVal, cVal, "confirmed", 1.0, 0, "Fallback skill record"
+                        );
+                        break;
+                    }
+                }
+            }
+
+            if (found && compResult != null) {
+                perTechResults.put(canon, compResult);
+                skillCoverage += rel_t;
+                weightedSkillSum += (rel_t * sVal);
+                confidenceSum += (rel_t * cVal);
+            }
+        }
+
+        if (skillCoverage < 0.50) {
+            return new SkillMatchResultV2(
+                    false, 0.0, 0.0, skillCoverage, perTechResults,
+                    String.format(Locale.ROOT, "SkillCoverage = %.4f < 0.50 nominal gate; skill match unavailable.", skillCoverage)
+            );
+        }
+
+        double finalScore = weightedSkillSum / skillCoverage;
+        double finalConf = confidenceSum; // unnormalized issue relevance
+        return new SkillMatchResultV2(
+                true, finalScore, finalConf, skillCoverage, perTechResults,
+                String.format(Locale.ROOT, "Skill S = %.2f with confidence C_S = %.4f over coverage %.2f", finalScore, finalConf, skillCoverage)
+        );
     }
 }

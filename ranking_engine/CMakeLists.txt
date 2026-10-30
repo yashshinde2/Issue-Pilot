@@ -14,6 +14,7 @@ add_library(ranking_engine_lib STATIC
     src/evaluation.cpp
     src/json_adapter.cpp
     src/vote_affinity.cpp
+    src/technology_registry.cpp
     src/utf8proc.c
 )
 

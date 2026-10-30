@@ -198,12 +198,190 @@ struct ContributorSkill {
     std::string technology;
     double score{0.0};      // 0 - 100
     double confidence{1.0}; // 0 - 1
+    std::string level;
+    std::string source{"observed"};
+};
+
+// V2.3 Contributor Skill Evidence per Technology conforming strictly to Sections 5.2 and 5.3
+struct ContributorSkillEvidenceV2 {
+    std::string technology;
+
+    int unique_contributed_repositories{0};
+    bool repo_available{false};
+
+    int standalone_commits{0}; // human commits not linked to PR
+    bool standalone_commits_available{false};
+
+    int unique_authored_prs{0};
+    bool pr_volume_available{false};
+
+    int merged_decided_prs{0};
+    int decided_prs{0};
+    bool merge_rate_available{false};
+
+    double months_since_last_activity{0.0};
+    bool recency_available{false};
+
+    double profile_coverage{1.0};
+    double source_quality{1.0};
+    bool profile_coverage_known{true};
+    bool source_quality_known{true};
+
+    bool has_questionnaire{false};
+    std::string questionnaire_level;
+    double questionnaire_score{0.0};
+
+    static double sat(double x, double k) {
+        if (x <= 0.0) return 0.0;
+        return 100.0 * (1.0 - std::exp(-x / k));
+    }
+
+    static double recency_decay(double months) {
+        if (months < 0.0) months = 0.0;
+        return 100.0 * std::exp(-months / 12.0);
+    }
+
+    static double merge_rate(int merged, int decided) {
+        return 100.0 * (static_cast<double>(merged) + 2.0) / (static_cast<double>(decided) + 4.0);
+    }
+
+    static double questionnaire_level_to_score(const std::string& lvl) {
+        std::string l = to_lower_str(trim_str(lvl));
+        if (l == "beginner") return 20.0;
+        if (l == "basic") return 40.0;
+        if (l == "intermediate") return 60.0;
+        if (l == "advanced") return 75.0;
+        if (l == "expert") return 90.0;
+        return 0.0;
+    }
+
+    struct SkillComputationResult {
+        bool available{false};
+        double score{0.0};
+        double confidence{0.0};
+        std::string source{"unavailable"};
+        double nominal_coverage_at{0.0};
+        int effective_episodes{0};
+        std::string explanation;
+    };
+
+    SkillComputationResult compute_skill() const {
+        SkillComputationResult res;
+
+        double q_score = 0.0;
+        bool has_q = false;
+        if (has_questionnaire) {
+            if (questionnaire_score > 0.0) {
+                q_score = questionnaire_score;
+                has_q = true;
+            } else if (!questionnaire_level.empty()) {
+                double qs = questionnaire_level_to_score(questionnaire_level);
+                if (qs > 0.0) {
+                    q_score = qs;
+                    has_q = true;
+                }
+            }
+        }
+
+        double sum_available_weights = 0.0;
+        double weighted_sum = 0.0;
+
+        if (repo_available) {
+            double r_score = sat(unique_contributed_repositories, 4.0);
+            weighted_sum += 0.15 * r_score;
+            sum_available_weights += 0.15;
+        }
+
+        if (standalone_commits_available) {
+            double c_score = sat(standalone_commits, 80.0);
+            weighted_sum += 0.20 * c_score;
+            sum_available_weights += 0.20;
+        }
+
+        if (pr_volume_available) {
+            double pr_score = sat(unique_authored_prs, 8.0);
+            weighted_sum += 0.20 * pr_score;
+            sum_available_weights += 0.20;
+        }
+
+        if (merge_rate_available && decided_prs >= 5) {
+            double mr_score = merge_rate(merged_decided_prs, decided_prs);
+            weighted_sum += 0.30 * mr_score;
+            sum_available_weights += 0.30;
+        }
+
+        if (recency_available) {
+            double rec_score = recency_decay(months_since_last_activity);
+            weighted_sum += 0.15 * rec_score;
+            sum_available_weights += 0.15;
+        }
+
+        res.nominal_coverage_at = sum_available_weights;
+
+        bool observed_available = false;
+        double skill_obs = 0.0;
+        double c_obs = 0.0;
+        int n_eff = 0;
+
+        if (profile_coverage_known && source_quality_known && sum_available_weights >= 0.40) {
+            skill_obs = weighted_sum / sum_available_weights;
+            observed_available = true;
+
+            int pr_count = pr_volume_available ? std::max(0, unique_authored_prs) : 0;
+            int commit_count = standalone_commits_available ? std::max(0, standalone_commits) : 0;
+            n_eff = pr_count + commit_count;
+            res.effective_episodes = n_eff;
+
+            double p_cov = std::max(0.0, std::min(1.0, profile_coverage));
+            double s_qual = std::max(0.0, std::min(1.0, source_quality));
+            c_obs = std::min(1.0, static_cast<double>(n_eff) / 10.0) * p_cov * s_qual;
+        }
+
+        // Case 1: Pure questionnaire
+        if (!observed_available && has_q) {
+            res.available = true;
+            res.score = q_score;
+            res.confidence = 0.40;
+            res.source = "self_reported";
+            res.explanation = "Observed evidence below coverage threshold; scored via self-reported questionnaire.";
+            return res;
+        }
+
+        // Case 2: Blended observed + questionnaire
+        if (observed_available && has_q) {
+            double q_conf = 0.40;
+            double q_weight = std::min(0.20, q_conf / (c_obs + q_conf));
+            res.available = true;
+            res.score = (1.0 - q_weight) * skill_obs + q_weight * q_score;
+            res.confidence = (1.0 - q_weight) * c_obs + q_weight * q_conf;
+            res.source = "blended";
+            res.explanation = "Blended observed and questionnaire.";
+            return res;
+        }
+
+        // Case 3: Pure observed
+        if (observed_available) {
+            res.available = true;
+            res.score = skill_obs;
+            res.confidence = c_obs;
+            res.source = "observed";
+            res.explanation = "Observed skill score.";
+            return res;
+        }
+
+        // Case 4: Neither available
+        res.available = false;
+        res.source = "unavailable";
+        res.explanation = "Nominal coverage A_t < 0.40 and no questionnaire report available.";
+        return res;
+    }
 };
 
 // Contributor Profile
 struct ContributorProfile {
     std::string user_id;
     std::unordered_map<std::string, ContributorSkill> skills;
+    std::unordered_map<std::string, ContributorSkillEvidenceV2> skill_evidence_v2;
     double capability{70.0}; // 0 - 100
     // Feedback historical statistics
     int accepted_count{0};

@@ -24,6 +24,13 @@ public:
   double calculate_skill_match(const ContributorProfile &profile,
                                IssueRecord &issue) const;
 
+  // V2.3 Multi-Technology Aggregation and Skill Match (Section 5.3)
+  bool calculate_skill_match_v2(const ContributorProfile &profile,
+                                const IssueRecord &issue,
+                                double &out_skill_score,
+                                double &out_confidence,
+                                double &out_coverage) const;
+
   double calculate_difficulty_match(double capability,
                                     const DifficultyEvidence &diff_evidence,
                                     double &out_issue_difficulty) const;

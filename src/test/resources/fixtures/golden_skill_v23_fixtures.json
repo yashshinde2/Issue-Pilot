@@ -1,0 +1,206 @@
+{
+  "schema_version": "2.3.0",
+  "feature_schema_version": "2.3.0",
+  "algorithm_version": "2.3.0",
+  "technology_registry_version": "2.3.0",
+  "description": "Golden fixtures for Issue Pilot V2.3 Contributor Skill and Technology Evidence conforming to Sections 5.1, 5.2, and 5.3",
+  "fixtures": [
+    {
+      "id": "skill_case_1_pure_observed",
+      "description": "All 5 observed signals available with full saturation test values",
+      "input": {
+        "technology": "Python",
+        "unique_contributed_repositories": 2,
+        "repo_available": true,
+        "standalone_commits": 40,
+        "standalone_commits_available": true,
+        "unique_authored_prs": 4,
+        "pr_volume_available": true,
+        "decided_prs": 8,
+        "merged_decided_prs": 6,
+        "merge_rate_available": true,
+        "months_since_last_activity": 6.0,
+        "recency_available": true,
+        "profile_coverage": 1.0,
+        "source_quality": 1.0,
+        "profile_coverage_known": true,
+        "source_quality_known": true,
+        "has_questionnaire": false
+      },
+      "expected": {
+        "available": true,
+        "score": 50.738774,
+        "confidence": 1.0,
+        "source": "observed",
+        "nominal_coverage_at": 1.0,
+        "effective_episodes": 44
+      }
+    },
+    {
+      "id": "skill_case_2_missing_merge_rate",
+      "description": "Decided PRs < 5 renders merge rate unavailable, available sub-signal weights renormalize over 0.70",
+      "input": {
+        "technology": "Java",
+        "unique_contributed_repositories": 4,
+        "repo_available": true,
+        "standalone_commits": 80,
+        "standalone_commits_available": true,
+        "unique_authored_prs": 8,
+        "pr_volume_available": true,
+        "decided_prs": 3,
+        "merged_decided_prs": 2,
+        "merge_rate_available": false,
+        "months_since_last_activity": 12.0,
+        "recency_available": true,
+        "profile_coverage": 1.0,
+        "source_quality": 1.0,
+        "profile_coverage_known": true,
+        "source_quality_known": true,
+        "has_questionnaire": false
+      },
+      "expected": {
+        "available": true,
+        "score": 57.549746,
+        "confidence": 1.0,
+        "source": "observed",
+        "nominal_coverage_at": 0.70,
+        "effective_episodes": 88
+      }
+    },
+    {
+      "id": "skill_case_3_insufficient_coverage",
+      "description": "Nominal coverage A_t = 0.15 < 0.40 threshold renders observed skill unavailable",
+      "input": {
+        "technology": "Rust",
+        "unique_contributed_repositories": 2,
+        "repo_available": true,
+        "standalone_commits": 0,
+        "standalone_commits_available": false,
+        "unique_authored_prs": 0,
+        "pr_volume_available": false,
+        "decided_prs": 0,
+        "merged_decided_prs": 0,
+        "merge_rate_available": false,
+        "months_since_last_activity": 0.0,
+        "recency_available": false,
+        "profile_coverage": 1.0,
+        "source_quality": 1.0,
+        "profile_coverage_known": true,
+        "source_quality_known": true,
+        "has_questionnaire": false
+      },
+      "expected": {
+        "available": false,
+        "source": "unavailable",
+        "nominal_coverage_at": 0.15
+      }
+    },
+    {
+      "id": "skill_case_4_pure_questionnaire",
+      "description": "No observed evidence with Intermediate self-report level maps to 60.0 score and 0.40 confidence",
+      "input": {
+        "technology": "Go",
+        "unique_contributed_repositories": 0,
+        "repo_available": false,
+        "standalone_commits": 0,
+        "standalone_commits_available": false,
+        "unique_authored_prs": 0,
+        "pr_volume_available": false,
+        "decided_prs": 0,
+        "merged_decided_prs": 0,
+        "merge_rate_available": false,
+        "months_since_last_activity": 0.0,
+        "recency_available": false,
+        "profile_coverage": 1.0,
+        "source_quality": 1.0,
+        "profile_coverage_known": true,
+        "source_quality_known": true,
+        "has_questionnaire": true,
+        "questionnaire_level": "intermediate"
+      },
+      "expected": {
+        "available": true,
+        "score": 60.0,
+        "confidence": 0.40,
+        "source": "self_reported",
+        "nominal_coverage_at": 0.0
+      }
+    },
+    {
+      "id": "skill_case_5_blended_skill",
+      "description": "Observed skill blended with Advanced questionnaire capped at 20% weight",
+      "input": {
+        "technology": "Python",
+        "unique_contributed_repositories": 2,
+        "repo_available": true,
+        "standalone_commits": 40,
+        "standalone_commits_available": true,
+        "unique_authored_prs": 4,
+        "pr_volume_available": true,
+        "decided_prs": 8,
+        "merged_decided_prs": 6,
+        "merge_rate_available": true,
+        "months_since_last_activity": 6.0,
+        "recency_available": true,
+        "profile_coverage": 1.0,
+        "source_quality": 1.0,
+        "profile_coverage_known": true,
+        "source_quality_known": true,
+        "has_questionnaire": true,
+        "questionnaire_level": "advanced",
+        "questionnaire_score": 75.0
+      },
+      "expected": {
+        "available": true,
+        "score": 55.591019,
+        "confidence": 0.88,
+        "source": "blended",
+        "nominal_coverage_at": 1.0,
+        "effective_episodes": 44
+      }
+    },
+    {
+      "id": "skill_case_6_multi_tech_pass",
+      "description": "Multi-technology issue (Python 0.75, JS 0.25) where contributor has Python: coverage 0.75 >= 0.50 passes gate",
+      "input": {
+        "issue_technologies": [
+          {"technology": "Python", "raw_relevance": 3.0, "normalized_relevance": 0.75},
+          {"technology": "JavaScript", "raw_relevance": 1.0, "normalized_relevance": 0.25}
+        ],
+        "contributor_skills": {
+          "Python": {
+            "score": 55.591019,
+            "confidence": 0.88
+          }
+        }
+      },
+      "expected": {
+        "available": true,
+        "skill_score": 55.591019,
+        "confidence": 0.66,
+        "coverage": 0.75
+      }
+    },
+    {
+      "id": "skill_case_7_multi_tech_fail",
+      "description": "Multi-technology issue (Python 0.75, JS 0.25) where contributor only has JS: coverage 0.25 < 0.50 fails gate",
+      "input": {
+        "issue_technologies": [
+          {"technology": "Python", "raw_relevance": 3.0, "normalized_relevance": 0.75},
+          {"technology": "JavaScript", "raw_relevance": 1.0, "normalized_relevance": 0.25}
+        ],
+        "contributor_skills": {
+          "JavaScript": {
+            "score": 80.0,
+            "confidence": 0.90
+          }
+        }
+      },
+      "expected": {
+        "available": false,
+        "coverage": 0.25
+      }
+    }
+  ]
+}
+

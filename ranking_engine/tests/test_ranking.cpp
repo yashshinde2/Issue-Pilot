@@ -1,5 +1,7 @@
 #include "../include/ranking_engine.hpp"
 #include "../include/json_adapter.hpp"
+#include "../include/technology_registry.hpp"
+#include "../include/contribution_aggregator.hpp"
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -635,6 +637,215 @@ int main() {
 
         auto comp_scores = engine_h_test.compute_scores(profile_h_test, cand_h_test);
         report_test("Engine compute_scores uses calculate_repository_health_v2 (73.0)", std::abs(comp_scores.repository_health - 73.0) < 1e-6, 1.0, std::abs(comp_scores.repository_health - 73.0) < 1e-6 ? 1.0 : 0.0);
+    }
+
+    // =========================================================================
+    // PHASE 3: CONTRIBUTOR SKILL AND TECHNOLOGY EVIDENCE VERIFICATION
+    // =========================================================================
+    std::cout << "\n--- Phase 3: Contributor Skill & Technology Evidence Tests ---\n";
+
+    // Test 26: Golden Skill Fixtures Execution
+    {
+        std::string skill_fix_path = "ranking_engine/tests/fixtures/golden_skill_v23_fixtures.json";
+        std::ifstream f(skill_fix_path);
+        if (!f.is_open()) {
+            skill_fix_path = "tests/fixtures/golden_skill_v23_fixtures.json";
+            f.open(skill_fix_path);
+        }
+        if (!f.is_open()) {
+            skill_fix_path = "../tests/fixtures/golden_skill_v23_fixtures.json";
+            f.open(skill_fix_path);
+        }
+        report_test("Golden Skill JSON Fixture Opened", f.is_open(), 1.0, f.is_open() ? 1.0 : 0.0);
+
+        std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        bool err = false;
+        size_t pos = 0;
+        auto root = issue_pilot::SimpleJsonParser::parse(content, pos, err);
+        report_test("Golden Skill JSON Valid AST", !err && root.has("fixtures"), 1.0, (!err && root.has("fixtures")) ? 1.0 : 0.0);
+
+        // Case 1: Pure observed skill (sat curves, nominal weights, n_eff = 44)
+        {
+            issue_pilot::ContributorSkillEvidenceV2 ev1;
+            ev1.technology = "Python";
+            ev1.unique_contributed_repositories = 2;
+            ev1.repo_available = true;
+            ev1.standalone_commits = 40;
+            ev1.standalone_commits_available = true;
+            ev1.unique_authored_prs = 4;
+            ev1.pr_volume_available = true;
+            ev1.decided_prs = 8;
+            ev1.merged_decided_prs = 6;
+            ev1.merge_rate_available = true;
+            ev1.months_since_last_activity = 6.0;
+            ev1.recency_available = true;
+
+            auto res1 = ev1.compute_skill();
+            report_test("Golden Skill 1: Available", res1.available, 1.0, res1.available ? 1.0 : 0.0);
+            report_test("Golden Skill 1: Score (~50.7388)", std::abs(res1.score - 50.738774) < 1e-4, 50.738774, res1.score);
+            report_test("Golden Skill 1: Confidence (1.0)", std::abs(res1.confidence - 1.0) < 1e-6, 1.0, res1.confidence);
+            report_test("Golden Skill 1: Effective Episodes (44)", res1.effective_episodes == 44, 44, res1.effective_episodes);
+            report_test("Golden Skill 1: Source (observed)", res1.source == "observed", 1.0, res1.source == "observed" ? 1.0 : 0.0);
+        }
+
+        // Case 2: Missing merge rate (decided_prs = 3 < 5 -> weight renormalize over 0.70)
+        {
+            issue_pilot::ContributorSkillEvidenceV2 ev2;
+            ev2.technology = "Java";
+            ev2.unique_contributed_repositories = 4;
+            ev2.repo_available = true;
+            ev2.standalone_commits = 80;
+            ev2.standalone_commits_available = true;
+            ev2.unique_authored_prs = 8;
+            ev2.pr_volume_available = true;
+            ev2.decided_prs = 3;
+            ev2.merged_decided_prs = 2;
+            ev2.merge_rate_available = false;
+            ev2.months_since_last_activity = 12.0;
+            ev2.recency_available = true;
+
+            auto res2 = ev2.compute_skill();
+            report_test("Golden Skill 2: Available", res2.available, 1.0, res2.available ? 1.0 : 0.0);
+            report_test("Golden Skill 2: Score (~57.5497)", std::abs(res2.score - 57.549746) < 1e-4, 57.549746, res2.score);
+            report_test("Golden Skill 2: Coverage A_t (0.70)", std::abs(res2.nominal_coverage_at - 0.70) < 1e-6, 0.70, res2.nominal_coverage_at);
+        }
+
+        // Case 3: Insufficient coverage rejection (A_t = 0.15 < 0.40)
+        {
+            issue_pilot::ContributorSkillEvidenceV2 ev3;
+            ev3.technology = "Rust";
+            ev3.unique_contributed_repositories = 2;
+            ev3.repo_available = true;
+            auto res3 = ev3.compute_skill();
+            report_test("Golden Skill 3: Unavailable when A_t < 0.40", !res3.available, 1.0, !res3.available ? 1.0 : 0.0);
+        }
+
+        // Case 4: Pure questionnaire (intermediate -> 60.0, conf = 0.40, source = self_reported)
+        {
+            issue_pilot::ContributorSkillEvidenceV2 ev4;
+            ev4.technology = "Go";
+            ev4.has_questionnaire = true;
+            ev4.questionnaire_level = "intermediate";
+            auto res4 = ev4.compute_skill();
+            report_test("Golden Skill 4: Available via questionnaire", res4.available, 1.0, res4.available ? 1.0 : 0.0);
+            report_test("Golden Skill 4: Score (60.0)", std::abs(res4.score - 60.0) < 1e-6, 60.0, res4.score);
+            report_test("Golden Skill 4: Confidence (0.40)", std::abs(res4.confidence - 0.40) < 1e-6, 0.40, res4.confidence);
+            report_test("Golden Skill 4: Source (self_reported)", res4.source == "self_reported", 1.0, res4.source == "self_reported" ? 1.0 : 0.0);
+        }
+
+        // Case 5: Blended skill (capped at 20% weight)
+        {
+            issue_pilot::ContributorSkillEvidenceV2 ev5;
+            ev5.technology = "Python";
+            ev5.unique_contributed_repositories = 2;
+            ev5.repo_available = true;
+            ev5.standalone_commits = 40;
+            ev5.standalone_commits_available = true;
+            ev5.unique_authored_prs = 4;
+            ev5.pr_volume_available = true;
+            ev5.decided_prs = 8;
+            ev5.merged_decided_prs = 6;
+            ev5.merge_rate_available = true;
+            ev5.months_since_last_activity = 6.0;
+            ev5.recency_available = true;
+            ev5.has_questionnaire = true;
+            ev5.questionnaire_level = "advanced";
+            ev5.questionnaire_score = 75.0;
+
+            auto res5 = ev5.compute_skill();
+            report_test("Golden Skill 5: Score (~55.5910)", std::abs(res5.score - 55.591019) < 1e-4, 55.591019, res5.score);
+            report_test("Golden Skill 5: Confidence (0.88)", std::abs(res5.confidence - 0.88) < 1e-4, 0.88, res5.confidence);
+            report_test("Golden Skill 5: Source (blended)", res5.source == "blended", 1.0, res5.source == "blended" ? 1.0 : 0.0);
+        }
+
+        // Case 6: Multi-technology candidate with >= 0.50 coverage
+        {
+            issue_pilot::RankingEngine engine_multi;
+            issue_pilot::ContributorProfile prof6;
+            prof6.skills["Python"] = issue_pilot::ContributorSkill{"Python", 55.591019, 0.88};
+
+            issue_pilot::IssueRecord issue6;
+            issue6.technologies.push_back(issue_pilot::TechnologyRelevance{"Python", 3.0, 0.75});
+            issue6.technologies.push_back(issue_pilot::TechnologyRelevance{"JavaScript", 1.0, 0.25});
+
+            double s_out = 0.0, c_out = 0.0, cov_out = 0.0;
+            bool ok6 = engine_multi.calculate_skill_match_v2(prof6, issue6, s_out, c_out, cov_out);
+            report_test("Golden Skill 6: Coverage >= 0.50 Passes", ok6, 1.0, ok6 ? 1.0 : 0.0);
+            report_test("Golden Skill 6: Skill S (~55.5910)", std::abs(s_out - 55.591019) < 1e-4, 55.591019, s_out);
+            report_test("Golden Skill 6: Confidence C_S (0.66)", std::abs(c_out - 0.66) < 1e-4, 0.66, c_out);
+            report_test("Golden Skill 6: Coverage (0.75)", std::abs(cov_out - 0.75) < 1e-4, 0.75, cov_out);
+        }
+
+        // Case 7: Multi-technology candidate with < 0.50 coverage rejected
+        {
+            issue_pilot::RankingEngine engine_multi;
+            issue_pilot::ContributorProfile prof7;
+            prof7.skills["JavaScript"] = issue_pilot::ContributorSkill{"JavaScript", 80.0, 0.90};
+
+            issue_pilot::IssueRecord issue7;
+            issue7.technologies.push_back(issue_pilot::TechnologyRelevance{"Python", 3.0, 0.75});
+            issue7.technologies.push_back(issue_pilot::TechnologyRelevance{"JavaScript", 1.0, 0.25});
+
+            double s_out = 0.0, c_out = 0.0, cov_out = 0.0;
+            bool ok7 = engine_multi.calculate_skill_match_v2(prof7, issue7, s_out, c_out, cov_out);
+            report_test("Golden Skill 7: Coverage < 0.50 Fails", !ok7, 1.0, !ok7 ? 1.0 : 0.0);
+            report_test("Golden Skill 7: Coverage Measured (0.25)", std::abs(cov_out - 0.25) < 1e-4, 0.25, cov_out);
+        }
+    }
+
+    // Test 27: Short Alias Context-Aware Detection (Section 5.1)
+    {
+        // "we must go to the database" -> NOT Go
+        auto d1 = issue_pilot::TechnologyRegistry::detect("", "we must go to the database", "there is an issue when we go ahead", {}, {});
+        bool found_go_false = false;
+        for (const auto& t : d1.technologies) {
+            if (t.technology == "Go") found_go_false = true;
+        }
+        report_test("Context-aware detection: English 'go' rejected", !found_go_false, 1.0, !found_go_false ? 1.0 : 0.0);
+
+        // "refactor server in Go using goroutines" -> Go detected
+        auto d2 = issue_pilot::TechnologyRegistry::detect("", "refactor server in Go", "rewritten with goroutines", {}, {});
+        bool found_go_true = false;
+        for (const auto& t : d2.technologies) {
+            if (t.technology == "Go") found_go_true = true;
+        }
+        report_test("Context-aware detection: 'in Go' and 'goroutines' accepted", found_go_true, 1.0, found_go_true ? 1.0 : 0.0);
+
+        // "fixed segmentation fault in main.c" -> C detected via .c extension
+        auto d3 = issue_pilot::TechnologyRegistry::detect("", "fixed segmentation fault", "crash occurs in main.c line 42", {}, {});
+        bool found_c_true = false;
+        for (const auto& t : d3.technologies) {
+            if (t.technology == "C") found_c_true = true;
+        }
+        report_test("Context-aware detection: 'main.c' maps to C", found_c_true, 1.0, found_c_true ? 1.0 : 0.0);
+    }
+
+    // Test 28: Contribution Episode Deduplication (Section 5.2)
+    {
+        std::vector<issue_pilot::ContributionPr> prs;
+        prs.push_back({"pr-1", "octocat/hello-world", "Python", true, true, false, false, 10.0});
+        prs.push_back({"pr-1", "octocat/hello-world", "Python", true, true, false, false, 10.0}); // duplicate PR page
+        prs.push_back({"pr-bot", "octocat/hello-world", "Python", true, true, true, false, 5.0});  // bot PR
+
+        std::vector<issue_pilot::ContributionCommit> commits;
+        commits.push_back({"sha-1", "octocat/hello-world", "Python", "pr-1", false, false, 10.0}); // linked to pr-1
+        commits.push_back({"sha-2", "octocat/hello-world", "Python", "pr-1", false, false, 10.0}); // linked to pr-1
+        commits.push_back({"sha-3", "octocat/hello-world", "Python", "", false, false, 12.0});     // standalone
+        commits.push_back({"sha-fork", "fork/hello-world", "Python", "", false, true, 8.0});        // fork commit
+        commits.push_back({"sha-bot", "octocat/hello-world", "Python", "", true, false, 8.0});       // bot commit
+
+        std::vector<issue_pilot::QuestionnaireReport> q_reports;
+        auto agg = issue_pilot::ContributionEpisodeAggregator::aggregate(prs, commits, q_reports);
+
+        report_test("Aggregator: Python present", agg.find("Python") != agg.end(), 1.0, agg.find("Python") != agg.end() ? 1.0 : 0.0);
+        if (agg.find("Python") != agg.end()) {
+            const auto& py = agg["Python"];
+            report_test("Aggregator: Unique Repositories (1)", py.unique_contributed_repositories == 1, 1.0, py.unique_contributed_repositories);
+            report_test("Aggregator: Standalone Commits (1)", py.standalone_commits == 1, 1.0, py.standalone_commits);
+            report_test("Aggregator: Unique Authored PRs (1)", py.unique_authored_prs == 1, 1.0, py.unique_authored_prs);
+            auto res_agg = py.compute_skill();
+            report_test("Aggregator: Deduplicated Effective Episodes n_eff (2)", res_agg.effective_episodes == 2, 2.0, res_agg.effective_episodes);
+        }
     }
 
     std::cout << "\nALL UNIT TEST CHECKS (INCLUDING PHASE 1 CONTRACTS) PASSED SUCCESSFULLY!\n";

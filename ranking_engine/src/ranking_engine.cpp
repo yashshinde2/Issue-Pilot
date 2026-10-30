@@ -37,6 +37,88 @@ double RankingEngine::calculate_skill_match(const ContributorProfile& profile,
     return std::max(0.0, std::min(100.0, match_sum));
 }
 
+bool RankingEngine::calculate_skill_match_v2(const ContributorProfile& profile,
+                                             const IssueRecord& issue,
+                                             double& out_skill_score,
+                                             double& out_confidence,
+                                             double& out_coverage) const {
+    if (issue.technologies.empty()) {
+        out_skill_score = 0.0;
+        out_confidence = 0.0;
+        out_coverage = 0.0;
+        return false;
+    }
+
+    double sum_raw = 0.0;
+    for (const auto& t : issue.technologies) {
+        sum_raw += (t.raw_relevance > 0.0 ? t.raw_relevance : 0.0);
+    }
+    if (sum_raw <= 0.0) {
+        out_skill_score = 0.0;
+        out_confidence = 0.0;
+        out_coverage = 0.0;
+        return false;
+    }
+
+    double skill_coverage = 0.0;
+    double weighted_skill_sum = 0.0;
+    double confidence_sum = 0.0;
+
+    for (const auto& t : issue.technologies) {
+        double rel_t = (t.normalized_relevance > 0.0) ? t.normalized_relevance : (t.raw_relevance / sum_raw);
+        std::string t_canon = t.technology;
+        std::string t_lower = to_lower_str(t_canon);
+
+        bool skill_found = false;
+        double s_val = 0.0;
+        double c_val = 0.0;
+
+        // 1. Check profile.skill_evidence_v2
+        for (const auto& kv : profile.skill_evidence_v2) {
+            if (to_lower_str(kv.first) == t_lower || to_lower_str(kv.second.technology) == t_lower) {
+                auto res = kv.second.compute_skill();
+                if (res.available) {
+                    s_val = res.score;
+                    c_val = res.confidence;
+                    skill_found = true;
+                    break;
+                }
+            }
+        }
+
+        // 2. Fallback to profile.skills
+        if (!skill_found) {
+            for (const auto& kv : profile.skills) {
+                if (to_lower_str(kv.first) == t_lower || to_lower_str(kv.second.technology) == t_lower) {
+                    s_val = kv.second.score;
+                    c_val = kv.second.confidence;
+                    skill_found = true;
+                    break;
+                }
+            }
+        }
+
+        if (skill_found) {
+            skill_coverage += rel_t;
+            weighted_skill_sum += (rel_t * s_val);
+            confidence_sum += (rel_t * c_val);
+        }
+    }
+
+    out_coverage = skill_coverage;
+
+    // Technology coverage gate: SkillCoverage >= 0.50
+    if (skill_coverage < 0.50) {
+        out_skill_score = 0.0;
+        out_confidence = 0.0;
+        return false;
+    }
+
+    out_skill_score = weighted_skill_sum / skill_coverage;
+    out_confidence = confidence_sum; // unnormalized issue relevance
+    return true;
+}
+
 double RankingEngine::calculate_difficulty_match(double capability, 
                                                 const DifficultyEvidence& diff_evidence,
                                                 double& out_issue_difficulty) const {
@@ -99,7 +181,17 @@ ComponentScores RankingEngine::compute_scores(const ContributorProfile& profile,
     // S
     s.skill_available = issue.skill_available;
     if (s.skill_available) {
-        s.skill_match = calculate_skill_match(profile, issue);
+        if (!profile.skill_evidence_v2.empty()) {
+            double s_v2 = 0.0, c_v2 = 0.0, cov_v2 = 0.0;
+            if (calculate_skill_match_v2(profile, issue, s_v2, c_v2, cov_v2)) {
+                s.skill_match = s_v2;
+            } else {
+                s.skill_available = false;
+                s.missing_components.push_back("Skill Match (Coverage < 0.50)");
+            }
+        } else {
+            s.skill_match = calculate_skill_match(profile, issue);
+        }
     } else {
         s.missing_components.push_back("Skill Match");
     }
