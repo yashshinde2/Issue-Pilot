@@ -175,3 +175,4 @@ public final class MaintainerResolutionHelper {
         return RoleResult.nonMaintainer(0.70, "Administrator-verified Bugzilla non-maintainer role");
     }
 }
+

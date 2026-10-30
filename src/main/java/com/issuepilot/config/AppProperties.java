@@ -438,6 +438,34 @@ public class AppProperties {
         this.cppEnginePath = cppEnginePath;
     }
 
+    public void setGithubToken(String githubToken) {
+        this.githubToken = githubToken;
+    }
+
+    public void setGithubApiBaseUrl(String githubApiBaseUrl) {
+        this.githubApiBaseUrl = githubApiBaseUrl;
+    }
+
+    public void setGitlabToken(String gitlabToken) {
+        this.gitlabToken = gitlabToken;
+    }
+
+    public void setGitlabApiBaseUrl(String gitlabApiBaseUrl) {
+        this.gitlabApiBaseUrl = gitlabApiBaseUrl;
+    }
+
+    public void setGitlabMaxRetries(int gitlabMaxRetries) {
+        this.gitlabMaxRetries = gitlabMaxRetries;
+    }
+
+    public void setCodebergToken(String codebergToken) {
+        this.codebergToken = codebergToken;
+    }
+
+    public void setCodebergApiBaseUrl(String codebergApiBaseUrl) {
+        this.codebergApiBaseUrl = codebergApiBaseUrl;
+    }
+
     public String getCppRankingEnginePath() {
         return cppEnginePath;
     }

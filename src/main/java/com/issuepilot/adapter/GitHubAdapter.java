@@ -3,6 +3,7 @@ package com.issuepilot.adapter;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.issuepilot.config.AppProperties;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
@@ -25,6 +26,7 @@ public class GitHubAdapter implements BaseIssueSourceAdapter {
     private final Map<String, Object> rateLimitState = new HashMap<>();
     private String lastSuccessfulCheckAt = null;
 
+    @Autowired
     public GitHubAdapter(AppProperties properties, ObjectMapper objectMapper) {
         this(properties, objectMapper, HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(properties.getGithubRequestTimeoutSeconds()))

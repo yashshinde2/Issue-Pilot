@@ -3,6 +3,7 @@ package com.issuepilot.adapter;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.issuepilot.config.AppProperties;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
@@ -30,6 +31,7 @@ public class BugzillaAdapter implements BaseIssueSourceAdapter {
     private String validatedBaseUrl = null;
     private String validatedHost = null;
 
+    @Autowired
     public BugzillaAdapter(AppProperties properties, ObjectMapper objectMapper) {
         this(properties, objectMapper, HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(Math.max(5, properties.getBugzillaRequestTimeoutSeconds())))

@@ -2,6 +2,8 @@
 #include "../include/evaluation.hpp"
 #include "../include/json_adapter.hpp"
 #include <iostream>
+#include <fstream>
+#include <sstream>
 #include <cassert>
 #include <cmath>
 #include <vector>
@@ -456,6 +458,97 @@ int main() {
                               parsed_cands[0].source == "codeberg" &&
                               parsed_cands[0].source_instance == "codeberg.org";
         report_test("JsonAdapter Parse Issue Key & Source", cand_parsed_ok, 1.0, cand_parsed_ok ? 1.0 : 0.0);
+
+        // Test 23: Unicode NFC Parity (Composed vs Decomposed & Non-ASCII)
+        std::string decomposed_cafe = "cafe\xCC\x81"; // 'cafe' + U+0301 combining acute accent
+        std::string nfc_cafe = issue_pilot::unicode::to_nfc(decomposed_cafe);
+        std::string expected_cafe = "caf\xC3\xA9"; // U+00E9
+        report_test("Unicode NFC Decomposition to Composition (café)", nfc_cafe == expected_cafe, 1.0, (nfc_cafe == expected_cafe ? 1.0 : 0.0));
+
+        std::string decomposed_naive = "nai\xCC\x88ve"; // 'nai' + U+0308 combining diaeresis + 've'
+        std::string nfc_naive = issue_pilot::unicode::to_nfc(decomposed_naive);
+        std::string expected_naive = "na\xC3\xAFve"; // U+00EF
+        report_test("Unicode NFC Decomposition to Composition (naïve)", nfc_naive == expected_naive, 1.0, (nfc_naive == expected_naive ? 1.0 : 0.0));
+
+        // Preserve case of instance and repository segments without silent fold
+        std::string key_with_non_ascii = issue_pilot::build_issue_key(
+            "GitLab",
+            "GitLab.M\xC3\xBCnchen.org",
+            "MyOrg/Caf\xC3\xA9-Project",
+            "101"
+        );
+        std::string expected_key = "gitlab|GitLab.M\xC3\xBCnchen.org|MyOrg/Caf\xC3\xA9-Project|101";
+        report_test("Issue Key Preserves Instance & Repo Case with Non-ASCII", key_with_non_ascii == expected_key, 1.0, (key_with_non_ascii == expected_key ? 1.0 : 0.0));
+
+        // Test 24: Golden JSON Fixtures Loaded from Disk
+        std::vector<std::string> fixture_paths = {
+            "tests/fixtures/golden_evidence_v23_fixtures.json",
+            "ranking_engine/tests/fixtures/golden_evidence_v23_fixtures.json",
+            "../ranking_engine/tests/fixtures/golden_evidence_v23_fixtures.json",
+            "../../ranking_engine/tests/fixtures/golden_evidence_v23_fixtures.json"
+        };
+        std::string fixture_content;
+        for (const auto& p : fixture_paths) {
+            std::ifstream f(p);
+            if (f.is_open()) {
+                std::stringstream ss;
+                ss << f.rdbuf();
+                fixture_content = ss.str();
+                break;
+            }
+        }
+        report_test("Golden JSON Fixture File Opened from Disk", !fixture_content.empty(), 1.0, !fixture_content.empty() ? 1.0 : 0.0);
+
+        bool parse_err = false;
+        size_t parse_pos = 0;
+        auto json_root = issue_pilot::SimpleJsonParser::parse(fixture_content, parse_pos, parse_err);
+        bool root_valid = (!parse_err) && json_root.has("golden_fixtures");
+        report_test("Golden JSON Fixture Root Valid Object", root_valid, 1.0, root_valid ? 1.0 : 0.0);
+
+        if (root_valid) {
+            const auto& gf = json_root.get("golden_fixtures");
+
+            // 1. Known Zero
+            bool kz_ok = gf.has("known_zero") &&
+                         gf.get("known_zero").get("available").as_bool(false) &&
+                         gf.get("known_zero").get("value").as_double(-1.0) == 0.0 &&
+                         std::abs(gf.get("known_zero").get("confidence").as_double() - 0.90) < 0.001 &&
+                         gf.get("known_zero").get("pagination_complete").as_bool(false);
+            report_test("C++ Golden Fixture 1: Known Zero Verified", kz_ok, 1.0, kz_ok ? 1.0 : 0.0);
+
+            // 2. Unavailable Unsupported Signal
+            bool unavail_unsupported_ok = gf.has("unavailable_unsupported_signal") &&
+                                         (!gf.get("unavailable_unsupported_signal").get("available").as_bool(true)) &&
+                                         gf.get("unavailable_unsupported_signal").get("value").type == issue_pilot::JsonValue::V_NULL &&
+                                         gf.get("unavailable_unsupported_signal").get("confidence").as_double() == 0.0 &&
+                                         gf.get("unavailable_unsupported_signal").get("schema_version").as_str() == "2.3.0";
+            report_test("C++ Golden Fixture 2: Unsupported Unavailable Verified", unavail_unsupported_ok, 1.0, unavail_unsupported_ok ? 1.0 : 0.0);
+
+            // 3. Unavailable Incomplete Pagination
+            bool unavail_inc_ok = gf.has("unavailable_incomplete_pagination") &&
+                                  (!gf.get("unavailable_incomplete_pagination").get("available").as_bool(true)) &&
+                                  gf.get("unavailable_incomplete_pagination").get("value").type == issue_pilot::JsonValue::V_NULL &&
+                                  (!gf.get("unavailable_incomplete_pagination").get("pagination_complete").as_bool(true));
+            report_test("C++ Golden Fixture 3: Incomplete Pagination Unavailable Verified", unavail_inc_ok, 1.0, unavail_inc_ok ? 1.0 : 0.0);
+
+            // 4. Measured Positive
+            bool mp_ok = gf.has("measured_positive") &&
+                         gf.get("measured_positive").get("available").as_bool(false) &&
+                         gf.get("measured_positive").get("value").as_double() == 85.0 &&
+                         std::abs(gf.get("measured_positive").get("confidence").as_double() - 0.81) < 0.001 &&
+                         gf.get("measured_positive").get("schema_version").as_str() == "2.3.0";
+            report_test("C++ Golden Fixture 4: Measured Positive Verified", mp_ok, 1.0, mp_ok ? 1.0 : 0.0);
+
+            // 5. Structured Difficulty
+            bool sd_ok = gf.has("structured_difficulty") &&
+                         gf.get("structured_difficulty").get("available").as_bool(false) &&
+                         gf.get("structured_difficulty").get("value").get("scope_change_size").as_double() == 25.0 &&
+                         gf.get("structured_difficulty").get("value").get("technical_complexity").as_double() == 50.0 &&
+                         gf.get("structured_difficulty").get("value").get("dependency_arch_impact").as_double() == 25.0 &&
+                         gf.get("structured_difficulty").get("value").get("coordination_complexity").as_double() == 25.0 &&
+                         !gf.get("structured_difficulty").get("value").has("historical_effort");
+            report_test("C++ Golden Fixture 5: Structured Difficulty (No HE) Verified", sd_ok, 1.0, sd_ok ? 1.0 : 0.0);
+        }
     }
 
     std::cout << "\nALL UNIT TEST CHECKS (INCLUDING PHASE 1 CONTRACTS) PASSED SUCCESSFULLY!\n";
