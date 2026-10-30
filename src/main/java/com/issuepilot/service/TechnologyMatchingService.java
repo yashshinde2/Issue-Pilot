@@ -1,10 +1,10 @@
 package com.issuepilot.service;
 
 import com.issuepilot.adapter.TechnologyDetectionHelper;
-import com.issuepilot.controller.RecommendationController.RecommendationRequest;
 import com.issuepilot.model.ContributorProfile;
 import com.issuepilot.model.ContributorSkill;
 import com.issuepilot.model.InferredSkill;
+import com.issuepilot.model.RecommendationRequest;
 import com.issuepilot.repository.IssueRepository;
 import org.springframework.stereotype.Service;
 
