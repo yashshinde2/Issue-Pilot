@@ -23,3 +23,4 @@ public class RecommendationRequest {
     public Integer timeout_seconds;
     public Integer max_retries;
 }
+

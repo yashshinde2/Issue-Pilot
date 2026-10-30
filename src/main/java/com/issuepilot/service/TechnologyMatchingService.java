@@ -11,12 +11,14 @@ import org.springframework.stereotype.Service;
 import java.util.*;
 
 /**
- * Service managing technology matching, preference integration, candidate prioritization,
+ * Service managing technology matching, preference integration, candidate
+ * prioritization,
  * and explainable recommendation annotations for Phase 6.
  *
  * Adheres strictly to:
  * - Priority 1: User-confirmed skills.
- * - Priority 2: Inferred skills (lower confidence, never treated as confirmed or proficiency).
+ * - Priority 2: Inferred skills (lower confidence, never treated as confirmed
+ * or proficiency).
  * - Priority 3: Explicit user discovery preferences.
  * - Clear distinction between hard filters and soft preferences.
  * - Preservation of V1 ranking engine contract and formula.
@@ -44,8 +46,7 @@ public class TechnologyMatchingService {
                 Double proficiencyScore,
                 String level,
                 Double confidence,
-                String explanation
-        ) {
+                String explanation) {
             this.technology = technology;
             this.priority = priority;
             this.proficiencyScore = proficiencyScore;
@@ -54,12 +55,29 @@ public class TechnologyMatchingService {
             this.explanation = explanation;
         }
 
-        public String getTechnology() { return technology; }
-        public MatchPriority getPriority() { return priority; }
-        public Double getProficiencyScore() { return proficiencyScore; }
-        public String getLevel() { return level; }
-        public Double getConfidence() { return confidence; }
-        public String getExplanation() { return explanation; }
+        public String getTechnology() {
+            return technology;
+        }
+
+        public MatchPriority getPriority() {
+            return priority;
+        }
+
+        public Double getProficiencyScore() {
+            return proficiencyScore;
+        }
+
+        public String getLevel() {
+            return level;
+        }
+
+        public Double getConfidence() {
+            return confidence;
+        }
+
+        public String getExplanation() {
+            return explanation;
+        }
     }
 
     /**
@@ -75,10 +93,12 @@ public class TechnologyMatchingService {
 
         for (Map.Entry<String, ContributorSkill> entry : profile.getSkills().entrySet()) {
             ContributorSkill skill = entry.getValue();
-            if (skill == null) continue;
+            if (skill == null)
+                continue;
             String rawTech = skill.getTechnology() != null ? skill.getTechnology() : entry.getKey();
             String norm = TechnologyDetectionHelper.normalizeTechnology(rawTech);
-            if (norm == null || dismissed.contains(norm)) continue;
+            if (norm == null || dismissed.contains(norm))
+                continue;
 
             confirmed.put(norm, skill);
         }
@@ -87,7 +107,8 @@ public class TechnologyMatchingService {
 
     /**
      * Extracts normalized inferred skills mapped by canonical technology name.
-     * Excludes dismissed skills, skills already confirmed, and skills marked dismissed.
+     * Excludes dismissed skills, skills already confirmed, and skills marked
+     * dismissed.
      */
     public Map<String, InferredSkill> getInferredSkills(ContributorProfile profile) {
         if (profile == null || profile.getInferredSkills() == null) {
@@ -98,9 +119,11 @@ public class TechnologyMatchingService {
         Map<String, InferredSkill> inferred = new LinkedHashMap<>();
 
         for (InferredSkill skill : profile.getInferredSkills()) {
-            if (skill == null || "dismissed".equalsIgnoreCase(skill.getStatus())) continue;
+            if (skill == null || "dismissed".equalsIgnoreCase(skill.getStatus()))
+                continue;
             String norm = TechnologyDetectionHelper.normalizeTechnology(skill.getTechnology());
-            if (norm == null || dismissed.contains(norm) || confirmed.containsKey(norm)) continue;
+            if (norm == null || dismissed.contains(norm) || confirmed.containsKey(norm))
+                continue;
 
             // Retain the highest confidence entry if duplicates exist
             InferredSkill existing = inferred.get(norm);
@@ -124,8 +147,7 @@ public class TechnologyMatchingService {
         Set<String> preferred = new LinkedHashSet<>();
 
         List<String> prefKeys = List.of(
-                "preferred_technologies", "technologies", "tech_stack", "languages", "preferred_languages"
-        );
+                "preferred_technologies", "technologies", "tech_stack", "languages", "preferred_languages");
 
         Map<String, Object> prefs = profile.getPreferences();
         for (String key : prefKeys) {
@@ -173,7 +195,8 @@ public class TechnologyMatchingService {
      * Does NOT infer technology matches from arbitrary words in the title.
      */
     public Set<String> getIssueTechnologies(Map<String, Object> issue) {
-        if (issue == null) return Collections.emptySet();
+        if (issue == null)
+            return Collections.emptySet();
         Set<String> result = new LinkedHashSet<>();
 
         // 1. detected_technologies list
@@ -182,7 +205,8 @@ public class TechnologyMatchingService {
             for (Object item : dtList) {
                 if (item != null) {
                     String norm = TechnologyDetectionHelper.normalizeTechnology(item.toString());
-                    if (norm != null) result.add(norm);
+                    if (norm != null)
+                        result.add(norm);
                 }
             }
         }
@@ -195,7 +219,8 @@ public class TechnologyMatchingService {
                     Object tName = tm.get("technology");
                     if (tName != null) {
                         String norm = TechnologyDetectionHelper.normalizeTechnology(tName.toString());
-                        if (norm != null) result.add(norm);
+                        if (norm != null)
+                            result.add(norm);
                     }
                 }
             }
@@ -242,8 +267,7 @@ public class TechnologyMatchingService {
                         cs.getScore(),
                         cs.getLevel(),
                         1.0,
-                        explanation
-                ));
+                        explanation));
                 matchedTechs.add(it);
             }
         }
@@ -260,8 +284,7 @@ public class TechnologyMatchingService {
                         null, // Never use confidence as proficiency score!
                         null,
                         is.getConfidence(),
-                        explanation
-                ));
+                        explanation));
                 matchedTechs.add(it);
             }
         }
@@ -276,8 +299,7 @@ public class TechnologyMatchingService {
                         null,
                         null,
                         0.5,
-                        explanation
-                ));
+                        explanation));
                 matchedTechs.add(it);
             }
         }
@@ -296,9 +318,9 @@ public class TechnologyMatchingService {
     public boolean violatesHardFilters(
             Map<String, Object> issue,
             ContributorProfile profile,
-            RecommendationRequest req
-    ) {
-        if (issue == null) return true;
+            RecommendationRequest req) {
+        if (issue == null)
+            return true;
 
         // 1. Request Hard Filter: Technology
         if (req != null && req.technology_filter != null && !req.technology_filter.isBlank()) {
@@ -311,11 +333,13 @@ public class TechnologyMatchingService {
                     break;
                 }
             }
-            if (!matched) return true;
+            if (!matched)
+                return true;
         }
 
         // 2. Request Hard Filter: Source / Platform
-        if (req != null && req.source_filter != null && !req.source_filter.isBlank() && !"all".equalsIgnoreCase(req.source_filter)) {
+        if (req != null && req.source_filter != null && !req.source_filter.isBlank()
+                && !"all".equalsIgnoreCase(req.source_filter)) {
             String issueSource = (String) issue.get("source");
             if (issueSource == null || !issueSource.equalsIgnoreCase(req.source_filter.trim())) {
                 return true;
@@ -328,8 +352,10 @@ public class TechnologyMatchingService {
         if (minDiff != null || maxDiff != null) {
             Double complexity = extractTechnicalComplexity(issue);
             if (complexity != null) {
-                if (minDiff != null && complexity < minDiff) return true;
-                if (maxDiff != null && complexity > maxDiff) return true;
+                if (minDiff != null && complexity < minDiff)
+                    return true;
+                if (maxDiff != null && complexity > maxDiff)
+                    return true;
             }
         }
 
@@ -352,7 +378,8 @@ public class TechnologyMatchingService {
                             break;
                         }
                     }
-                    if (!match) return true;
+                    if (!match)
+                        return true;
                 }
             }
 
@@ -367,7 +394,8 @@ public class TechnologyMatchingService {
                             break;
                         }
                     }
-                    if (!match) return true;
+                    if (!match)
+                        return true;
                 }
             }
         }
@@ -379,7 +407,8 @@ public class TechnologyMatchingService {
         Set<String> set = new HashSet<>();
         if (obj instanceof List<?> list) {
             for (Object item : list) {
-                if (item != null) set.add(item.toString().toLowerCase().trim());
+                if (item != null)
+                    set.add(item.toString().toLowerCase().trim());
             }
         } else if (obj instanceof Map<?, ?> map) {
             for (Map.Entry<?, ?> entry : map.entrySet()) {
@@ -395,20 +424,21 @@ public class TechnologyMatchingService {
         Object diffEv = issue.get("difficulty_evidence");
         if (diffEv instanceof Map<?, ?> dm) {
             Object tc = dm.get("technical_complexity");
-            if (tc instanceof Number num) return num.doubleValue();
+            if (tc instanceof Number num)
+                return num.doubleValue();
         }
         return null;
     }
 
     /**
-     * Prioritizes and deduplicates an in-memory candidate pool (e.g. sample or pre-fetched issues).
+     * Prioritizes and deduplicates an in-memory candidate pool (e.g. sample or
+     * pre-fetched issues).
      */
     public List<Map<String, Object>> prioritizeCandidates(
             List<Map<String, Object>> candidatePool,
             ContributorProfile profile,
             RecommendationRequest req,
-            int targetLimit
-    ) {
+            int targetLimit) {
         if (candidatePool == null || candidatePool.isEmpty()) {
             return Collections.emptyList();
         }
@@ -421,9 +451,11 @@ public class TechnologyMatchingService {
         Set<String> seenIds = new HashSet<>();
 
         for (Map<String, Object> candidate : candidatePool) {
-            if (candidate == null) continue;
+            if (candidate == null)
+                continue;
             String id = (String) candidate.get("id");
-            if (id == null || seenIds.contains(id)) continue;
+            if (id == null || seenIds.contains(id))
+                continue;
 
             if (violatesHardFilters(candidate, profile, req)) {
                 continue;
@@ -445,7 +477,8 @@ public class TechnologyMatchingService {
             seenIds.add(id);
         }
 
-        // Assemble ordered candidate pool: Confirmed -> Inferred -> Preferred -> General Backfill
+        // Assemble ordered candidate pool: Confirmed -> Inferred -> Preferred ->
+        // General Backfill
         List<Map<String, Object>> prioritized = new ArrayList<>();
         prioritized.addAll(priority1Confirmed);
         prioritized.addAll(priority2Inferred);
@@ -459,16 +492,17 @@ public class TechnologyMatchingService {
     }
 
     /**
-     * Resolves the candidate pool from MongoDB Atlas using single-query multi-technology lookup
+     * Resolves the candidate pool from MongoDB Atlas using single-query
+     * multi-technology lookup
      * to avoid N+1 queries, while respecting hard filters and soft preferences.
      */
     public List<Map<String, Object>> fetchCandidatePool(
             IssueRepository issueRepository,
             ContributorProfile profile,
             RecommendationRequest req,
-            int targetLimit
-    ) {
-        if (issueRepository == null) return Collections.emptyList();
+            int targetLimit) {
+        if (issueRepository == null)
+            return Collections.emptyList();
 
         Map<String, ContributorSkill> confirmed = getConfirmedSkills(profile);
         Map<String, InferredSkill> inferred = getInferredSkills(profile);
@@ -482,7 +516,8 @@ public class TechnologyMatchingService {
         // Priority 3
         targetTechs.addAll(preferred);
 
-        // If explicit technology_filter is set in request, it overrides soft technology search
+        // If explicit technology_filter is set in request, it overrides soft technology
+        // search
         if (req != null && req.technology_filter != null && !req.technology_filter.isBlank()) {
             targetTechs = Set.of(TechnologyDetectionHelper.normalizeTechnology(req.technology_filter));
         }
@@ -503,8 +538,7 @@ public class TechnologyMatchingService {
                     null,
                     sourceFilter,
                     targetLimit,
-                    0
-            );
+                    0);
         } else {
             fetched = issueRepository.queryIssues(
                     "open",
@@ -515,11 +549,11 @@ public class TechnologyMatchingService {
                     null,
                     sourceFilter,
                     targetLimit,
-                    0
-            );
+                    0);
         }
 
-        // If matching candidates are fewer than target and soft preferences allow backfill, fetch general open issues
+        // If matching candidates are fewer than target and soft preferences allow
+        // backfill, fetch general open issues
         boolean isHardTechFilter = (req != null && req.technology_filter != null && !req.technology_filter.isBlank());
         if (profile != null && profile.getPreferences() != null) {
             Set<String> hardFilters = parseHardFilters(profile.getPreferences().get("hard_filters"));
@@ -539,8 +573,7 @@ public class TechnologyMatchingService {
                     null,
                     sourceFilter,
                     needed * 2,
-                    0
-            );
+                    0);
             Set<String> existingIds = new HashSet<>();
             for (Map<String, Object> item : fetched) {
                 existingIds.add((String) item.get("id"));
@@ -550,7 +583,8 @@ public class TechnologyMatchingService {
                 if (id != null && !existingIds.contains(id) && !violatesHardFilters(bf, profile, req)) {
                     fetched.add(bf);
                     existingIds.add(id);
-                    if (fetched.size() >= targetLimit) break;
+                    if (fetched.size() >= targetLimit)
+                        break;
                 }
             }
         }
@@ -559,11 +593,13 @@ public class TechnologyMatchingService {
     }
 
     /**
-     * Enriches a recommendation result map with clear, human-readable match explanations
+     * Enriches a recommendation result map with clear, human-readable match
+     * explanations
      * and match reason lists without modifying internal ranking scores.
      */
     public void enrichWithExplanations(Map<String, Object> recommendation, ContributorProfile profile) {
-        if (recommendation == null || profile == null) return;
+        if (recommendation == null || profile == null)
+            return;
 
         List<TechnologyMatch> matches = matchTechnologies(recommendation, profile);
         List<String> reasons = new ArrayList<>();
@@ -590,4 +626,3 @@ public class TechnologyMatchingService {
         }
     }
 }
-
