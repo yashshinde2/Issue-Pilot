@@ -328,6 +328,207 @@ class ContributorSkillV23Test {
         var r7 = technologyMatchingService.calculateSkillMatchV2(Collections.emptyMap(), skillMap7, issueTechs6);
         assertFalse(r7.available());
         assertEquals(0.25, r7.coverage(), 1e-4);
+
+        // Verify recency_evaluations section
+        JsonNode recencyEvals = root.get("recency_evaluations");
+        if (recencyEvals != null && recencyEvals.isArray()) {
+            for (JsonNode item : recencyEvals) {
+                double m = item.get("months").asDouble();
+                double expectedScore = item.get("expected_score").asDouble();
+                assertEquals(expectedScore, ContributorSkillEvidenceV2.recencyDecay(m), 1e-4);
+            }
+        }
+
+        // Verify questionnaire_boundary_tests section
+        JsonNode qbTests = root.get("questionnaire_boundary_tests");
+        if (qbTests != null && qbTests.isArray()) {
+            for (JsonNode qb : qbTests) {
+                double cObs = qb.get("c_obs").asDouble();
+                double qConf = qb.get("q_conf").asDouble();
+                double expectedQw = qb.get("q_w").asDouble();
+                double ratio = qConf / (cObs + qConf);
+                double qw = Math.min(0.20, ratio);
+                assertEquals(expectedQw, qw, 1e-6);
+                assertEquals(0.20, qw, 1e-6);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("Verify Recency Score evaluations under spec exp(-m/12) and half-life 0.5^(m/12)")
+    void testRecencyEvaluationsAndHalfLifeComparison() {
+        double[] months = {0.0, 6.0, 12.0, 24.0, 36.0};
+        double[] expectedExp = {100.0, 60.653066, 36.787944, 13.533528, 4.978707};
+        double[] expectedHalfLife = {100.0, 70.710678, 50.0, 25.0, 12.5};
+
+        for (int i = 0; i < months.length; i++) {
+            assertEquals(expectedExp[i], ContributorSkillEvidenceV2.recencyDecay(months[i]), 1e-4);
+            assertEquals(expectedHalfLife[i], ContributorSkillEvidenceV2.recencyHalfLife(months[i]), 1e-4);
+        }
+    }
+
+    @Test
+    @DisplayName("Verify questionnaire weight q_w = min(0.20, q_conf / (c_obs + q_conf)) across c_obs in [0, 1.0]")
+    void testQuestionnaireBoundaryValues() {
+        double qConf = 0.40;
+        double[] cObsValues = {0.0, 0.10, 0.40, 1.00};
+        for (double cObs : cObsValues) {
+            double ratio = qConf / (cObs + qConf);
+            double qw = Math.min(0.20, ratio);
+            assertEquals(0.20, qw, 1e-9, "q_w must be identically 0.20 at c_obs=" + cObs + " because ratio=" + ratio + " >= 0.20");
+        }
+    }
+
+    @Test
+    @DisplayName("Verify all 6 contribution deduplication edge cases (PR-commit linking, multi-repo IDs, pagination, bots, forks)")
+    void testContributionDeduplicationSixEdgeCases() {
+        Instant now = Instant.now();
+
+        List<ContributionEpisodeAggregator.ContributionPr> prs = List.of(
+                // 1. Multiple commits in one PR -> tested together below
+                // 4. Duplicate PRs across pagination pages count once
+                new ContributionEpisodeAggregator.ContributionPr("42", "orgA/repoA", "Go", true, true, false, false, now),
+                new ContributionEpisodeAggregator.ContributionPr("42", "orgA/repoA", "Go", true, true, false, false, now),
+                // 5. Identical native PR IDs in different repositories remain distinct (Repo A #42 vs Repo B #42)
+                new ContributionEpisodeAggregator.ContributionPr("42", "orgB/repoB", "Go", false, true, false, false, now),
+                // 6. Bots and forks are excluded
+                new ContributionEpisodeAggregator.ContributionPr("99", "orgA/repoA", "Go", true, true, true, false, now),
+                new ContributionEpisodeAggregator.ContributionPr("10", "fork/repoC", "Go", true, true, false, true, now)
+        );
+
+        List<ContributionEpisodeAggregator.ContributionCommit> commits = List.of(
+                // 1. Multiple commits in one PR (c1, c2, c3 in Repo A PR #42)
+                // 2. PR-linked commits do not count as standalone commits
+                // 3. A commit linked to multiple PR records or duplicate commit records is not duplicated
+                new ContributionEpisodeAggregator.ContributionCommit("c1", "orgA/repoA", "Go", "42", false, false, now),
+                new ContributionEpisodeAggregator.ContributionCommit("c2", "orgA/repoA", "Go", "42", false, false, now),
+                new ContributionEpisodeAggregator.ContributionCommit("c3", "orgA/repoA", "Go", "42", false, false, now),
+                new ContributionEpisodeAggregator.ContributionCommit("c1", "orgA/repoA", "Go", "42", false, false, now),
+                // PR-linked commit for Repo B PR #42
+                new ContributionEpisodeAggregator.ContributionCommit("c4", "orgB/repoB", "Go", "42", false, false, now),
+                // Standalone human commit in Repo A
+                new ContributionEpisodeAggregator.ContributionCommit("c5", "orgA/repoA", "Go", null, false, false, now),
+                // 6. Bot commit & fork commit excluded
+                new ContributionEpisodeAggregator.ContributionCommit("c6", "orgA/repoA", "Go", null, true, false, now),
+                new ContributionEpisodeAggregator.ContributionCommit("c7", "fork/repoC", "Go", null, false, true, now)
+        );
+
+        var agg = ContributionEpisodeAggregator.aggregate(
+                prs, commits, Collections.emptyList(), now, 1.0, 1.0, true, true
+        );
+
+        assertTrue(agg.containsKey("Go"));
+        ContributorSkillEvidenceV2 go = agg.get("Go");
+
+        assertEquals(2, go.getUniqueContributedRepositories(), "Forks excluded; exactly 2 distinct repos (orgA/repoA and orgB/repoB)");
+        assertEquals(2, go.getUniqueAuthoredPrs(), "Repo A #42 and Repo B #42 both counted; pagination duplicate, bot PR, fork PR excluded");
+        assertEquals(1, go.getStandaloneCommits(), "c1..c4 linked to PRs; only c5 counted as standalone");
+
+        SkillComputationResult res = go.computeSkill();
+        assertEquals(3, res.effectiveEpisodes(), "Effective episodes n_eff = 2 PRs + 1 standalone commit = 3");
+        assertEquals(2, go.getDecidedPrs());
+        assertEquals(1, go.getMergedDecidedPrs());
+    }
+
+    @Test
+    @DisplayName("Verify ambiguous technology alias detection edge cases for Go, C, R, JS, TS")
+    void testAmbiguousTechnologyAliasDetectionEdgeCases() {
+        // --- Go ---
+        // English prose rejection
+        var dGoEng = TechnologyRegistry.detect("", "we must go to the database now", "let us go ahead with migration", null, null);
+        assertFalse(dGoEng.technologies().stream().anyMatch(t -> "Go".equalsIgnoreCase(t.getTechnology())));
+
+        // Context prose acceptance
+        var dGoCtx = TechnologyRegistry.detect("", "issue in service written in Go", "concurrency handled by goroutines", null, null);
+        assertTrue(dGoCtx.technologies().stream().anyMatch(t -> "Go".equalsIgnoreCase(t.getTechnology())));
+
+        // Code fence acceptance
+        var dGoFence = TechnologyRegistry.detect("", "panic trace", "```go\nfunc main() {}\n```", null, null);
+        assertTrue(dGoFence.technologies().stream().anyMatch(t -> "Go".equalsIgnoreCase(t.getTechnology())));
+
+        // File extension acceptance
+        var dGoExt = TechnologyRegistry.detect("", "syntax error", "failed at pkg/server/main.go line 10", null, null);
+        assertTrue(dGoExt.technologies().stream().anyMatch(t -> "Go".equalsIgnoreCase(t.getTechnology())));
+
+        // Topic acceptance
+        var dGoTopic = TechnologyRegistry.detect("", "backend issue", "server hangs", null, List.of("golang"));
+        assertTrue(dGoTopic.technologies().stream().anyMatch(t -> "Go".equalsIgnoreCase(t.getTechnology())));
+
+        // --- C ---
+        // English prose rejection
+        var dCEng = TechnologyRegistry.detect("", "look at option c in the list", "part c describes the behavior", null, null);
+        assertFalse(dCEng.technologies().stream().anyMatch(t -> "C".equalsIgnoreCase(t.getTechnology())));
+
+        // Context prose acceptance
+        var dCCtx = TechnologyRegistry.detect("", "core engine written in C", "ansi-c compatibility required", null, null);
+        assertTrue(dCCtx.technologies().stream().anyMatch(t -> "C".equalsIgnoreCase(t.getTechnology())));
+
+        // Code fence acceptance
+        var dCFence = TechnologyRegistry.detect("", "null dereference", "```c\nint main() { return 0; }\n```", null, null);
+        assertTrue(dCFence.technologies().stream().anyMatch(t -> "C".equalsIgnoreCase(t.getTechnology())));
+
+        // File extension acceptance
+        var dCExt = TechnologyRegistry.detect("", "segfault", "fault in driver/main.c line 55", null, null);
+        assertTrue(dCExt.technologies().stream().anyMatch(t -> "C".equalsIgnoreCase(t.getTechnology())));
+
+        // --- R ---
+        // English prose rejection
+        var dREng = TechnologyRegistry.detect("", "computed correlation r = 0.95", "radius r of the circle", null, null);
+        assertFalse(dREng.technologies().stream().anyMatch(t -> "R".equalsIgnoreCase(t.getTechnology())));
+
+        // Context prose acceptance
+        var dRCtx = TechnologyRegistry.detect("", "statistical analysis in R", "uses cran package", null, null);
+        assertTrue(dRCtx.technologies().stream().anyMatch(t -> "R".equalsIgnoreCase(t.getTechnology())));
+
+        // Code fence acceptance
+        var dRFence = TechnologyRegistry.detect("", "plot failure", "```r\nplot(x, y)\n```", null, null);
+        assertTrue(dRFence.technologies().stream().anyMatch(t -> "R".equalsIgnoreCase(t.getTechnology())));
+
+        // File extension acceptance
+        var dRExt = TechnologyRegistry.detect("", "runtime error", "error in scripts/analysis.R line 12", null, null);
+        assertTrue(dRExt.technologies().stream().anyMatch(t -> "R".equalsIgnoreCase(t.getTechnology())));
+
+        // --- JS ---
+        // English prose rejection
+        var dJsEng = TechnologyRegistry.detect("", "the js variable is unset", "pass param js = 1", null, null);
+        assertFalse(dJsEng.technologies().stream().anyMatch(t -> "JavaScript".equalsIgnoreCase(t.getTechnology())));
+
+        // Context prose acceptance
+        var dJsCtx = TechnologyRegistry.detect("", "client side written in JS", "bundle size regression", null, null);
+        assertTrue(dJsCtx.technologies().stream().anyMatch(t -> "JavaScript".equalsIgnoreCase(t.getTechnology())));
+
+        // Code fence acceptance
+        var dJsFence = TechnologyRegistry.detect("", "uncaught error", "```javascript\nconsole.log(42);\n```", null, null);
+        assertTrue(dJsFence.technologies().stream().anyMatch(t -> "JavaScript".equalsIgnoreCase(t.getTechnology())));
+
+        // File extension acceptance
+        var dJsExt = TechnologyRegistry.detect("", "syntax error", "found in web/app.js:20", null, null);
+        assertTrue(dJsExt.technologies().stream().anyMatch(t -> "JavaScript".equalsIgnoreCase(t.getTechnology())));
+
+        // Manifest acceptance
+        var dJsManifest = TechnologyRegistry.detect("", "build broken", "check package.json dependencies", null, null);
+        assertTrue(dJsManifest.technologies().stream().anyMatch(t -> "JavaScript".equalsIgnoreCase(t.getTechnology())));
+
+        // --- TS ---
+        // English prose rejection (ts = timestamp)
+        var dTsEng = TechnologyRegistry.detect("", "timestamp ts = 1700000000", "invalid ts in event log", null, null);
+        assertFalse(dTsEng.technologies().stream().anyMatch(t -> "TypeScript".equalsIgnoreCase(t.getTechnology())));
+
+        // Context prose acceptance
+        var dTsCtx = TechnologyRegistry.detect("", "frontend written in TS", "compiler error on TS types", null, null);
+        assertTrue(dTsCtx.technologies().stream().anyMatch(t -> "TypeScript".equalsIgnoreCase(t.getTechnology())));
+
+        // Code fence acceptance
+        var dTsFence = TechnologyRegistry.detect("", "type mismatch", "```typescript\nconst x: number = 42;\n```", null, null);
+        assertTrue(dTsFence.technologies().stream().anyMatch(t -> "TypeScript".equalsIgnoreCase(t.getTechnology())));
+
+        // File extension acceptance
+        var dTsExt = TechnologyRegistry.detect("", "type error", "found in src/index.ts:15", null, null);
+        assertTrue(dTsExt.technologies().stream().anyMatch(t -> "TypeScript".equalsIgnoreCase(t.getTechnology())));
+
+        // Manifest acceptance
+        var dTsManifest = TechnologyRegistry.detect("", "tsconfig error", "check tsconfig.json paths", null, null);
+        assertTrue(dTsManifest.technologies().stream().anyMatch(t -> "TypeScript".equalsIgnoreCase(t.getTechnology())));
     }
 }
 

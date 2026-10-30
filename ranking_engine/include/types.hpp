@@ -241,6 +241,11 @@ struct ContributorSkillEvidenceV2 {
         return 100.0 * std::exp(-months / 12.0);
     }
 
+    static double recency_half_life(double months) {
+        if (months < 0.0) months = 0.0;
+        return 100.0 * std::pow(0.5, months / 12.0);
+    }
+
     static double merge_rate(int merged, int decided) {
         return 100.0 * (static_cast<double>(merged) + 2.0) / (static_cast<double>(decided) + 4.0);
     }

@@ -201,6 +201,18 @@
         "coverage": 0.25
       }
     }
+  ],
+  "recency_evaluations": [
+    {"months": 0.0, "expected_score": 100.0},
+    {"months": 6.0, "expected_score": 60.653066},
+    {"months": 12.0, "expected_score": 36.787944},
+    {"months": 24.0, "expected_score": 13.533528},
+    {"months": 36.0, "expected_score": 4.978707}
+  ],
+  "questionnaire_boundary_tests": [
+    {"c_obs": 0.0, "q_conf": 0.40, "ratio": 1.0, "q_w": 0.20},
+    {"c_obs": 0.10, "q_conf": 0.40, "ratio": 0.80, "q_w": 0.20},
+    {"c_obs": 0.40, "q_conf": 0.40, "ratio": 0.50, "q_w": 0.20},
+    {"c_obs": 1.00, "q_conf": 0.40, "ratio": 0.285714, "q_w": 0.20}
   ]
 }
-

@@ -8,6 +8,7 @@ namespace issue_pilot {
 static std::unordered_map<std::string, TechnologyDefinition> s_registry;
 static std::unordered_map<std::string, std::string> s_alias_map;
 static std::unordered_map<std::string, std::string> s_ext_map;
+static std::unordered_map<std::string, std::string> s_manifest_map;
 static bool s_initialized = false;
 
 
@@ -25,6 +26,12 @@ void TechnologyRegistry::init_registry() {
             std::string ext_lower = to_lower_str(ext);
             if (s_ext_map.find(ext_lower) == s_ext_map.end()) {
                 s_ext_map[ext_lower] = def.canonical_name;
+            }
+        }
+        for (const auto& mf : def.manifest_files) {
+            std::string mf_lower = to_lower_str(mf);
+            if (s_manifest_map.find(mf_lower) == s_manifest_map.end()) {
+                s_manifest_map[mf_lower] = def.canonical_name;
             }
         }
     };
@@ -95,17 +102,19 @@ bool TechnologyRegistry::matches_short_alias_with_context(const TechnologyDefini
     }
 
     if (canonical == "JavaScript") {
-        if (std::regex_search(text, std::regex("\\b(javascript|node|nodejs|ecmascript)\\b", std::regex_constants::icase))) {
+        if (std::regex_search(text, std::regex("\\b(javascript|nodejs|node\\.js|ecmascript)\\b", std::regex_constants::icase))) {
             return true;
         }
-        return std::regex_search(text, std::regex("\\bjs\\b", std::regex_constants::icase));
+        std::regex js_context("(?:\\bin\\s+JS\\b|\\bJS\\s+code\\b|\\bJS\\s+bundle\\b|\\bJS\\s+engine\\b|\\bJS\\s+runtime\\b|\\bvanilla\\s+JS\\b|\\bNode\\s+JS\\b|\\bJS/TS\\b|\\bTS/JS\\b)", std::regex_constants::icase);
+        return std::regex_search(text, js_context);
     }
 
     if (canonical == "TypeScript") {
         if (std::regex_search(text, std::regex("\\b(typescript|tsc)\\b", std::regex_constants::icase))) {
             return true;
         }
-        return std::regex_search(text, std::regex("\\bts\\b", std::regex_constants::icase));
+        std::regex ts_context("(?:\\bin\\s+TS\\b|\\bTS\\s+types\\b|\\bTS\\s+compiler\\b|\\bTS\\s+config\\b|\\bTS\\s+file\\b|\\bTS\\s+code\\b|\\bTS\\s+interface\\b|\\bJS/TS\\b|\\bTS/JS\\b)", std::regex_constants::icase);
+        return std::regex_search(text, ts_context);
     }
 
     return false;
@@ -191,7 +200,7 @@ TechnologyDetectionResult TechnologyRegistry::detect(
             body_copy = m.suffix().str();
         }
 
-        // File extensions
+        // File extensions & Manifest files
         std::regex ext_re("[a-zA-Z0-9_/-]+(\\.[a-zA-Z0-9]{1,5})\\b");
         body_copy = body;
         while (std::regex_search(body_copy, m, ext_re)) {
@@ -201,6 +210,13 @@ TechnologyDetectionResult TechnologyRegistry::detect(
                 points_map[it->second].ext = 2;
             }
             body_copy = m.suffix().str();
+        }
+
+        std::string lower_body = to_lower_str(body);
+        for (const auto& kv : s_manifest_map) {
+            if (lower_body.find(kv.first) != std::string::npos) {
+                points_map[kv.second].ext = 2;
+            }
         }
 
         // Sentences in body

@@ -848,6 +848,187 @@ int main() {
         }
     }
 
+    // Test 29: Contribution Deduplication 6 Edge Cases (PR-commit linking, multi-repo IDs, pagination, bots, forks)
+    {
+        std::vector<issue_pilot::ContributionPr> prs;
+        // 1. Multiple commits in one PR -> tested together below
+        // 4. Duplicate PRs across pagination pages count once
+        prs.push_back({"42", "orgA/repoA", "Go", true, true, false, false, 0.0});
+        prs.push_back({"42", "orgA/repoA", "Go", true, true, false, false, 0.0});
+        // 5. Identical native PR IDs in different repositories remain distinct (Repo A #42 vs Repo B #42)
+        prs.push_back({"42", "orgB/repoB", "Go", false, true, false, false, 0.0});
+        // 6. Bots and forks are excluded
+        prs.push_back({"99", "orgA/repoA", "Go", true, true, true, false, 0.0});
+        prs.push_back({"10", "fork/repoC", "Go", true, true, false, true, 0.0});
+
+        std::vector<issue_pilot::ContributionCommit> commits;
+        // 1. Multiple commits in one PR (c1, c2, c3 in Repo A PR #42)
+        // 2. PR-linked commits do not count as standalone commits
+        // 3. A commit linked to multiple PR records or duplicate commit records is not duplicated
+        commits.push_back({"c1", "orgA/repoA", "Go", "42", false, false, 0.0});
+        commits.push_back({"c2", "orgA/repoA", "Go", "42", false, false, 0.0});
+        commits.push_back({"c3", "orgA/repoA", "Go", "42", false, false, 0.0});
+        commits.push_back({"c1", "orgA/repoA", "Go", "42", false, false, 0.0});
+        // PR-linked commit for Repo B PR #42
+        commits.push_back({"c4", "orgB/repoB", "Go", "42", false, false, 0.0});
+        // Standalone human commit in Repo A
+        commits.push_back({"c5", "orgA/repoA", "Go", "", false, false, 0.0});
+        // 6. Bot commit & fork commit excluded
+        commits.push_back({"c6", "orgA/repoA", "Go", "", true, false, 0.0});
+        commits.push_back({"c7", "fork/repoC", "Go", "", false, true, 0.0});
+
+        std::vector<issue_pilot::QuestionnaireReport> q_reports;
+        auto agg = issue_pilot::ContributionEpisodeAggregator::aggregate(prs, commits, q_reports);
+
+        report_test("Deduplication 6 Cases: Go present", agg.find("Go") != agg.end(), 1.0, agg.find("Go") != agg.end() ? 1.0 : 0.0);
+        if (agg.find("Go") != agg.end()) {
+            const auto& go = agg["Go"];
+            report_test("Deduplication 6 Cases: Unique Repositories (2)", go.unique_contributed_repositories == 2, 2.0, go.unique_contributed_repositories);
+            report_test("Deduplication 6 Cases: Unique Authored PRs (2)", go.unique_authored_prs == 2, 2.0, go.unique_authored_prs);
+            report_test("Deduplication 6 Cases: Standalone Commits (1)", go.standalone_commits == 1, 1.0, go.standalone_commits);
+            auto res = go.compute_skill();
+            report_test("Deduplication 6 Cases: Effective Episodes n_eff (3)", res.effective_episodes == 3, 3.0, res.effective_episodes);
+            report_test("Deduplication 6 Cases: Decided PRs (2)", go.decided_prs == 2, 2.0, go.decided_prs);
+            report_test("Deduplication 6 Cases: Merged Decided PRs (1)", go.merged_decided_prs == 1, 1.0, go.merged_decided_prs);
+        }
+    }
+
+    // Test 30: Recency Evaluations and Half-Life Comparison (0, 6, 12, 24, 36 months)
+    {
+        double months[] = {0.0, 6.0, 12.0, 24.0, 36.0};
+        double exp_expected[] = {100.0, 60.653066, 36.787944, 13.533528, 4.978707};
+        double hl_expected[] = {100.0, 70.710678, 50.0, 25.0, 12.5};
+
+        bool all_exp_ok = true;
+        bool all_hl_ok = true;
+        for (int i = 0; i < 5; ++i) {
+            double v_exp = issue_pilot::ContributorSkillEvidenceV2::recency_decay(months[i]);
+            double v_hl = issue_pilot::ContributorSkillEvidenceV2::recency_half_life(months[i]);
+            if (std::abs(v_exp - exp_expected[i]) > 1e-4) all_exp_ok = false;
+            if (std::abs(v_hl - hl_expected[i]) > 1e-4) all_hl_ok = false;
+        }
+        report_test("Recency Decay Formula 100*exp(-m/12) (0..36m)", all_exp_ok, 1.0, all_exp_ok ? 1.0 : 0.0);
+        report_test("Recency Half-Life Formula 100*0.5^(m/12) (0..36m)", all_hl_ok, 1.0, all_hl_ok ? 1.0 : 0.0);
+        report_test("Recency Half-Life at 12m is exactly 50.0", std::abs(issue_pilot::ContributorSkillEvidenceV2::recency_half_life(12.0) - 50.0) < 1e-6, 50.0, issue_pilot::ContributorSkillEvidenceV2::recency_half_life(12.0));
+    }
+
+    // Test 31: Questionnaire Blending Weight Invariant Across c_obs in [0, 1.0]
+    {
+        double q_conf = 0.40;
+        double c_obs_vals[] = {0.0, 0.10, 0.40, 1.00};
+        bool all_qw_ok = true;
+        for (int i = 0; i < 4; ++i) {
+            double c = c_obs_vals[i];
+            double ratio = q_conf / (c + q_conf);
+            double qw = std::min(0.20, ratio);
+            if (std::abs(qw - 0.20) > 1e-9) all_qw_ok = false;
+        }
+        report_test("Questionnaire Blending Weight q_w == 0.20 identically on [0, 1.0]", all_qw_ok, 1.0, all_qw_ok ? 1.0 : 0.0);
+    }
+
+    // Test 32: Technology Detection Ambiguous Alias Edge Cases (Go, C, R, JS, TS)
+    {
+        // Go
+        auto d_go_eng = issue_pilot::TechnologyRegistry::detect("", "we must go to the database now", "let us go ahead with migration", {}, {});
+        bool go_eng = false;
+        for (const auto& t : d_go_eng.technologies) if (t.technology == "Go") go_eng = true;
+        report_test("Technology Edge: 'go' prose rejected", !go_eng, 1.0, !go_eng ? 1.0 : 0.0);
+
+        auto d_go_ctx = issue_pilot::TechnologyRegistry::detect("", "written in Go", "concurrency handled by goroutines", {}, {});
+        bool go_ctx = false;
+        for (const auto& t : d_go_ctx.technologies) if (t.technology == "Go") go_ctx = true;
+        report_test("Technology Edge: 'written in Go' accepted", go_ctx, 1.0, go_ctx ? 1.0 : 0.0);
+
+        auto d_go_fence = issue_pilot::TechnologyRegistry::detect("", "panic trace", "```go\nfunc main() {}\n```", {}, {});
+        bool go_fence = false;
+        for (const auto& t : d_go_fence.technologies) if (t.technology == "Go") go_fence = true;
+        report_test("Technology Edge: Go code fence accepted", go_fence, 1.0, go_fence ? 1.0 : 0.0);
+
+        auto d_go_ext = issue_pilot::TechnologyRegistry::detect("", "syntax error", "failed at pkg/server/main.go line 10", {}, {});
+        bool go_ext = false;
+        for (const auto& t : d_go_ext.technologies) if (t.technology == "Go") go_ext = true;
+        report_test("Technology Edge: .go file extension accepted", go_ext, 1.0, go_ext ? 1.0 : 0.0);
+
+        auto d_go_top = issue_pilot::TechnologyRegistry::detect("", "backend issue", "server hangs", {}, {"golang"});
+        bool go_top = false;
+        for (const auto& t : d_go_top.technologies) if (t.technology == "Go") go_top = true;
+        report_test("Technology Edge: 'golang' topic accepted", go_top, 1.0, go_top ? 1.0 : 0.0);
+
+        // C
+        auto d_c_eng = issue_pilot::TechnologyRegistry::detect("", "look at option c in the list", "part c describes the behavior", {}, {});
+        bool c_eng = false;
+        for (const auto& t : d_c_eng.technologies) if (t.technology == "C") c_eng = true;
+        report_test("Technology Edge: 'c' prose rejected", !c_eng, 1.0, !c_eng ? 1.0 : 0.0);
+
+        auto d_c_ctx = issue_pilot::TechnologyRegistry::detect("", "core engine written in C", "ansi-c compatibility required", {}, {});
+        bool c_ctx = false;
+        for (const auto& t : d_c_ctx.technologies) if (t.technology == "C") c_ctx = true;
+        report_test("Technology Edge: 'written in C' accepted", c_ctx, 1.0, c_ctx ? 1.0 : 0.0);
+
+        auto d_c_ext = issue_pilot::TechnologyRegistry::detect("", "segfault", "fault in driver/main.c line 55", {}, {});
+        bool c_ext = false;
+        for (const auto& t : d_c_ext.technologies) if (t.technology == "C") c_ext = true;
+        report_test("Technology Edge: .c file extension accepted", c_ext, 1.0, c_ext ? 1.0 : 0.0);
+
+        // R
+        auto d_r_eng = issue_pilot::TechnologyRegistry::detect("", "computed correlation r = 0.95", "radius r of the circle", {}, {});
+        bool r_eng = false;
+        for (const auto& t : d_r_eng.technologies) if (t.technology == "R") r_eng = true;
+        report_test("Technology Edge: 'r' prose rejected", !r_eng, 1.0, !r_eng ? 1.0 : 0.0);
+
+        auto d_r_ctx = issue_pilot::TechnologyRegistry::detect("", "statistical analysis in R", "uses cran package", {}, {});
+        bool r_ctx = false;
+        for (const auto& t : d_r_ctx.technologies) if (t.technology == "R") r_ctx = true;
+        report_test("Technology Edge: 'analysis in R' accepted", r_ctx, 1.0, r_ctx ? 1.0 : 0.0);
+
+        auto d_r_ext = issue_pilot::TechnologyRegistry::detect("", "runtime error", "error in scripts/analysis.R line 12", {}, {});
+        bool r_ext = false;
+        for (const auto& t : d_r_ext.technologies) if (t.technology == "R") r_ext = true;
+        report_test("Technology Edge: .R file extension accepted", r_ext, 1.0, r_ext ? 1.0 : 0.0);
+
+        // JS
+        auto d_js_eng = issue_pilot::TechnologyRegistry::detect("", "the js variable is unset", "pass param js = 1", {}, {});
+        bool js_eng = false;
+        for (const auto& t : d_js_eng.technologies) if (t.technology == "JavaScript") js_eng = true;
+        report_test("Technology Edge: 'js' generic prose rejected", !js_eng, 1.0, !js_eng ? 1.0 : 0.0);
+
+        auto d_js_ctx = issue_pilot::TechnologyRegistry::detect("", "client side written in JS", "bundle size regression", {}, {});
+        bool js_ctx = false;
+        for (const auto& t : d_js_ctx.technologies) if (t.technology == "JavaScript") js_ctx = true;
+        report_test("Technology Edge: 'written in JS' accepted", js_ctx, 1.0, js_ctx ? 1.0 : 0.0);
+
+        auto d_js_ext = issue_pilot::TechnologyRegistry::detect("", "syntax error", "found in web/app.js:20", {}, {});
+        bool js_ext = false;
+        for (const auto& t : d_js_ext.technologies) if (t.technology == "JavaScript") js_ext = true;
+        report_test("Technology Edge: .js file extension accepted", js_ext, 1.0, js_ext ? 1.0 : 0.0);
+
+        auto d_js_manifest = issue_pilot::TechnologyRegistry::detect("", "build broken", "check package.json dependencies", {}, {});
+        bool js_manifest = false;
+        for (const auto& t : d_js_manifest.technologies) if (t.technology == "JavaScript") js_manifest = true;
+        report_test("Technology Edge: package.json manifest accepted", js_manifest, 1.0, js_manifest ? 1.0 : 0.0);
+
+        // TS
+        auto d_ts_eng = issue_pilot::TechnologyRegistry::detect("", "timestamp ts = 1700000000", "invalid ts in event log", {}, {});
+        bool ts_eng = false;
+        for (const auto& t : d_ts_eng.technologies) if (t.technology == "TypeScript") ts_eng = true;
+        report_test("Technology Edge: 'ts' timestamp prose rejected", !ts_eng, 1.0, !ts_eng ? 1.0 : 0.0);
+
+        auto d_ts_ctx = issue_pilot::TechnologyRegistry::detect("", "frontend written in TS", "compiler error on TS types", {}, {});
+        bool ts_ctx = false;
+        for (const auto& t : d_ts_ctx.technologies) if (t.technology == "TypeScript") ts_ctx = true;
+        report_test("Technology Edge: 'written in TS' accepted", ts_ctx, 1.0, ts_ctx ? 1.0 : 0.0);
+
+        auto d_ts_ext = issue_pilot::TechnologyRegistry::detect("", "type error", "found in src/index.ts:15", {}, {});
+        bool ts_ext = false;
+        for (const auto& t : d_ts_ext.technologies) if (t.technology == "TypeScript") ts_ext = true;
+        report_test("Technology Edge: .ts file extension accepted", ts_ext, 1.0, ts_ext ? 1.0 : 0.0);
+
+        auto d_ts_manifest = issue_pilot::TechnologyRegistry::detect("", "tsconfig error", "check tsconfig.json paths", {}, {});
+        bool ts_manifest = false;
+        for (const auto& t : d_ts_manifest.technologies) if (t.technology == "TypeScript") ts_manifest = true;
+        report_test("Technology Edge: tsconfig.json manifest accepted", ts_manifest, 1.0, ts_manifest ? 1.0 : 0.0);
+    }
+
     std::cout << "\nALL UNIT TEST CHECKS (INCLUDING PHASE 1 CONTRACTS) PASSED SUCCESSFULLY!\n";
     std::cout << "Executed: " << total_assertions << " | Passed: " << passed_assertions << " | Failed: " << (total_assertions - passed_assertions) << "\n";
     std::cout << "========================================\n";

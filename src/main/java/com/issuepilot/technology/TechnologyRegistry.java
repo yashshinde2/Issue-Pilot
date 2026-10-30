@@ -70,6 +70,7 @@ public final class TechnologyRegistry {
     private static final Map<String, TechnologyDefinition> REGISTRY = new LinkedHashMap<>();
     private static final Map<String, String> EXTENSION_TO_TECH = new HashMap<>();
     private static final Map<String, String> ALIAS_TO_TECH = new HashMap<>();
+    private static final Map<String, String> MANIFEST_TO_TECH = new HashMap<>();
 
     static {
         register(new TechnologyDefinition(
@@ -284,6 +285,11 @@ public final class TechnologyRegistry {
                 EXTENSION_TO_TECH.put(ext.toLowerCase(Locale.ROOT), def.canonicalName());
             }
         }
+        for (String mf : def.manifestFiles()) {
+            if (!MANIFEST_TO_TECH.containsKey(mf.toLowerCase(Locale.ROOT))) {
+                MANIFEST_TO_TECH.put(mf.toLowerCase(Locale.ROOT), def.canonicalName());
+            }
+        }
     }
 
     public static Map<String, TechnologyDefinition> getRegistry() {
@@ -355,12 +361,18 @@ public final class TechnologyRegistry {
                 }
             }
 
-            // 4. Explicit File Extensions (2 points)
+            // 4. Explicit File Extensions & Manifest Files (2 points)
             Set<String> extensions = extractFileExtensions(body);
             for (String ext : extensions) {
                 String canonical = EXTENSION_TO_TECH.get(ext.toLowerCase(Locale.ROOT));
                 if (canonical != null && pointsMap.containsKey(canonical)) {
                     pointsMap.get(canonical)[3] = 2;
+                }
+            }
+            String lowerBody = body.toLowerCase(Locale.ROOT);
+            for (Map.Entry<String, String> entry : MANIFEST_TO_TECH.entrySet()) {
+                if (lowerBody.contains(entry.getKey())) {
+                    pointsMap.get(entry.getValue())[3] = 2;
                 }
             }
 
@@ -525,19 +537,27 @@ public final class TechnologyRegistry {
         }
 
         if ("JavaScript".equals(canonical)) {
-            if (Pattern.compile("\\bjavascript\\b|\\bnode\\b|\\bnodejs\\b|\\becmascript\\b", Pattern.CASE_INSENSITIVE).matcher(text).find()) {
+            if (Pattern.compile("\\bjavascript\\b|\\bnodejs\\b|\\bnode\\.js\\b|\\becmascript\\b", Pattern.CASE_INSENSITIVE).matcher(text).find()) {
                 return true;
             }
-            // Whole token JS
-            return Pattern.compile("\\bjs\\b", Pattern.CASE_INSENSITIVE).matcher(text).find();
+            // Short alias 'js' requires contextual qualification in prose
+            Pattern jsContext = Pattern.compile(
+                    "(?:\\bin\\s+JS\\b|\\bJS\\s+code\\b|\\bJS\\s+bundle\\b|\\bJS\\s+engine\\b|\\bJS\\s+runtime\\b|\\bvanilla\\s+JS\\b|\\bNode\\s+JS\\b|\\bJS/TS\\b|\\bTS/JS\\b)",
+                    Pattern.CASE_INSENSITIVE
+            );
+            return jsContext.matcher(text).find();
         }
 
         if ("TypeScript".equals(canonical)) {
             if (Pattern.compile("\\btypescript\\b|\\btsc\\b", Pattern.CASE_INSENSITIVE).matcher(text).find()) {
                 return true;
             }
-            // Whole token TS
-            return Pattern.compile("\\bts\\b", Pattern.CASE_INSENSITIVE).matcher(text).find();
+            // Short alias 'ts' requires contextual qualification in prose (to reject 'ts' = timestamp / time series)
+            Pattern tsContext = Pattern.compile(
+                    "(?:\\bin\\s+TS\\b|\\bTS\\s+types\\b|\\bTS\\s+compiler\\b|\\bTS\\s+config\\b|\\bTS\\s+file\\b|\\bTS\\s+code\\b|\\bTS\\s+interface\\b|\\bJS/TS\\b|\\bTS/JS\\b)",
+                    Pattern.CASE_INSENSITIVE
+            );
+            return tsContext.matcher(text).find();
         }
 
         return false;

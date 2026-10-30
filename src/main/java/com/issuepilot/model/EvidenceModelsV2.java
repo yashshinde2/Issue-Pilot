@@ -377,6 +377,11 @@ public final class EvidenceModelsV2 {
             return 100.0 * Math.exp(-months / 12.0);
         }
 
+        public static double recencyHalfLife(double months) {
+            if (months < 0.0) months = 0.0;
+            return 100.0 * Math.pow(0.5, months / 12.0);
+        }
+
         public static double mergeRate(int merged, int decided) {
             return 100.0 * ((double) merged + 2.0) / ((double) decided + 4.0);
         }
