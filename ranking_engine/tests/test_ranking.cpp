@@ -469,6 +469,54 @@ int main() {
         std::string expected_naive = "na\xC3\xAFve"; // U+00EF
         report_test("Unicode NFC Decomposition to Composition (naïve)", nfc_naive == expected_naive, 1.0, (nfc_naive == expected_naive ? 1.0 : 0.0));
 
+        // Ångström canonical equivalence
+        std::string decomposed_angstrom = "A\xCC\x8Angstr\xC3\xB6m"; // A + ring above + ngstr + o with diaeresis + m
+        std::string composed_angstrom = "\xC3\x85ngstr\xC3\xB6m";
+        std::string nfc_angstrom = issue_pilot::unicode::to_nfc(decomposed_angstrom);
+        report_test("Unicode NFC Ångström Decomposition Parity", nfc_angstrom == composed_angstrom, 1.0, (nfc_angstrom == composed_angstrom ? 1.0 : 0.0));
+
+        // Composition exclusions: Angstrom sign (U+212B) and Ohm sign (U+2126)
+        std::string angstrom_sign = "\xE2\x84\xAB";
+        std::string nfc_angstrom_sign = issue_pilot::unicode::to_nfc(angstrom_sign);
+        std::string expected_angstrom_composed = "\xC3\x85"; // U+00C5
+        report_test("Unicode NFC Composition Exclusion: Angstrom Sign (U+212B -> U+00C5)", nfc_angstrom_sign == expected_angstrom_composed, 1.0, (nfc_angstrom_sign == expected_angstrom_composed ? 1.0 : 0.0));
+
+        std::string ohm_sign = "\xE2\x84\xA6";
+        std::string nfc_ohm_sign = issue_pilot::unicode::to_nfc(ohm_sign);
+        std::string expected_ohm_composed = "\xCE\xA9"; // U+03A9
+        report_test("Unicode NFC Composition Exclusion: Ohm Sign (U+2126 -> U+03A9)", nfc_ohm_sign == expected_ohm_composed, 1.0, (nfc_ohm_sign == expected_ohm_composed ? 1.0 : 0.0));
+
+        // Combining-class reordering: stacked diacritics
+        // q + U+0301 (acute, ccc=230) + U+0323 (dot below, ccc=220) vs q + U+0323 + U+0301
+        std::string stacked1 = "q\xCC\x81\xCC\xA3";
+        std::string stacked2 = "q\xCC\xA3\xCC\x81";
+        std::string nfc_stacked1 = issue_pilot::unicode::to_nfc(stacked1);
+        std::string nfc_stacked2 = issue_pilot::unicode::to_nfc(stacked2);
+        report_test("Unicode NFC Combining Class Canonical Reordering", nfc_stacked1 == nfc_stacked2 && nfc_stacked1 == stacked2, 1.0, (nfc_stacked1 == nfc_stacked2 && nfc_stacked1 == stacked2 ? 1.0 : 0.0));
+
+        // Hangul algorithmic composition/decomposition
+        // 가 (U+AC00) = \u1100 + \u1161
+        std::string decomposed_ga = "\xE1\x84\x80\xE1\x85\xA1";
+        std::string composed_ga = "\xEA\xB0\x80";
+        report_test("Unicode NFC Hangul LV Composition (가)", issue_pilot::unicode::to_nfc(decomposed_ga) == composed_ga, 1.0, (issue_pilot::unicode::to_nfc(decomposed_ga) == composed_ga ? 1.0 : 0.0));
+
+        // 간 (U+AC04) = \u1100 + \u1161 + \u11AB
+        std::string decomposed_gan = "\xE1\x84\x80\xE1\x85\xA1\xE1\x86\xAB";
+        std::string composed_gan = "\xEA\xB0\x84";
+        report_test("Unicode NFC Hangul LVT Composition (간)", issue_pilot::unicode::to_nfc(decomposed_gan) == composed_gan, 1.0, (issue_pilot::unicode::to_nfc(decomposed_gan) == composed_gan ? 1.0 : 0.0));
+
+        // 한 (U+D55C) = \u1112 + \u1161 + \u11AB
+        std::string decomposed_han = "\xE1\x84\x92\xE1\x85\xA1\xE1\x86\xAB";
+        std::string composed_han = "\xED\x95\x9C";
+        report_test("Unicode NFC Hangul LVT Composition (한)", issue_pilot::unicode::to_nfc(decomposed_han) == composed_han, 1.0, (issue_pilot::unicode::to_nfc(decomposed_han) == composed_han ? 1.0 : 0.0));
+
+        // Supplementary characters (SMP): Math bold A (U+1D400) and Emoji 😀 (U+1F600)
+        std::string math_bold_a = "\xF0\x9D\x90\x80";
+        report_test("Unicode NFC Supplementary Character (U+1D400)", issue_pilot::unicode::to_nfc(math_bold_a) == math_bold_a, 1.0, (issue_pilot::unicode::to_nfc(math_bold_a) == math_bold_a ? 1.0 : 0.0));
+
+        std::string emoji_face = "\xF0\x9F\x98\x80";
+        report_test("Unicode NFC Supplementary Emoji (U+1F600)", issue_pilot::unicode::to_nfc(emoji_face) == emoji_face, 1.0, (issue_pilot::unicode::to_nfc(emoji_face) == emoji_face ? 1.0 : 0.0));
+
         // Preserve case of instance and repository segments without silent fold
         std::string key_with_non_ascii = issue_pilot::build_issue_key(
             "GitLab",
@@ -548,6 +596,45 @@ int main() {
                          !gf.get("structured_difficulty").get("value").has("historical_effort");
             report_test("C++ Golden Fixture 5: Structured Difficulty (No HE) Verified", sd_ok, 1.0, sd_ok ? 1.0 : 0.0);
         }
+
+        // Test 25: Repository Health V2 Mathematical Contract (Weights: 0.30 C90, 0.25 PR30, 0.25 AU90, 0.20 MA90)
+        issue_pilot::RepositoryHealthEvidenceV2 h_full;
+        h_full.c90_score = 100.0;
+        h_full.pr30_score = 80.0;
+        h_full.au90_score = 60.0;
+        h_full.ma90_score = 40.0;
+        // 0.30*100 + 0.25*80 + 0.25*60 + 0.20*40 = 30 + 20 + 15 + 8 = 73.0
+        double h_full_val = h_full.compute_health();
+        report_test("Repository Health V2 Full Weights Exact (73.0)", std::abs(h_full_val - 73.0) < 1e-6, 1.0, std::abs(h_full_val - 73.0) < 1e-6 ? 1.0 : 0.0);
+
+        // Missing sub-signal renormalization: e.g. ma90 unavailable
+        issue_pilot::RepositoryHealthEvidenceV2 h_missing_ma;
+        h_missing_ma.c90_score = 100.0;
+        h_missing_ma.pr30_score = 80.0;
+        h_missing_ma.au90_score = 60.0;
+        h_missing_ma.ma90_available = false;
+        // Remaining weights: 0.30 + 0.25 + 0.25 = 0.80. Weighted sum: 65.0. 65.0 / 0.80 = 81.25.
+        double h_renorm_val = h_missing_ma.compute_health();
+        report_test("Repository Health V2 Missing Sub-signal Renormalization (81.25)", std::abs(h_renorm_val - 81.25) < 1e-6, 1.0, std::abs(h_renorm_val - 81.25) < 1e-6 ? 1.0 : 0.0);
+
+        // Engine integration test: H evidence v2 feeds compute_scores correctly
+        issue_pilot::RankingEngine engine_h_test;
+        issue_pilot::IssueRecord cand_h_test;
+        cand_h_test.id = "test_repo_health";
+        cand_h_test.issue_url = "https://github.com/test/repo/issues/1";
+        cand_h_test.health_evidence_v2.available = true;
+        cand_h_test.health_evidence_v2.value = h_full;
+        cand_h_test.health_evidence_v2.confidence = 0.90;
+        cand_h_test.difficulty_evidence.available = true;
+        cand_h_test.responsiveness_evidence.available = true;
+        cand_h_test.freshness_evidence.available = true;
+
+        issue_pilot::ContributorProfile profile_h_test;
+        profile_h_test.user_id = "contrib_1";
+        profile_h_test.completed_count = 5;
+
+        auto comp_scores = engine_h_test.compute_scores(profile_h_test, cand_h_test);
+        report_test("Engine compute_scores uses calculate_repository_health_v2 (73.0)", std::abs(comp_scores.repository_health - 73.0) < 1e-6, 1.0, std::abs(comp_scores.repository_health - 73.0) < 1e-6 ? 1.0 : 0.0);
     }
 
     std::cout << "\nALL UNIT TEST CHECKS (INCLUDING PHASE 1 CONTRACTS) PASSED SUCCESSFULLY!\n";

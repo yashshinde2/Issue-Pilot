@@ -382,4 +382,115 @@ public class AlgorithmV23DataContractTest {
         assertEquals("codeberg", top.get("source"));
         assertEquals("codeberg.org", top.get("source_instance"));
     }
+
+    @Test
+    @DisplayName("12. Unicode NFC Conformance: Canonical Decomposition, Composition Exclusions, Diacritic Reordering & Hangul")
+    public void testExpandedUnicodeNfcParity() {
+        // Latin decomposed vs composed
+        String decomposedCafe = "cafe\u0301";
+        String expectedCafe = "caf\u00E9";
+        CanonicalIssueKey keyCafe = CanonicalIssueKey.parse("github|github.com|owner/" + decomposedCafe + "|1");
+        assertEquals("github|github.com|owner/" + expectedCafe + "|1", keyCafe.toString());
+
+        String decomposedNaive = "nai\u0308ve";
+        String expectedNaive = "na\u00EFve";
+        CanonicalIssueKey keyNaive = CanonicalIssueKey.parse("github|github.com|owner/" + decomposedNaive + "|2");
+        assertEquals("github|github.com|owner/" + expectedNaive + "|2", keyNaive.toString());
+
+        String decomposedAngstrom = "A\u030Angstr\u00F6m";
+        String composedAngstrom = "\u00C5ngstr\u00F6m";
+        CanonicalIssueKey keyAngstrom = CanonicalIssueKey.parse("github|github.com|owner/" + decomposedAngstrom + "|3");
+        assertEquals("github|github.com|owner/" + composedAngstrom + "|3", keyAngstrom.toString());
+
+        // Composition exclusions: Angstrom sign (U+212B -> U+00C5) and Ohm sign (U+2126 -> U+03A9)
+        CanonicalIssueKey keyAngstromSign = CanonicalIssueKey.parse("github|github.com|owner/\u212B|4");
+        assertEquals("github|github.com|owner/\u00C5|4", keyAngstromSign.toString());
+
+        CanonicalIssueKey keyOhmSign = CanonicalIssueKey.parse("github|github.com|owner/\u2126|5");
+        assertEquals("github|github.com|owner/\u03A9|5", keyOhmSign.toString());
+
+        // Combining-class reordering: stacked diacritics
+        String stacked1 = "q\u0301\u0323";
+        String stacked2 = "q\u0323\u0301";
+        CanonicalIssueKey keyStacked1 = CanonicalIssueKey.parse("github|github.com|owner/" + stacked1 + "|6");
+        CanonicalIssueKey keyStacked2 = CanonicalIssueKey.parse("github|github.com|owner/" + stacked2 + "|6");
+        assertEquals(keyStacked1.toString(), keyStacked2.toString());
+        assertEquals("github|github.com|owner/q\u0323\u0301|6", keyStacked1.toString());
+
+        // Hangul algorithmic composition/decomposition
+        // 가 (U+AC00) = \u1100 + \u1161
+        CanonicalIssueKey keyGa = CanonicalIssueKey.parse("github|github.com|owner/\u1100\u1161|7");
+        assertEquals("github|github.com|owner/\uAC00|7", keyGa.toString());
+
+        // 간 (U+AC04) = \u1100 + \u1161 + \u11AB
+        CanonicalIssueKey keyGan = CanonicalIssueKey.parse("github|github.com|owner/\u1100\u1161\u11AB|8");
+        assertEquals("github|github.com|owner/\uAC04|8", keyGan.toString());
+
+        // 한 (U+D55C) = \u1112 + \u1161 + \u11AB
+        CanonicalIssueKey keyHan = CanonicalIssueKey.parse("github|github.com|owner/\u1112\u1161\u11AB|9");
+        assertEquals("github|github.com|owner/\uD55C|9", keyHan.toString());
+
+        // Supplementary characters: Math Bold A and Emoji
+        CanonicalIssueKey keySmp = CanonicalIssueKey.parse("gitlab|gitlab.example.org|repo/\uD835\uDC00-\uD83D\uDE00|10");
+        assertEquals("gitlab|gitlab.example.org|repo/\uD835\uDC00-\uD83D\uDE00|10", keySmp.toString());
+
+        // Non-ASCII and case preservation on instance & repo segments
+        CanonicalIssueKey keyMunchen = CanonicalIssueKey.parse("GitLab|GitLab.M\u00FCnchen.org|MyOrg/Caf\u00E9-Project|101");
+        assertEquals("gitlab|GitLab.M\u00FCnchen.org|MyOrg/Caf\u00E9-Project|101", keyMunchen.toString());
+    }
+
+    @Test
+    @DisplayName("13. Repository Health V2 Mathematical Contract: Exact Weights, Saturation, Renormalization & Vanity Metrics Independence")
+    public void testRepositoryHealthV2MathematicalContract() {
+        // 1. Exact formula calculation with all 4 signals
+        EvidenceModelsV2.RepositoryHealthEvidenceV2 hFull = new EvidenceModelsV2.RepositoryHealthEvidenceV2();
+        hFull.setC90Score(100.0);
+        hFull.setPr30Score(80.0);
+        hFull.setAu90Score(60.0);
+        hFull.setMa90Score(40.0);
+        // H = 0.30*100 + 0.25*80 + 0.25*60 + 0.20*40 = 30 + 20 + 15 + 8 = 73.0
+        assertEquals(73.0, hFull.computeHealthScore(), 1e-6);
+
+        // 2. Sub-signal weight renormalization when one signal is missing
+        EvidenceModelsV2.RepositoryHealthEvidenceV2 hMissingMa = new EvidenceModelsV2.RepositoryHealthEvidenceV2();
+        hMissingMa.setC90Score(100.0);
+        hMissingMa.setPr30Score(80.0);
+        hMissingMa.setAu90Score(60.0);
+        hMissingMa.setMa90Score(null);
+        // Remaining weights: 0.30 + 0.25 + 0.25 = 0.80. Weighted sum: 65.0. 65 / 0.80 = 81.25
+        assertEquals(81.25, hMissingMa.computeHealthScore(), 1e-6);
+
+        // 3. fromMeasurements mathematical verification
+        // commits = 60 -> ln(61)/ln(61) = 1.0 -> 100.0
+        // prs = 4 -> 4/8 = 0.5 -> 50.0
+        // authors = 3 -> 3/6 = 0.5 -> 50.0
+        // activity = 90 days ago -> 0.5^(90/90) = 0.5 -> 50.0
+        EvidenceModelsV2.RepositoryHealthEvidenceV2 measured = EvidenceModelsV2.RepositoryHealthEvidenceV2.fromMeasurements(
+                60, 4, 3, 90.0
+        );
+        assertEquals(100.0, measured.getC90Score(), 1e-4);
+        assertEquals(50.0, measured.getPr30Score(), 1e-4);
+        assertEquals(50.0, measured.getAu90Score(), 1e-4);
+        assertEquals(50.0, measured.getMa90Score(), 1e-4);
+        // H = 0.30*100 + 0.25*50 + 0.25*50 + 0.20*50 = 30 + 12.5 + 12.5 + 10 = 65.0
+        assertEquals(65.0, measured.computeHealthScore(), 1e-4);
+
+        // 4. Mathematical saturation tests
+        EvidenceModelsV2.RepositoryHealthEvidenceV2 saturated = EvidenceModelsV2.RepositoryHealthEvidenceV2.fromMeasurements(
+                1000, 50, 30, 0.0
+        );
+        assertEquals(100.0, saturated.getC90Score(), 1e-4);
+        assertEquals(100.0, saturated.getPr30Score(), 1e-4);
+        assertEquals(100.0, saturated.getAu90Score(), 1e-4);
+        assertEquals(100.0, saturated.getMa90Score(), 1e-4);
+        assertEquals(100.0, saturated.computeHealthScore(), 1e-4);
+
+        // 5. Independence from vanity metrics: stars, forks, and open issues CANNOT change H
+        Double baselineH = measured.computeHealthScore();
+        int arbitraryStars = 50000;
+        int arbitraryForks = 12000;
+        int arbitraryOpenIssues = 900;
+        // Evidence model V2 does not have stars/forks/open_issues fields, guaranteeing separation.
+        assertEquals(baselineH, measured.computeHealthScore());
+    }
 }

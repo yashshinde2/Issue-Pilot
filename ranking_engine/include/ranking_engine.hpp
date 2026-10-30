@@ -33,6 +33,9 @@ public:
   double
   calculate_repository_health(const RepositoryHealthEvidence &evidence) const;
 
+  double
+  calculate_repository_health_v2(const RepositoryHealthEvidenceV2 &evidence) const;
+
   bool calculate_feedback(const ContributorProfile &profile,
                           double &out_feedback, double &out_acceptance,
                           double &out_completion) const;

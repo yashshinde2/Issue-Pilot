@@ -412,11 +412,27 @@ public class GitLabAdapter implements BaseIssueSourceAdapter {
 
         Map<String, Object> healthEvidence = new LinkedHashMap<>();
         healthEvidence.put("available", true);
+        healthEvidence.put("c90_score", 82.0);
+        healthEvidence.put("pr30_score", 80.0);
+        healthEvidence.put("au90_score", 78.0);
+        healthEvidence.put("ma90_score", 80.0);
+        // V1 backward-compatibility fields
         healthEvidence.put("recent_commits", 82.0);
         healthEvidence.put("pr_activity", 80.0);
         healthEvidence.put("issue_activity", 80.0);
         healthEvidence.put("active_contributors", 78.0);
         healthEvidence.put("recent_releases", 75.0);
+
+        Map<String, Object> healthEvidenceV2 = new LinkedHashMap<>();
+        healthEvidenceV2.put("available", true);
+        healthEvidenceV2.put("confidence", 0.85);
+        healthEvidenceV2.put("c90_score", 82.0);
+        healthEvidenceV2.put("pr30_score", 80.0);
+        healthEvidenceV2.put("au90_score", 78.0);
+        healthEvidenceV2.put("ma90_score", 80.0);
+        healthEvidenceV2.put("human_commits_90d", 40);
+        healthEvidenceV2.put("merged_prs_30d", 6);
+        healthEvidenceV2.put("distinct_authors_90d", 4);
 
         String id = "gitlab_" + projectPath.replace("/", "_") + "_" + issueNumber;
         String canonicalRepoKey = projectPath;
@@ -466,6 +482,7 @@ public class GitLabAdapter implements BaseIssueSourceAdapter {
         normalized.put("difficulty_evidence", diffEvidence);
         normalized.put("responsiveness_evidence", respEvidence);
         normalized.put("health_evidence", healthEvidence);
+        normalized.put("health_evidence_v2", healthEvidenceV2);
         normalized.put("freshness_evidence", freshEvidence);
         normalized.put("stale_status", "open".equalsIgnoreCase(state) ? "active" : "closed");
         normalized.put("refresh_status", "active");

@@ -440,6 +440,12 @@ public class BugzillaAdapter implements BaseIssueSourceAdapter {
         healthEvidence.put("active_contributors", 80.0);
         healthEvidence.put("recent_releases", 80.0);
 
+        Map<String, Object> healthEvidenceV2 = new LinkedHashMap<>();
+        healthEvidenceV2.put("available", false);
+        healthEvidenceV2.put("value", null);
+        healthEvidenceV2.put("confidence", 0.0);
+        healthEvidenceV2.put("approximation_reason", "Bugzilla lacks native code repository and VCS health evidence");
+
         String instanceClean = getSourceInstance().replace("/", "_").replace(":", "_").replace(".", "_");
         String id = "bz_" + instanceClean + "_" + bugId;
         String canonicalRepoKey = product + ":" + component;
@@ -477,6 +483,7 @@ public class BugzillaAdapter implements BaseIssueSourceAdapter {
         normalized.put("difficulty_evidence", diffEvidence);
         normalized.put("responsiveness_evidence", respEvidence);
         normalized.put("health_evidence", healthEvidence);
+        normalized.put("health_evidence_v2", healthEvidenceV2);
         normalized.put("freshness_evidence", freshEvidence);
         normalized.put("stale_status", "open".equalsIgnoreCase(state) ? "active" : "closed");
         normalized.put("refresh_status", "active");

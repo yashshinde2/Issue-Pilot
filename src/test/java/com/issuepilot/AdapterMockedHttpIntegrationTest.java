@@ -389,4 +389,102 @@ public class AdapterMockedHttpIntegrationTest {
             assertEquals("closed", norm.get("state"), "Status " + status + " with resolution FIXED must map to closed");
         }
     }
+
+    // ==============================================================
+    // 5. Cross-Platform Pagination Completeness Verification Tests
+    // ==============================================================
+
+    @Test
+    @DisplayName("Pagination: GitHub & Codeberg Link Header Completeness Semantics")
+    public void testGitHubAndCodebergPaginationCompleteness() {
+        // 1. Single page response without Link header: Complete
+        var singlePage = PaginationCompletenessValidator.evaluateGitHubLinkPagination(null, 15, 30, false, 200);
+        assertTrue(singlePage.isComplete(), "Single-page response without Link header must be complete");
+        assertFalse(singlePage.hasMorePages());
+        assertEquals(15, singlePage.itemsRetrieved());
+
+        // 2. Active pagination with rel="next": In progress (incomplete)
+        String linkWithNext = "<https://api.github.com/issues?page=2>; rel=\"next\", <https://api.github.com/issues?page=5>; rel=\"last\"";
+        var inProgress = PaginationCompletenessValidator.evaluateGitHubLinkPagination(linkWithNext, 30, 30, false, 200);
+        assertFalse(inProgress.isComplete(), "Responses with rel=\"next\" are not complete");
+        assertTrue(inProgress.hasMorePages());
+
+        // 3. Multi-page final page without rel="next": Complete
+        String finalPageLink = "<https://api.github.com/issues?page=4>; rel=\"prev\", <https://api.github.com/issues?page=1>; rel=\"first\"";
+        var multiPageFinal = PaginationCompletenessValidator.evaluateGitHubLinkPagination(finalPageLink, 12, 30, false, 200);
+        assertTrue(multiPageFinal.isComplete(), "Terminal page lacking rel=\"next\" must be complete");
+        assertFalse(multiPageFinal.hasMorePages());
+
+        // 4. Malformed Link header: Incomplete / malformed
+        var malformed = PaginationCompletenessValidator.evaluateGitHubLinkPagination("not-a-valid-link-header", 10, 30, false, 200);
+        assertFalse(malformed.isComplete(), "Malformed link header must produce isComplete = false");
+
+        // 5. Interrupted or rate-limited traversal: Incomplete
+        var rateLimited = PaginationCompletenessValidator.evaluateGitHubLinkPagination(linkWithNext, 30, 30, false, 429);
+        assertFalse(rateLimited.isComplete(), "Rate limited response must produce isComplete = false");
+
+        var interrupted = PaginationCompletenessValidator.evaluateGitHubLinkPagination(linkWithNext, 30, 30, true, 200);
+        assertFalse(interrupted.isComplete(), "Interrupted loop must produce isComplete = false");
+    }
+
+    @Test
+    @DisplayName("Pagination: GitLab X-Next-Page Header Completeness Semantics")
+    public void testGitLabPaginationCompleteness() {
+        // 1. Single page or final page (null or empty X-Next-Page): Complete
+        var completeNull = PaginationCompletenessValidator.evaluateGitLabPagination(null, 25, false, 200);
+        assertTrue(completeNull.isComplete());
+        assertFalse(completeNull.hasMorePages());
+
+        var completeEmpty = PaginationCompletenessValidator.evaluateGitLabPagination("", 25, false, 200);
+        assertTrue(completeEmpty.isComplete());
+
+        var completeZero = PaginationCompletenessValidator.evaluateGitLabPagination("0", 25, false, 200);
+        assertTrue(completeZero.isComplete());
+
+        // 2. Active pagination with next page: In progress
+        var inProgress = PaginationCompletenessValidator.evaluateGitLabPagination("2", 100, false, 200);
+        assertFalse(inProgress.isComplete());
+        assertTrue(inProgress.hasMorePages());
+
+        // 3. Malformed non-numeric X-Next-Page: Incomplete
+        var malformed = PaginationCompletenessValidator.evaluateGitLabPagination("invalid-page-token", 50, false, 200);
+        assertFalse(malformed.isComplete());
+
+        // 4. Rate-limited or interrupted: Incomplete
+        var rateLimited = PaginationCompletenessValidator.evaluateGitLabPagination("2", 100, false, 429);
+        assertFalse(rateLimited.isComplete());
+
+        var interrupted = PaginationCompletenessValidator.evaluateGitLabPagination("2", 100, true, 200);
+        assertFalse(interrupted.isComplete());
+    }
+
+    @Test
+    @DisplayName("Pagination: Bugzilla Offset/Limit/TotalMatches Completeness Semantics")
+    public void testBugzillaPaginationCompleteness() {
+        // 1. Complete single page: items >= total matches
+        var complete = PaginationCompletenessValidator.evaluateBugzillaPagination(0, 50, 20, 20, false, 200);
+        assertTrue(complete.isComplete());
+        assertFalse(complete.hasMorePages());
+
+        // 2. Complete multi-page exhaustion: offset + items == total matches
+        var multiComplete = PaginationCompletenessValidator.evaluateBugzillaPagination(40, 20, 55, 15, false, 200);
+        assertTrue(multiComplete.isComplete());
+        assertFalse(multiComplete.hasMorePages());
+
+        // 3. In progress: offset + items < total matches
+        var inProgress = PaginationCompletenessValidator.evaluateBugzillaPagination(0, 20, 55, 20, false, 200);
+        assertFalse(inProgress.isComplete());
+        assertTrue(inProgress.hasMorePages());
+
+        // 4. Malformed parameters: null or negative offset
+        var malformed = PaginationCompletenessValidator.evaluateBugzillaPagination(null, 20, 55, 20, false, 200);
+        assertFalse(malformed.isComplete());
+
+        // 5. Interrupted or error: Incomplete
+        var httpError = PaginationCompletenessValidator.evaluateBugzillaPagination(0, 20, 55, 20, false, 401);
+        assertFalse(httpError.isComplete());
+
+        var interrupted = PaginationCompletenessValidator.evaluateBugzillaPagination(0, 20, 55, 20, true, 200);
+        assertFalse(interrupted.isComplete());
+    }
 }

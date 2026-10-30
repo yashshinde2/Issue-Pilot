@@ -161,6 +161,21 @@ struct RepositoryHealthEvidenceV2 {
     double pr30_score{80.0};
     double au90_score{80.0};
     double ma90_score{80.0};
+    bool c90_available{true};
+    bool pr30_available{true};
+    bool au90_available{true};
+    bool ma90_available{true};
+
+    double compute_health() const {
+        double sum_w = 0.0;
+        double w_val = 0.0;
+        if (c90_available) { w_val += 0.30 * c90_score; sum_w += 0.30; }
+        if (pr30_available) { w_val += 0.25 * pr30_score; sum_w += 0.25; }
+        if (au90_available) { w_val += 0.25 * au90_score; sum_w += 0.25; }
+        if (ma90_available) { w_val += 0.20 * ma90_score; sum_w += 0.20; }
+        if (sum_w <= 0.0) return 0.0;
+        return w_val / sum_w;
+    }
 };
 
 // V2.3 Freshness Evidence: AgeScore (40%), ActivityScore (60%)

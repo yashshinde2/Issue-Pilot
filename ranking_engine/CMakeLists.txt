@@ -1,9 +1,11 @@
 cmake_minimum_required(VERSION 3.10)
-project(IssuePilotRankingEngine VERSION 1.0.0 LANGUAGES CXX)
+project(IssuePilotRankingEngine VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+add_definitions(-DUTF8PROC_STATIC)
 
 include_directories(include)
 
@@ -12,6 +14,7 @@ add_library(ranking_engine_lib STATIC
     src/evaluation.cpp
     src/json_adapter.cpp
     src/vote_affinity.cpp
+    src/utf8proc.c
 )
 
 add_executable(issue_pilot_ranking_engine

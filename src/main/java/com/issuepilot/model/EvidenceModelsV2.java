@@ -157,6 +157,59 @@ public final class EvidenceModelsV2 {
 
         public Integer getDistinctAuthors90d() { return distinctAuthors90d; }
         public void setDistinctAuthors90d(Integer distinctAuthors90d) { this.distinctAuthors90d = distinctAuthors90d; }
+
+        /**
+         * Computes the V2.3 aggregated repository health score H conforming to Section 8:
+         * H = 0.30 * C90 + 0.25 * PR30 + 0.25 * AU90 + 0.20 * MA90.
+         * Renormalizes across available sub-signals if any are missing.
+         */
+        public Double computeHealthScore() {
+            double sumWeights = 0.0;
+            double weightedSum = 0.0;
+            if (c90Score != null && !Double.isNaN(c90Score)) {
+                weightedSum += 0.30 * Math.max(0.0, Math.min(100.0, c90Score));
+                sumWeights += 0.30;
+            }
+            if (pr30Score != null && !Double.isNaN(pr30Score)) {
+                weightedSum += 0.25 * Math.max(0.0, Math.min(100.0, pr30Score));
+                sumWeights += 0.25;
+            }
+            if (au90Score != null && !Double.isNaN(au90Score)) {
+                weightedSum += 0.25 * Math.max(0.0, Math.min(100.0, au90Score));
+                sumWeights += 0.25;
+            }
+            if (ma90Score != null && !Double.isNaN(ma90Score)) {
+                weightedSum += 0.20 * Math.max(0.0, Math.min(100.0, ma90Score));
+                sumWeights += 0.20;
+            }
+            if (sumWeights <= 0.0) return null;
+            return weightedSum / sumWeights;
+        }
+
+        public static RepositoryHealthEvidenceV2 fromMeasurements(
+                Integer humanCommits90d,
+                Integer mergedPrs30d,
+                Integer distinctAuthors90d,
+                Double daysSinceCodeActivity
+        ) {
+            RepositoryHealthEvidenceV2 h = new RepositoryHealthEvidenceV2();
+            if (humanCommits90d != null) {
+                h.setHumanCommits90d(humanCommits90d);
+                h.setC90Score(100.0 * Math.min(1.0, Math.log(1.0 + Math.max(0, humanCommits90d)) / Math.log(61.0)));
+            }
+            if (mergedPrs30d != null) {
+                h.setMergedPrs30d(mergedPrs30d);
+                h.setPr30Score(100.0 * Math.min(1.0, Math.max(0, mergedPrs30d) / 8.0));
+            }
+            if (distinctAuthors90d != null) {
+                h.setDistinctAuthors90d(distinctAuthors90d);
+                h.setAu90Score(100.0 * Math.min(1.0, Math.max(0, distinctAuthors90d) / 6.0));
+            }
+            if (daysSinceCodeActivity != null) {
+                h.setMa90Score(100.0 * Math.pow(0.5, Math.max(0.0, daysSinceCodeActivity) / 90.0));
+            }
+            return h;
+        }
     }
 
     /**

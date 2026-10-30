@@ -150,7 +150,21 @@ bool JsonAdapter::parse_request(const std::string& json_str,
                 issue.responsiveness_evidence.recent_maintainer_act = r.get("recent_maintainer_act").as_double(80.0);
             }
 
-            // Health Evidence
+            // Health Evidence (V2 & V1)
+            if (item.has("health_evidence_v2")) {
+                const auto& h2 = item.get("health_evidence_v2");
+                issue.health_evidence_v2.available = h2.get("available").as_bool(true);
+                issue.health_evidence_v2.confidence = h2.get("confidence").as_double(1.0);
+                const auto& val = h2.has("value") ? h2.get("value") : h2;
+                issue.health_evidence_v2.value.c90_available = val.has("c90_score");
+                issue.health_evidence_v2.value.pr30_available = val.has("pr30_score");
+                issue.health_evidence_v2.value.au90_available = val.has("au90_score");
+                issue.health_evidence_v2.value.ma90_available = val.has("ma90_score");
+                issue.health_evidence_v2.value.c90_score = val.get("c90_score").as_double(80.0);
+                issue.health_evidence_v2.value.pr30_score = val.get("pr30_score").as_double(80.0);
+                issue.health_evidence_v2.value.au90_score = val.get("au90_score").as_double(80.0);
+                issue.health_evidence_v2.value.ma90_score = val.get("ma90_score").as_double(80.0);
+            }
             if (item.has("health_evidence")) {
                 const auto& h = item.get("health_evidence");
                 issue.health_evidence.available = h.get("available").as_bool(true);
@@ -159,6 +173,17 @@ bool JsonAdapter::parse_request(const std::string& json_str,
                 issue.health_evidence.issue_activity = h.get("issue_activity").as_double(80.0);
                 issue.health_evidence.active_contributors = h.get("active_contributors").as_double(80.0);
                 issue.health_evidence.recent_releases = h.get("recent_releases").as_double(80.0);
+                if (h.has("c90_score") || h.has("pr30_score") || h.has("au90_score") || h.has("ma90_score")) {
+                    issue.health_evidence_v2.available = h.get("available").as_bool(true);
+                    issue.health_evidence_v2.value.c90_available = h.has("c90_score");
+                    issue.health_evidence_v2.value.pr30_available = h.has("pr30_score");
+                    issue.health_evidence_v2.value.au90_available = h.has("au90_score");
+                    issue.health_evidence_v2.value.ma90_available = h.has("ma90_score");
+                    issue.health_evidence_v2.value.c90_score = h.get("c90_score").as_double(80.0);
+                    issue.health_evidence_v2.value.pr30_score = h.get("pr30_score").as_double(80.0);
+                    issue.health_evidence_v2.value.au90_score = h.get("au90_score").as_double(80.0);
+                    issue.health_evidence_v2.value.ma90_score = h.get("ma90_score").as_double(80.0);
+                }
             }
 
             // Freshness Evidence

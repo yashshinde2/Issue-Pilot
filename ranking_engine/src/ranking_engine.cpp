@@ -55,6 +55,11 @@ double RankingEngine::calculate_repository_health(const RepositoryHealthEvidence
     return std::max(0.0, std::min(100.0, h));
 }
 
+double RankingEngine::calculate_repository_health_v2(const RepositoryHealthEvidenceV2& evidence) const {
+    double h = evidence.compute_health();
+    return std::max(0.0, std::min(100.0, h));
+}
+
 bool RankingEngine::calculate_feedback(const ContributorProfile& profile,
                                       double& out_feedback,
                                       double& out_acceptance,
@@ -118,10 +123,14 @@ ComponentScores RankingEngine::compute_scores(const ContributorProfile& profile,
     }
 
     // H
-    s.health_available = issue.health_evidence.available;
-    if (s.health_available) {
+    if (issue.health_evidence_v2.available) {
+        s.health_available = true;
+        s.repository_health = calculate_repository_health_v2(issue.health_evidence_v2.value);
+    } else if (issue.health_evidence.available) {
+        s.health_available = true;
         s.repository_health = calculate_repository_health(issue.health_evidence);
     } else {
+        s.health_available = false;
         s.missing_components.push_back("Repository Health");
     }
 

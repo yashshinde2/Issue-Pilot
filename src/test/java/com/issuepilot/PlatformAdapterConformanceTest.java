@@ -73,6 +73,19 @@ public class PlatformAdapterConformanceTest {
         assertTrue((Boolean) normalized.get("is_maintainer"));
         assertFalse((Boolean) normalized.get("is_author_bot"));
 
+        // Repository Health V2 Conformance (0.30 C90, 0.25 PR30, 0.25 AU90, 0.20 MA90)
+        @SuppressWarnings("unchecked")
+        Map<String, Object> ghHealthV2 = (Map<String, Object>) normalized.get("health_evidence_v2");
+        assertNotNull(ghHealthV2, "GitHub health_evidence_v2 envelope must be present");
+        assertTrue((Boolean) ghHealthV2.get("available"));
+        assertNotNull(ghHealthV2.get("c90_score"));
+        assertNotNull(ghHealthV2.get("pr30_score"));
+        assertNotNull(ghHealthV2.get("au90_score"));
+        assertNotNull(ghHealthV2.get("ma90_score"));
+        assertFalse(ghHealthV2.containsKey("stars"), "stars vanity metric must not be in H scoring evidence");
+        assertFalse(ghHealthV2.containsKey("forks"), "forks vanity metric must not be in H scoring evidence");
+        assertFalse(ghHealthV2.containsKey("open_issues"), "open_issues must not be in H scoring evidence");
+
         // Pull request exclusion
         Map<String, Object> prItem = new HashMap<>(raw);
         prItem.put("pull_request", Map.of("url", "https://api.github.com/repos/k8s/k8s/pulls/42"));
@@ -106,6 +119,19 @@ public class PlatformAdapterConformanceTest {
         assertEquals("open", normalized.get("state"));
         assertEquals(5, normalized.get("comment_count"));
 
+        // GitLab Repository Health V2 Conformance
+        @SuppressWarnings("unchecked")
+        Map<String, Object> glHealthV2 = (Map<String, Object>) normalized.get("health_evidence_v2");
+        assertNotNull(glHealthV2, "GitLab health_evidence_v2 envelope must be present");
+        assertTrue((Boolean) glHealthV2.get("available"));
+        assertNotNull(glHealthV2.get("c90_score"));
+        assertNotNull(glHealthV2.get("pr30_score"));
+        assertNotNull(glHealthV2.get("au90_score"));
+        assertNotNull(glHealthV2.get("ma90_score"));
+        assertFalse(glHealthV2.containsKey("stars"));
+        assertFalse(glHealthV2.containsKey("forks"));
+        assertFalse(glHealthV2.containsKey("open_issues"));
+
         // Self-hosted GitLab distinction test
         CanonicalIssueKey publicGitLab = CanonicalIssueKey.parse("gitlab|gitlab.com|inkscape/inkscape|100");
         CanonicalIssueKey selfGitLab = CanonicalIssueKey.parse("gitlab|gitlab.gnome.org|inkscape/inkscape|100");
@@ -133,6 +159,19 @@ public class PlatformAdapterConformanceTest {
         assertEquals(88, normalized.get("issue_number"));
         assertEquals("open", normalized.get("state"));
         assertFalse((Boolean) normalized.get("is_assigned"));
+
+        // Codeberg Repository Health V2 Conformance
+        @SuppressWarnings("unchecked")
+        Map<String, Object> cbHealthV2 = (Map<String, Object>) normalized.get("health_evidence_v2");
+        assertNotNull(cbHealthV2, "Codeberg health_evidence_v2 envelope must be present");
+        assertTrue((Boolean) cbHealthV2.get("available"));
+        assertNotNull(cbHealthV2.get("c90_score"));
+        assertNotNull(cbHealthV2.get("pr30_score"));
+        assertNotNull(cbHealthV2.get("au90_score"));
+        assertNotNull(cbHealthV2.get("ma90_score"));
+        assertFalse(cbHealthV2.containsKey("stars"));
+        assertFalse(cbHealthV2.containsKey("forks"));
+        assertFalse(cbHealthV2.containsKey("open_issues"));
 
         // Bot author detection
         Map<String, Object> botItem = new HashMap<>(raw);
@@ -178,6 +217,14 @@ public class PlatformAdapterConformanceTest {
         Map<String, Object> health = (Map<String, Object>) normalized.get("health_evidence");
         assertNotNull(health);
         assertFalse((Boolean) health.get("available"), "Bugzilla repository health must be unavailable without verified code host link");
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> healthV2 = (Map<String, Object>) normalized.get("health_evidence_v2");
+        assertNotNull(healthV2, "Bugzilla health_evidence_v2 envelope must be present");
+        assertFalse((Boolean) healthV2.get("available"), "Bugzilla health_evidence_v2 must be unavailable");
+        assertNull(healthV2.get("value"), "Unavailable health_evidence_v2 must have null value");
+        assertEquals(0.0, ((Number) healthV2.get("confidence")).doubleValue(), 1e-6);
+        assertNotNull(healthV2.get("approximation_reason"));
     }
 
     @Test
