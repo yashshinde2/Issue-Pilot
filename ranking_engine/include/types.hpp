@@ -379,6 +379,31 @@ struct ResponsivenessEvidenceV2 {
 
   bool pagination_complete{true};
   bool role_mapping_verified{true};
+  std::string source;
+  double source_cap{1.0};
+
+  static double resolve_source_cap(const std::string& src, double explicit_cap = 1.0) {
+    if (explicit_cap < 1.0 - 1e-9) {
+      if (explicit_cap < 0.0 || !std::isfinite(explicit_cap)) {
+        throw std::invalid_argument("Invalid explicit source cap");
+      }
+      return explicit_cap;
+    }
+    if (src.empty()) return 1.0;
+    std::string s = to_lower_str(trim_str(src));
+    if (s == "github") return 0.90;
+    if (s == "gitlab") return 0.85;
+    if (s == "forgejo" || s == "gitea") return 0.80;
+    if (s == "bugzilla") return 0.70;
+    if (s == "inferred" || s == "inferred_proxy" || s == "proxy") return 0.50;
+    return 1.0;
+  }
+
+  static double calculate_signal_confidence(const std::string& src, double explicit_cap, double c_sample, double c_coverage, double c_directness) {
+    double cap = resolve_source_cap(src, explicit_cap);
+    double raw = c_sample * c_coverage * c_directness;
+    return std::min(cap, std::max(0.0, raw));
+  }
 
   static constexpr double CLOCK_SKEW_TOLERANCE_DAYS = 0.001; // ~86.4 seconds
 
@@ -450,6 +475,7 @@ struct ResponsivenessEvidenceV2 {
       return ResponsivenessComputationResult::unavailable(0.0, 0, "Comment pagination incomplete.");
     }
 
+    double cap = resolve_source_cap(source, source_cap);
     double a_r = 0.0;
     double weighted_sum = 0.0;
     double conf_sum = 0.0;
@@ -460,9 +486,10 @@ struct ResponsivenessEvidenceV2 {
       if (rt_confidence < 0.0 || rt_confidence > 1.0 || !std::isfinite(rt_confidence)) {
         throw std::invalid_argument("Invalid RT confidence");
       }
+      double c = std::min(cap, rt_confidence);
       a_r += 0.30;
       weighted_sum += 0.30 * std::max(0.0, std::min(100.0, response_time_score));
-      conf_sum += 0.30 * rt_confidence;
+      conf_sum += 0.30 * c;
       count++;
     }
 
@@ -471,9 +498,10 @@ struct ResponsivenessEvidenceV2 {
       if (rr_confidence < 0.0 || rr_confidence > 1.0 || !std::isfinite(rr_confidence)) {
         throw std::invalid_argument("Invalid RR confidence");
       }
+      double c = std::min(cap, rr_confidence);
       a_r += 0.30;
       weighted_sum += 0.30 * std::max(0.0, std::min(100.0, response_rate_score));
-      conf_sum += 0.30 * rr_confidence;
+      conf_sum += 0.30 * c;
       count++;
     }
 
@@ -482,9 +510,10 @@ struct ResponsivenessEvidenceV2 {
       if (pr_confidence < 0.0 || pr_confidence > 1.0 || !std::isfinite(pr_confidence)) {
         throw std::invalid_argument("Invalid PR confidence");
       }
+      double c = std::min(cap, pr_confidence);
       a_r += 0.25;
       weighted_sum += 0.25 * std::max(0.0, std::min(100.0, pr_review_score));
-      conf_sum += 0.25 * pr_confidence;
+      conf_sum += 0.25 * c;
       count++;
     }
 
@@ -493,9 +522,10 @@ struct ResponsivenessEvidenceV2 {
       if (ma_confidence < 0.0 || ma_confidence > 1.0 || !std::isfinite(ma_confidence)) {
         throw std::invalid_argument("Invalid MA confidence");
       }
+      double c = std::min(cap, ma_confidence);
       a_r += 0.15;
       weighted_sum += 0.15 * std::max(0.0, std::min(100.0, recent_maintainer_act));
-      conf_sum += 0.15 * ma_confidence;
+      conf_sum += 0.15 * c;
       count++;
     }
 
@@ -555,6 +585,16 @@ struct RepositoryHealthEvidenceV2 {
   double ma90_confidence{1.0};
 
   bool code_host_available{true};
+  std::string source;
+  double source_cap{1.0};
+
+  static double resolve_source_cap(const std::string& src, double explicit_cap = 1.0) {
+    return ResponsivenessEvidenceV2::resolve_source_cap(src, explicit_cap);
+  }
+
+  static double calculate_signal_confidence(const std::string& src, double explicit_cap, double c_sample, double c_coverage, double c_directness) {
+    return ResponsivenessEvidenceV2::calculate_signal_confidence(src, explicit_cap, c_sample, c_coverage, c_directness);
+  }
 
   static double calculate_c90_score(int human_commits_90d) {
     return 100.0 * std::min(1.0, std::log(1.0 + std::max(0, human_commits_90d)) / std::log(61.0));
@@ -588,6 +628,7 @@ struct RepositoryHealthEvidenceV2 {
       return HealthComputationResult::unavailable(0.0, 0, "Direct code-host evidence unavailable (Bugzilla H unavailable).");
     }
 
+    double cap = resolve_source_cap(source, source_cap);
     double a_h = 0.0;
     double weighted_sum = 0.0;
     double conf_sum = 0.0;
@@ -598,9 +639,10 @@ struct RepositoryHealthEvidenceV2 {
       if (c90_confidence < 0.0 || c90_confidence > 1.0 || !std::isfinite(c90_confidence)) {
         throw std::invalid_argument("Invalid C90 confidence");
       }
+      double c = std::min(cap, c90_confidence);
       a_h += 0.30;
       weighted_sum += 0.30 * std::max(0.0, std::min(100.0, c90_score));
-      conf_sum += 0.30 * c90_confidence;
+      conf_sum += 0.30 * c;
       count++;
     }
 
@@ -609,9 +651,10 @@ struct RepositoryHealthEvidenceV2 {
       if (pr30_confidence < 0.0 || pr30_confidence > 1.0 || !std::isfinite(pr30_confidence)) {
         throw std::invalid_argument("Invalid PR30 confidence");
       }
+      double c = std::min(cap, pr30_confidence);
       a_h += 0.25;
       weighted_sum += 0.25 * std::max(0.0, std::min(100.0, pr30_score));
-      conf_sum += 0.25 * pr30_confidence;
+      conf_sum += 0.25 * c;
       count++;
     }
 
@@ -620,9 +663,10 @@ struct RepositoryHealthEvidenceV2 {
       if (au90_confidence < 0.0 || au90_confidence > 1.0 || !std::isfinite(au90_confidence)) {
         throw std::invalid_argument("Invalid AU90 confidence");
       }
+      double c = std::min(cap, au90_confidence);
       a_h += 0.25;
       weighted_sum += 0.25 * std::max(0.0, std::min(100.0, au90_score));
-      conf_sum += 0.25 * au90_confidence;
+      conf_sum += 0.25 * c;
       count++;
     }
 
@@ -631,9 +675,10 @@ struct RepositoryHealthEvidenceV2 {
       if (ma90_confidence < 0.0 || ma90_confidence > 1.0 || !std::isfinite(ma90_confidence)) {
         throw std::invalid_argument("Invalid MA90 confidence");
       }
+      double c = std::min(cap, ma90_confidence);
       a_h += 0.20;
       weighted_sum += 0.20 * std::max(0.0, std::min(100.0, ma90_score));
-      conf_sum += 0.20 * ma90_confidence;
+      conf_sum += 0.20 * c;
       count++;
     }
 

@@ -483,6 +483,53 @@ public final class EvidenceModelsV2 {
         @JsonProperty("role_mapping_verified")
         private Boolean roleMappingVerified = true;
 
+        @JsonProperty("source")
+        private String source;
+
+        @JsonProperty("source_cap")
+        private Double sourceCap;
+
+        public static double resolveSourceCap(String source, Double explicitCap) {
+            if (explicitCap != null) {
+                if (explicitCap < 0.0 || explicitCap > 1.0 || !Double.isFinite(explicitCap)) {
+                    throw new IllegalArgumentException("Invalid explicit source cap: " + explicitCap);
+                }
+                return explicitCap;
+            }
+            if (source == null) return 1.0;
+            String s = source.trim().toLowerCase(java.util.Locale.ROOT);
+            return switch (s) {
+                case "github" -> 0.90;
+                case "gitlab" -> 0.85;
+                case "forgejo", "gitea" -> 0.80;
+                case "bugzilla" -> 0.70;
+                case "inferred", "inferred_proxy", "proxy" -> 0.50;
+                default -> 1.0;
+            };
+        }
+
+        public static double calculateSignalConfidence(String source, Double explicitCap, double cSample, double cCoverage, double cDirectness) {
+            double cap = resolveSourceCap(source, explicitCap);
+            double raw = cSample * cCoverage * cDirectness;
+            return Math.min(cap, Math.max(0.0, raw));
+        }
+
+        public String getSource() {
+            return source;
+        }
+
+        public void setSource(String source) {
+            this.source = source;
+        }
+
+        public Double getSourceCap() {
+            return sourceCap;
+        }
+
+        public void setSourceCap(Double sourceCap) {
+            this.sourceCap = sourceCap;
+        }
+
         public static final double CLOCK_SKEW_TOLERANCE_DAYS = 0.001; // ~86.4 seconds
 
         public record IssueResponseEvent(double ageHours, Double firstReplyHours, boolean completeObservation) {
@@ -563,6 +610,7 @@ public final class EvidenceModelsV2 {
                 return ResponsivenessComputationResult.unavailable(0.0, 0, "Comment pagination incomplete.");
             }
 
+            double cap = resolveSourceCap(source, sourceCap);
             double aR = 0.0;
             double weightedSum = 0.0;
             double confSum = 0.0;
@@ -572,9 +620,10 @@ public final class EvidenceModelsV2 {
             boolean rtOk = (rtAvailable == null || Boolean.TRUE.equals(rtAvailable)) && responseTimeScore != null
                     && (rtSamples == null || rtSamples >= 5);
             if (rtOk) {
-                double cRt = rtConfidence != null ? rtConfidence : 1.0;
-                if (cRt < 0.0 || cRt > 1.0 || !Double.isFinite(cRt))
-                    throw new IllegalArgumentException("Invalid RT confidence: " + cRt);
+                double rawC = rtConfidence != null ? rtConfidence : 1.0;
+                if (rawC < 0.0 || rawC > 1.0 || !Double.isFinite(rawC))
+                    throw new IllegalArgumentException("Invalid RT confidence: " + rawC);
+                double cRt = Math.min(cap, rawC);
                 aR += 0.30;
                 weightedSum += 0.30 * Math.max(0.0, Math.min(100.0, responseTimeScore));
                 confSum += 0.30 * cRt;
@@ -585,9 +634,10 @@ public final class EvidenceModelsV2 {
             boolean rrOk = (rrAvailable == null || Boolean.TRUE.equals(rrAvailable)) && responseRateScore != null
                     && (rrSamples == null || rrSamples >= 5);
             if (rrOk) {
-                double cRr = rrConfidence != null ? rrConfidence : 1.0;
-                if (cRr < 0.0 || cRr > 1.0 || !Double.isFinite(cRr))
-                    throw new IllegalArgumentException("Invalid RR confidence: " + cRr);
+                double rawC = rrConfidence != null ? rrConfidence : 1.0;
+                if (rawC < 0.0 || rawC > 1.0 || !Double.isFinite(rawC))
+                    throw new IllegalArgumentException("Invalid RR confidence: " + rawC);
+                double cRr = Math.min(cap, rawC);
                 aR += 0.30;
                 weightedSum += 0.30 * Math.max(0.0, Math.min(100.0, responseRateScore));
                 confSum += 0.30 * cRr;
@@ -598,9 +648,10 @@ public final class EvidenceModelsV2 {
             boolean prOk = (prAvailable == null || Boolean.TRUE.equals(prAvailable)) && prReviewScore != null
                     && (prSamples == null || prSamples >= 5);
             if (prOk) {
-                double cPr = prConfidence != null ? prConfidence : 1.0;
-                if (cPr < 0.0 || cPr > 1.0 || !Double.isFinite(cPr))
-                    throw new IllegalArgumentException("Invalid PR confidence: " + cPr);
+                double rawC = prConfidence != null ? prConfidence : 1.0;
+                if (rawC < 0.0 || rawC > 1.0 || !Double.isFinite(rawC))
+                    throw new IllegalArgumentException("Invalid PR confidence: " + rawC);
+                double cPr = Math.min(cap, rawC);
                 aR += 0.25;
                 weightedSum += 0.25 * Math.max(0.0, Math.min(100.0, prReviewScore));
                 confSum += 0.25 * cPr;
@@ -611,9 +662,10 @@ public final class EvidenceModelsV2 {
             boolean maOk = (maAvailable == null || Boolean.TRUE.equals(maAvailable)) && recentMaintainerAct != null
                     && (maSamples == null || maSamples >= 5);
             if (maOk) {
-                double cMa = maConfidence != null ? maConfidence : 1.0;
-                if (cMa < 0.0 || cMa > 1.0 || !Double.isFinite(cMa))
-                    throw new IllegalArgumentException("Invalid MA confidence: " + cMa);
+                double rawC = maConfidence != null ? maConfidence : 1.0;
+                if (rawC < 0.0 || rawC > 1.0 || !Double.isFinite(rawC))
+                    throw new IllegalArgumentException("Invalid MA confidence: " + rawC);
+                double cMa = Math.min(cap, rawC);
                 aR += 0.15;
                 weightedSum += 0.15 * Math.max(0.0, Math.min(100.0, recentMaintainerAct));
                 confSum += 0.15 * cMa;
@@ -864,6 +916,36 @@ public final class EvidenceModelsV2 {
         @JsonProperty("code_host_available")
         private Boolean codeHostAvailable = true;
 
+        @JsonProperty("source")
+        private String source;
+
+        @JsonProperty("source_cap")
+        private Double sourceCap;
+
+        public static double resolveSourceCap(String source, Double explicitCap) {
+            return ResponsivenessEvidenceV2.resolveSourceCap(source, explicitCap);
+        }
+
+        public static double calculateSignalConfidence(String source, Double explicitCap, double cSample, double cCoverage, double cDirectness) {
+            return ResponsivenessEvidenceV2.calculateSignalConfidence(source, explicitCap, cSample, cCoverage, cDirectness);
+        }
+
+        public String getSource() {
+            return source;
+        }
+
+        public void setSource(String source) {
+            this.source = source;
+        }
+
+        public Double getSourceCap() {
+            return sourceCap;
+        }
+
+        public void setSourceCap(Double sourceCap) {
+            this.sourceCap = sourceCap;
+        }
+
         public RepositoryHealthEvidenceV2() {
         }
 
@@ -909,6 +991,7 @@ public final class EvidenceModelsV2 {
                         "Direct code-host evidence unavailable (Bugzilla H unavailable).");
             }
 
+            double cap = resolveSourceCap(source, sourceCap);
             double aH = 0.0;
             double weightedSum = 0.0;
             double confSum = 0.0;
@@ -918,9 +1001,10 @@ public final class EvidenceModelsV2 {
             boolean c90Ok = (c90Available == null || Boolean.TRUE.equals(c90Available)) && c90Score != null
                     && !Double.isNaN(c90Score);
             if (c90Ok) {
-                double c = c90Confidence != null ? c90Confidence : 1.0;
-                if (c < 0.0 || c > 1.0 || !Double.isFinite(c))
-                    throw new IllegalArgumentException("Invalid C90 confidence: " + c);
+                double rawC = c90Confidence != null ? c90Confidence : 1.0;
+                if (rawC < 0.0 || rawC > 1.0 || !Double.isFinite(rawC))
+                    throw new IllegalArgumentException("Invalid C90 confidence: " + rawC);
+                double c = Math.min(cap, rawC);
                 aH += 0.30;
                 weightedSum += 0.30 * Math.max(0.0, Math.min(100.0, c90Score));
                 confSum += 0.30 * c;
@@ -931,9 +1015,10 @@ public final class EvidenceModelsV2 {
             boolean pr30Ok = (pr30Available == null || Boolean.TRUE.equals(pr30Available)) && pr30Score != null
                     && !Double.isNaN(pr30Score);
             if (pr30Ok) {
-                double c = pr30Confidence != null ? pr30Confidence : 1.0;
-                if (c < 0.0 || c > 1.0 || !Double.isFinite(c))
-                    throw new IllegalArgumentException("Invalid PR30 confidence: " + c);
+                double rawC = pr30Confidence != null ? pr30Confidence : 1.0;
+                if (rawC < 0.0 || rawC > 1.0 || !Double.isFinite(rawC))
+                    throw new IllegalArgumentException("Invalid PR30 confidence: " + rawC);
+                double c = Math.min(cap, rawC);
                 aH += 0.25;
                 weightedSum += 0.25 * Math.max(0.0, Math.min(100.0, pr30Score));
                 confSum += 0.25 * c;
@@ -944,9 +1029,10 @@ public final class EvidenceModelsV2 {
             boolean au90Ok = (au90Available == null || Boolean.TRUE.equals(au90Available)) && au90Score != null
                     && !Double.isNaN(au90Score);
             if (au90Ok) {
-                double c = au90Confidence != null ? au90Confidence : 1.0;
-                if (c < 0.0 || c > 1.0 || !Double.isFinite(c))
-                    throw new IllegalArgumentException("Invalid AU90 confidence: " + c);
+                double rawC = au90Confidence != null ? au90Confidence : 1.0;
+                if (rawC < 0.0 || rawC > 1.0 || !Double.isFinite(rawC))
+                    throw new IllegalArgumentException("Invalid AU90 confidence: " + rawC);
+                double c = Math.min(cap, rawC);
                 aH += 0.25;
                 weightedSum += 0.25 * Math.max(0.0, Math.min(100.0, au90Score));
                 confSum += 0.25 * c;
@@ -957,9 +1043,10 @@ public final class EvidenceModelsV2 {
             boolean ma90Ok = (ma90Available == null || Boolean.TRUE.equals(ma90Available)) && ma90Score != null
                     && !Double.isNaN(ma90Score);
             if (ma90Ok) {
-                double c = ma90Confidence != null ? ma90Confidence : 1.0;
-                if (c < 0.0 || c > 1.0 || !Double.isFinite(c))
-                    throw new IllegalArgumentException("Invalid MA90 confidence: " + c);
+                double rawC = ma90Confidence != null ? ma90Confidence : 1.0;
+                if (rawC < 0.0 || rawC > 1.0 || !Double.isFinite(rawC))
+                    throw new IllegalArgumentException("Invalid MA90 confidence: " + rawC);
+                double c = Math.min(cap, rawC);
                 aH += 0.20;
                 weightedSum += 0.20 * Math.max(0.0, Math.min(100.0, ma90Score));
                 confSum += 0.20 * c;

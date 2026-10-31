@@ -512,5 +512,79 @@ class ResponsivenessAndHealthV23Test {
         assertEquals(1.00, resInactive.coverageAh(), 1e-6);
         assertEquals(1.2027, resInactive.score(), 1e-3);
     }
+
+    @Test
+    @DisplayName("Verify V2.3 source-confidence ceilings (GitHub 0.90, GitLab 0.85, Forgejo 0.80, Inferred 0.50)")
+    void testSourceConfidenceCeilings() {
+        // GitHub empty repo: C90=0, PR30=0, AU90=0 (raw 1.0 capped to 0.90), MA90 unavail
+        // C_H = 0.30(0.90) + 0.25(0.90) + 0.25(0.90) = 0.72
+        RepositoryHealthEvidenceV2 hGh = new RepositoryHealthEvidenceV2();
+        hGh.setSource("github");
+        hGh.setC90Score(0.0); hGh.setC90Available(true); hGh.setC90Confidence(1.0);
+        hGh.setPr30Score(0.0); hGh.setPr30Available(true); hGh.setPr30Confidence(1.0);
+        hGh.setAu90Score(0.0); hGh.setAu90Available(true); hGh.setAu90Confidence(1.0);
+        hGh.setMa90Available(false);
+
+        HealthComputationResult resGh = hGh.computeHealth();
+        assertTrue(resGh.available());
+        assertEquals(3, resGh.signalCount());
+        assertEquals(0.80, resGh.coverageAh(), 1e-6);
+        assertEquals(0.0, resGh.score(), 1e-6, "H score must remain exactly 0.0");
+        assertEquals(0.72, resGh.confidence(), 1e-6, "GitHub C_H must be strictly capped at 0.72");
+
+        // GitLab empty repo: C_H = 0.80 * 0.85 = 0.68
+        RepositoryHealthEvidenceV2 hGl = new RepositoryHealthEvidenceV2();
+        hGl.setSource("gitlab");
+        hGl.setC90Score(0.0); hGl.setC90Available(true);
+        hGl.setPr30Score(0.0); hGl.setPr30Available(true);
+        hGl.setAu90Score(0.0); hGl.setAu90Available(true);
+        hGl.setMa90Available(false);
+
+        HealthComputationResult resGl = hGl.computeHealth();
+        assertTrue(resGl.available());
+        assertEquals(0.68, resGl.confidence(), 1e-6, "GitLab C_H must be strictly capped at 0.68");
+
+        // Forgejo empty repo: C_H = 0.80 * 0.80 = 0.64
+        RepositoryHealthEvidenceV2 hFj = new RepositoryHealthEvidenceV2();
+        hFj.setSource("forgejo");
+        hFj.setC90Score(0.0); hFj.setC90Available(true);
+        hFj.setPr30Score(0.0); hFj.setPr30Available(true);
+        hFj.setAu90Score(0.0); hFj.setAu90Available(true);
+        hFj.setMa90Available(false);
+
+        HealthComputationResult resFj = hFj.computeHealth();
+        assertTrue(resFj.available());
+        assertEquals(0.64, resFj.confidence(), 1e-6, "Forgejo C_H must be strictly capped at 0.64");
+
+        // Inferred proxy empty repo: C_H = 0.80 * 0.50 = 0.40
+        RepositoryHealthEvidenceV2 hInf = new RepositoryHealthEvidenceV2();
+        hInf.setSource("inferred");
+        hInf.setC90Score(0.0); hInf.setC90Available(true);
+        hInf.setPr30Score(0.0); hInf.setPr30Available(true);
+        hInf.setAu90Score(0.0); hInf.setAu90Available(true);
+        hInf.setMa90Available(false);
+
+        HealthComputationResult resInf = hInf.computeHealth();
+        assertTrue(resInf.available());
+        assertEquals(0.40, resInf.confidence(), 1e-6, "Inferred proxy C_H must be strictly capped at 0.40");
+
+        // Signal confidence calculation formula: c = min(source_cap, c_sample * c_coverage * c_directness)
+        assertEquals(0.50, RepositoryHealthEvidenceV2.calculateSignalConfidence("inferred", null, 1.0, 1.0, 1.0), 1e-6);
+        assertEquals(0.90, RepositoryHealthEvidenceV2.calculateSignalConfidence("github", null, 1.0, 1.0, 1.0), 1e-6);
+        assertEquals(0.85, RepositoryHealthEvidenceV2.calculateSignalConfidence("gitlab", null, 1.0, 1.0, 1.0), 1e-6);
+        assertEquals(0.80, RepositoryHealthEvidenceV2.calculateSignalConfidence("forgejo", null, 1.0, 1.0, 1.0), 1e-6);
+
+        // Responsiveness with Source Caps
+        ResponsivenessEvidenceV2 rGh = new ResponsivenessEvidenceV2();
+        rGh.setSource("github");
+        rGh.setResponseTimeScore(80.0); rGh.setRtSamples(6); rGh.setRtAvailable(true);
+        rGh.setResponseRateScore(70.0); rGh.setRrSamples(6); rGh.setRrAvailable(true);
+        rGh.setPrReviewScore(75.0); rGh.setPrSamples(6); rGh.setPrAvailable(true);
+        rGh.setRecentMaintainerAct(60.0); rGh.setMaSamples(6); rGh.setMaAvailable(true);
+
+        ResponsivenessComputationResult resRGh = rGh.computeResponsiveness();
+        assertTrue(resRGh.available());
+        assertEquals(0.90, resRGh.confidence(), 1e-6, "GitHub full Responsiveness C_R must be capped at 0.90");
+    }
 }
 

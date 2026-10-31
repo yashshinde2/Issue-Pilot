@@ -1616,7 +1616,51 @@ int main() {
         report_test("Truly Empty Repo: H is Available with K=3 signals", res_h_truly_empty.available, 1.0, res_h_truly_empty.available ? 1.0 : 0.0);
         report_test("Truly Empty Repo: H Coverage A_H is 0.80", std::abs(res_h_truly_empty.coverage_ah - 0.80) < 1e-6, 0.80, res_h_truly_empty.coverage_ah);
         report_test("Truly Empty Repo: H Score is 0.0", std::abs(res_h_truly_empty.score - 0.0) < 1e-6, 0.0, res_h_truly_empty.score);
-        report_test("Truly Empty Repo: H Confidence C_H is 0.80", std::abs(res_h_truly_empty.confidence - 0.80) < 1e-6, 0.80, res_h_truly_empty.confidence);
+        report_test("Truly Empty Repo: Uncapped H Confidence C_H is 0.80", std::abs(res_h_truly_empty.confidence - 0.80) < 1e-6, 0.80, res_h_truly_empty.confidence);
+
+        // 9. Source-Confidence Ceilings (GitHub 0.90, GitLab 0.85, Forgejo 0.80, Inferred 0.50)
+        // GitHub: C_H = 0.30(0.90) + 0.25(0.90) + 0.25(0.90) = 0.72
+        issue_pilot::RepositoryHealthEvidenceV2 h_gh = h_truly_empty;
+        h_gh.source = "github";
+        auto res_h_gh = h_gh.compute_health();
+        report_test("GitHub Empty Repo C_H is Capped at 0.72", std::abs(res_h_gh.confidence - 0.72) < 1e-6, 0.72, res_h_gh.confidence);
+        report_test("GitHub Empty Repo H Score Remains 0.0", std::abs(res_h_gh.score - 0.0) < 1e-6, 0.0, res_h_gh.score);
+        report_test("GitHub Empty Repo Coverage A_H Remains 0.80", std::abs(res_h_gh.coverage_ah - 0.80) < 1e-6, 0.80, res_h_gh.coverage_ah);
+        report_test("GitHub Empty Repo Signal Count Remains 3", res_h_gh.signal_count == 3, 1.0, res_h_gh.signal_count);
+
+        // GitLab: C_H = 0.80 * 0.85 = 0.68
+        issue_pilot::RepositoryHealthEvidenceV2 h_gl = h_truly_empty;
+        h_gl.source = "gitlab";
+        auto res_h_gl = h_gl.compute_health();
+        report_test("GitLab Empty Repo C_H is Capped at 0.68", std::abs(res_h_gl.confidence - 0.68) < 1e-6, 0.68, res_h_gl.confidence);
+
+        // Forgejo: C_H = 0.80 * 0.80 = 0.64
+        issue_pilot::RepositoryHealthEvidenceV2 h_fj = h_truly_empty;
+        h_fj.source = "forgejo";
+        auto res_h_fj = h_fj.compute_health();
+        report_test("Forgejo Empty Repo C_H is Capped at 0.64", std::abs(res_h_fj.confidence - 0.64) < 1e-6, 0.64, res_h_fj.confidence);
+
+        // Inferred Proxy: C_H = 0.80 * 0.50 = 0.40
+        issue_pilot::RepositoryHealthEvidenceV2 h_inf = h_truly_empty;
+        h_inf.source = "inferred";
+        auto res_h_inf = h_inf.compute_health();
+        report_test("Inferred Proxy Empty Repo C_H is Capped at 0.40", std::abs(res_h_inf.confidence - 0.40) < 1e-6, 0.40, res_h_inf.confidence);
+
+        // Signal confidence cap enforcement
+        double c_inf_calc = issue_pilot::RepositoryHealthEvidenceV2::calculate_signal_confidence("inferred", 1.0, 1.0, 1.0, 1.0);
+        report_test("Inferred Signal Confidence Cannot Exceed 0.50", std::abs(c_inf_calc - 0.50) < 1e-6, 0.50, c_inf_calc);
+        double c_gh_calc = issue_pilot::RepositoryHealthEvidenceV2::calculate_signal_confidence("github", 1.0, 1.0, 1.0, 1.0);
+        report_test("GitHub Signal Confidence Cannot Exceed 0.90", std::abs(c_gh_calc - 0.90) < 1e-6, 0.90, c_gh_calc);
+
+        // Responsiveness with Source Caps
+        issue_pilot::ResponsivenessEvidenceV2 r_gh;
+        r_gh.source = "github";
+        r_gh.response_time_score = 80.0; r_gh.rt_samples = 6; r_gh.rt_available = true;
+        r_gh.response_rate_score = 70.0; r_gh.rr_samples = 6; r_gh.rr_available = true;
+        r_gh.pr_review_score = 75.0; r_gh.pr_samples = 6; r_gh.pr_available = true;
+        r_gh.recent_maintainer_act = 60.0; r_gh.ma_samples = 6; r_gh.ma_available = true;
+        auto res_r_gh = r_gh.compute_responsiveness();
+        report_test("GitHub Full Responsiveness C_R is Capped at 0.90", std::abs(res_r_gh.confidence - 0.90) < 1e-6, 0.90, res_r_gh.confidence);
 
         // Non-empty inactive repo: 365 days since code activity
         issue_pilot::RepositoryHealthEvidenceV2 h_empty;
