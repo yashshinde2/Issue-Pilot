@@ -1538,23 +1538,96 @@ int main() {
         r_gate.rt_samples = 5;
         report_test("Responsiveness Sample Gate Accepts N=5", r_gate.compute_responsiveness().available, 1.0, r_gate.compute_responsiveness().available ? 1.0 : 0.0);
 
-        // 6. Clock Skew Clamping vs Negative Duration
-        double ma_skew = issue_pilot::ResponsivenessEvidenceV2::calculate_ma_score(-0.01);
-        report_test("MA Negative Clock Skew Clamped to 0.0 -> Score 100.0", std::abs(ma_skew - 100.0) < 1e-6, 100.0, ma_skew);
+        // 6. Clock Skew Clamping vs Negative / Future Duration Parity
+        // RT & PR duration parity: zero, positive, negative, NaN, Inf
+        double rt_zero = issue_pilot::ResponsivenessEvidenceV2::calculate_rt_score(0.0);
+        report_test("RT Duration Zero -> Score 100.0", std::abs(rt_zero - 100.0) < 1e-6, 100.0, rt_zero);
+        double rt_pos = issue_pilot::ResponsivenessEvidenceV2::calculate_rt_score(48.0);
+        report_test("RT Duration Positive 48h -> Score 50.0", std::abs(rt_pos - 50.0) < 1e-6, 50.0, rt_pos);
 
-        double ma90_skew = issue_pilot::RepositoryHealthEvidenceV2::calculate_ma90_score(-0.05);
-        report_test("MA90 Negative Clock Skew Clamped to 0.0 -> Score 100.0", std::abs(ma90_skew - 100.0) < 1e-6, 100.0, ma90_skew);
+        bool rt_neg_threw = false;
+        try { issue_pilot::ResponsivenessEvidenceV2::calculate_rt_score(-5.0); } catch (const std::invalid_argument&) { rt_neg_threw = true; }
+        report_test("RT Negative Duration Throws std::invalid_argument", rt_neg_threw, 1.0, rt_neg_threw ? 1.0 : 0.0);
 
-        // 7. Empty Repository Known Zero
+        bool rt_nan_threw = false;
+        try { issue_pilot::ResponsivenessEvidenceV2::calculate_rt_score(std::numeric_limits<double>::quiet_NaN()); } catch (const std::invalid_argument&) { rt_nan_threw = true; }
+        report_test("RT NaN Duration Throws std::invalid_argument", rt_nan_threw, 1.0, rt_nan_threw ? 1.0 : 0.0);
+
+        bool rt_inf_threw = false;
+        try { issue_pilot::ResponsivenessEvidenceV2::calculate_rt_score(std::numeric_limits<double>::infinity()); } catch (const std::invalid_argument&) { rt_inf_threw = true; }
+        report_test("RT Infinite Duration Throws std::invalid_argument", rt_inf_threw, 1.0, rt_inf_threw ? 1.0 : 0.0);
+
+        double pr_zero = issue_pilot::ResponsivenessEvidenceV2::calculate_pr_score(0.0);
+        report_test("PR Duration Zero -> Score 100.0", std::abs(pr_zero - 100.0) < 1e-6, 100.0, pr_zero);
+        double pr_pos = issue_pilot::ResponsivenessEvidenceV2::calculate_pr_score(72.0);
+        report_test("PR Duration Positive 72h -> Score 50.0", std::abs(pr_pos - 50.0) < 1e-6, 50.0, pr_pos);
+
+        bool pr_neg_threw = false;
+        try { issue_pilot::ResponsivenessEvidenceV2::calculate_pr_score(-10.0); } catch (const std::invalid_argument&) { pr_neg_threw = true; }
+        report_test("PR Negative Duration Throws std::invalid_argument", pr_neg_threw, 1.0, pr_neg_threw ? 1.0 : 0.0);
+
+        bool pr_nan_threw = false;
+        try { issue_pilot::ResponsivenessEvidenceV2::calculate_pr_score(std::numeric_limits<double>::quiet_NaN()); } catch (const std::invalid_argument&) { pr_nan_threw = true; }
+        report_test("PR NaN Duration Throws std::invalid_argument", pr_nan_threw, 1.0, pr_nan_threw ? 1.0 : 0.0);
+
+        // Clock skew tolerance: small skew (-0.0005d <= 0.001d tolerance) clamped to 0.0 -> score 100.0
+        double ma_skew = issue_pilot::ResponsivenessEvidenceV2::calculate_ma_score(-0.0005);
+        report_test("MA Permitted Clock Skew (-0.0005d) Clamped to 0.0 -> Score 100.0", std::abs(ma_skew - 100.0) < 1e-6, 100.0, ma_skew);
+        double ma90_skew = issue_pilot::RepositoryHealthEvidenceV2::calculate_ma90_score(-0.0005);
+        report_test("MA90 Permitted Clock Skew (-0.0005d) Clamped to 0.0 -> Score 100.0", std::abs(ma90_skew - 100.0) < 1e-6, 100.0, ma90_skew);
+
+        // Material future (> 0.001d) throws std::invalid_argument
+        bool ma_future_threw = false;
+        try { issue_pilot::ResponsivenessEvidenceV2::calculate_ma_score(-0.05); } catch (const std::invalid_argument&) { ma_future_threw = true; }
+        report_test("MA Material Future (> 0.001d) Throws std::invalid_argument", ma_future_threw, 1.0, ma_future_threw ? 1.0 : 0.0);
+
+        bool ma90_future_threw = false;
+        try { issue_pilot::RepositoryHealthEvidenceV2::calculate_ma90_score(-0.05); } catch (const std::invalid_argument&) { ma90_future_threw = true; }
+        report_test("MA90 Material Future (> 0.001d) Throws std::invalid_argument", ma90_future_threw, 1.0, ma90_future_threw ? 1.0 : 0.0);
+
+        // 7. RR Mature-Cohort Numerator Semantics & Exact Boundaries
+        // 5 mature issues (3 timely <= 168h, 1 reply at 200h, 1 unreplied) + 2 immature issues (replied at 12h, 30h)
+        std::vector<issue_pilot::ResponsivenessEvidenceV2::IssueResponseEvent> rr_fixture = {
+            {200.0, 48.0, true, true},    // mature timely
+            {180.0, 72.0, true, true},    // mature timely
+            {168.0, 168.0, true, true},   // mature timely boundary
+            {300.0, 200.0, true, true},   // mature untimely (>168h)
+            {500.0, -1.0, false, true},   // mature unreplied
+            {24.0, 12.0, true, true},     // immature (<168h) - excluded
+            {50.0, 30.0, true, true}      // immature (<168h) - excluded
+        };
+        double rr_cohort_score = issue_pilot::ResponsivenessEvidenceV2::evaluate_rr_cohort(rr_fixture);
+        report_test("RR Mature-Cohort Excludes Immature Issues (RR = 60.0%)", std::abs(rr_cohort_score - 60.0) < 1e-6, 60.0, rr_cohort_score);
+
+        // Boundary checks at 168.0h vs 168.001h
+        std::vector<issue_pilot::ResponsivenessEvidenceV2::IssueResponseEvent> timely_bound = {{168.0, 168.0, true, true}};
+        std::vector<issue_pilot::ResponsivenessEvidenceV2::IssueResponseEvent> untimely_bound = {{168.0, 168.001, true, true}};
+        report_test("RR Boundary: Reply at exactly 168.0h is Timely (100.0%)", std::abs(issue_pilot::ResponsivenessEvidenceV2::evaluate_rr_cohort(timely_bound) - 100.0) < 1e-6, 100.0, issue_pilot::ResponsivenessEvidenceV2::evaluate_rr_cohort(timely_bound));
+        report_test("RR Boundary: Reply at 168.001h is Untimely (0.0%)", std::abs(issue_pilot::ResponsivenessEvidenceV2::evaluate_rr_cohort(untimely_bound) - 0.0) < 1e-6, 0.0, issue_pilot::ResponsivenessEvidenceV2::evaluate_rr_cohort(untimely_bound));
+
+        // 8. Empty Repository Signal Table & Known Zero Semantics
+        // Empty repo: C90=0, PR30=0, AU90=0 (known zeros, available), MA90 unavailable (no code events ever)
+        issue_pilot::RepositoryHealthEvidenceV2 h_truly_empty;
+        h_truly_empty.c90_score = issue_pilot::RepositoryHealthEvidenceV2::calculate_c90_score(0); h_truly_empty.c90_available = true;
+        h_truly_empty.pr30_score = issue_pilot::RepositoryHealthEvidenceV2::calculate_pr30_score(0); h_truly_empty.pr30_available = true;
+        h_truly_empty.au90_score = issue_pilot::RepositoryHealthEvidenceV2::calculate_au90_score(0); h_truly_empty.au90_available = true;
+        h_truly_empty.ma90_available = false; // No code activity timestamp exists
+        auto res_h_truly_empty = h_truly_empty.compute_health();
+        report_test("Truly Empty Repo: H is Available with K=3 signals", res_h_truly_empty.available, 1.0, res_h_truly_empty.available ? 1.0 : 0.0);
+        report_test("Truly Empty Repo: H Coverage A_H is 0.80", std::abs(res_h_truly_empty.coverage_ah - 0.80) < 1e-6, 0.80, res_h_truly_empty.coverage_ah);
+        report_test("Truly Empty Repo: H Score is 0.0", std::abs(res_h_truly_empty.score - 0.0) < 1e-6, 0.0, res_h_truly_empty.score);
+        report_test("Truly Empty Repo: H Confidence C_H is 0.80", std::abs(res_h_truly_empty.confidence - 0.80) < 1e-6, 0.80, res_h_truly_empty.confidence);
+
+        // Non-empty inactive repo: 365 days since code activity
         issue_pilot::RepositoryHealthEvidenceV2 h_empty;
         h_empty.c90_score = issue_pilot::RepositoryHealthEvidenceV2::calculate_c90_score(0); h_empty.c90_available = true;
         h_empty.pr30_score = issue_pilot::RepositoryHealthEvidenceV2::calculate_pr30_score(0); h_empty.pr30_available = true;
         h_empty.au90_score = issue_pilot::RepositoryHealthEvidenceV2::calculate_au90_score(0); h_empty.au90_available = true;
         h_empty.ma90_score = issue_pilot::RepositoryHealthEvidenceV2::calculate_ma90_score(365.0); h_empty.ma90_available = true;
         auto res_h_empty = h_empty.compute_health();
-        report_test("Empty Repository Available with Complete Measurements", res_h_empty.available, 1.0, res_h_empty.available ? 1.0 : 0.0);
-        report_test("Empty Repository C90 is Exactly 0.0", std::abs(h_empty.c90_score - 0.0) < 1e-6, 0.0, h_empty.c90_score);
-        report_test("Empty Repository PR30 is Exactly 0.0", std::abs(h_empty.pr30_score - 0.0) < 1e-6, 0.0, h_empty.pr30_score);
+        report_test("Inactive Repository Available with Complete Measurements", res_h_empty.available, 1.0, res_h_empty.available ? 1.0 : 0.0);
+        report_test("Inactive Repository C90 is Exactly 0.0", std::abs(h_empty.c90_score - 0.0) < 1e-6, 0.0, h_empty.c90_score);
+        report_test("Inactive Repository PR30 is Exactly 0.0", std::abs(h_empty.pr30_score - 0.0) < 1e-6, 0.0, h_empty.pr30_score);
     }
 
     std::cout << "\nALL UNIT TEST CHECKS (INCLUDING PHASE 1 CONTRACTS) PASSED SUCCESSFULLY!\n";

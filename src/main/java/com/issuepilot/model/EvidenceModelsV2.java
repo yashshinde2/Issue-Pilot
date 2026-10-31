@@ -483,12 +483,39 @@ public final class EvidenceModelsV2 {
         @JsonProperty("role_mapping_verified")
         private Boolean roleMappingVerified = true;
 
+        public static final double CLOCK_SKEW_TOLERANCE_DAYS = 0.001; // ~86.4 seconds
+
+        public record IssueResponseEvent(double ageHours, Double firstReplyHours, boolean completeObservation) {
+            public boolean isMature() {
+                return ageHours >= 168.0 && completeObservation;
+            }
+            public boolean isTimelyReplied() {
+                return isMature() && firstReplyHours != null && firstReplyHours >= 0.0 && firstReplyHours <= 168.0;
+            }
+        }
+
+        public static double evaluateRrCohort(java.util.List<IssueResponseEvent> issues) {
+            int matureTotal = 0;
+            int repliedWithin7d = 0;
+            if (issues != null) {
+                for (IssueResponseEvent e : issues) {
+                    if (e.isMature()) {
+                        matureTotal++;
+                        if (e.isTimelyReplied()) {
+                            repliedWithin7d++;
+                        }
+                    }
+                }
+            }
+            return calculateRrScore(repliedWithin7d, matureTotal);
+        }
+
         public ResponsivenessEvidenceV2() {
         }
 
         public static double calculateRtScore(double medianHours) {
-            if (medianHours < 0.0)
-                throw new IllegalArgumentException("Negative reply duration: " + medianHours);
+            if (!Double.isFinite(medianHours) || medianHours < 0.0)
+                throw new IllegalArgumentException("Negative or non-finite reply duration: " + medianHours);
             return 100.0 / (1.0 + medianHours / 48.0);
         }
 
@@ -499,12 +526,16 @@ public final class EvidenceModelsV2 {
         }
 
         public static double calculatePrScore(double medianReviewHours) {
-            if (medianReviewHours < 0.0)
-                throw new IllegalArgumentException("Negative review duration: " + medianReviewHours);
+            if (!Double.isFinite(medianReviewHours) || medianReviewHours < 0.0)
+                throw new IllegalArgumentException("Negative or non-finite review duration: " + medianReviewHours);
             return 100.0 / (1.0 + medianReviewHours / 72.0);
         }
 
         public static double calculateMaScore(double daysSinceAct) {
+            if (!Double.isFinite(daysSinceAct))
+                throw new IllegalArgumentException("Non-finite daysSinceAct: " + daysSinceAct);
+            if (daysSinceAct < -CLOCK_SKEW_TOLERANCE_DAYS)
+                throw new IllegalArgumentException("Future timestamp exceeds clock skew tolerance: " + daysSinceAct);
             if (daysSinceAct < 0.0)
                 daysSinceAct = 0.0;
             return 100.0 * Math.pow(0.5, daysSinceAct / 14.0);
@@ -848,8 +879,16 @@ public final class EvidenceModelsV2 {
             return 100.0 * Math.min(1.0, Math.max(0, distinctAuthors90d) / 6.0);
         }
 
+        public static final double CLOCK_SKEW_TOLERANCE_DAYS = 0.001; // ~86.4 seconds
+
         public static double calculateMa90Score(double daysSinceCodeActivity) {
-            return 100.0 * Math.pow(0.5, Math.max(0.0, daysSinceCodeActivity) / 90.0);
+            if (!Double.isFinite(daysSinceCodeActivity))
+                throw new IllegalArgumentException("Non-finite daysSinceCodeActivity: " + daysSinceCodeActivity);
+            if (daysSinceCodeActivity < -CLOCK_SKEW_TOLERANCE_DAYS)
+                throw new IllegalArgumentException("Future timestamp exceeds clock skew tolerance: " + daysSinceCodeActivity);
+            if (daysSinceCodeActivity < 0.0)
+                daysSinceCodeActivity = 0.0;
+            return 100.0 * Math.pow(0.5, daysSinceCodeActivity / 90.0);
         }
 
         public record HealthComputationResult(

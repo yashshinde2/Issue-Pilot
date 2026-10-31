@@ -275,9 +275,13 @@ class ResponsivenessAndHealthV23Test {
         assertThrows(IllegalArgumentException.class, () -> ResponsivenessEvidenceV2.calculateRtScore(-5.0));
         assertThrows(IllegalArgumentException.class, () -> ResponsivenessEvidenceV2.calculatePrScore(-10.0));
 
-        // Tolerated negative duration / clock skew clamped to zero in recency
-        assertEquals(100.0, ResponsivenessEvidenceV2.calculateMaScore(-0.01), 1e-6);
-        assertEquals(100.0, RepositoryHealthEvidenceV2.calculateMa90Score(-0.05), 1e-6);
+        // Permitted clock skew within tolerance (-0.0005d <= 0.001d tolerance) clamped to zero
+        assertEquals(100.0, ResponsivenessEvidenceV2.calculateMaScore(-0.0005), 1e-6);
+        assertEquals(100.0, RepositoryHealthEvidenceV2.calculateMa90Score(-0.0005), 1e-6);
+
+        // Timestamps materially in the future (> 0.001d = 86.4s) throw IllegalArgumentException
+        assertThrows(IllegalArgumentException.class, () -> ResponsivenessEvidenceV2.calculateMaScore(-0.05));
+        assertThrows(IllegalArgumentException.class, () -> RepositoryHealthEvidenceV2.calculateMa90Score(-0.05));
     }
 
     @Test
@@ -402,6 +406,111 @@ class ResponsivenessAndHealthV23Test {
         ResponsivenessComputationResult resFalse = r.computeResponsiveness();
         assertFalse(resFalse.available());
         assertTrue(resFalse.explanation().contains("unverified"));
+    }
+
+    @Test
+    @DisplayName("Verify duration parity: zero, positive, negative, NaN, and Infinite inputs for RT and PR")
+    void testDurationValidationAndParity() {
+        // RT validation
+        assertEquals(100.0, ResponsivenessEvidenceV2.calculateRtScore(0.0), 1e-6);
+        assertEquals(50.0, ResponsivenessEvidenceV2.calculateRtScore(48.0), 1e-6);
+        assertThrows(IllegalArgumentException.class, () -> ResponsivenessEvidenceV2.calculateRtScore(-5.0));
+        assertThrows(IllegalArgumentException.class, () -> ResponsivenessEvidenceV2.calculateRtScore(Double.NaN));
+        assertThrows(IllegalArgumentException.class, () -> ResponsivenessEvidenceV2.calculateRtScore(Double.POSITIVE_INFINITY));
+        assertThrows(IllegalArgumentException.class, () -> ResponsivenessEvidenceV2.calculateRtScore(Double.NEGATIVE_INFINITY));
+
+        // PR validation
+        assertEquals(100.0, ResponsivenessEvidenceV2.calculatePrScore(0.0), 1e-6);
+        assertEquals(50.0, ResponsivenessEvidenceV2.calculatePrScore(72.0), 1e-6);
+        assertThrows(IllegalArgumentException.class, () -> ResponsivenessEvidenceV2.calculatePrScore(-10.0));
+        assertThrows(IllegalArgumentException.class, () -> ResponsivenessEvidenceV2.calculatePrScore(Double.NaN));
+        assertThrows(IllegalArgumentException.class, () -> ResponsivenessEvidenceV2.calculatePrScore(Double.POSITIVE_INFINITY));
+        assertThrows(IllegalArgumentException.class, () -> ResponsivenessEvidenceV2.calculatePrScore(Double.NEGATIVE_INFINITY));
+    }
+
+    @Test
+    @DisplayName("Verify clock-skew tolerance and future timestamp rejection for MA and MA90")
+    void testClockSkewToleranceAndFutureTimestampRejection() {
+        // Permitted clock-skew: -0.0005d (within 0.001d = 86.4s) clamped to 0.0 -> score 100.0
+        assertEquals(100.0, ResponsivenessEvidenceV2.calculateMaScore(-0.0005), 1e-6);
+        assertEquals(100.0, RepositoryHealthEvidenceV2.calculateMa90Score(-0.0005), 1e-6);
+
+        // Material future (> 0.001d) must throw IllegalArgumentException
+        assertThrows(IllegalArgumentException.class, () -> ResponsivenessEvidenceV2.calculateMaScore(-0.05));
+        assertThrows(IllegalArgumentException.class, () -> ResponsivenessEvidenceV2.calculateMaScore(Double.NaN));
+        assertThrows(IllegalArgumentException.class, () -> ResponsivenessEvidenceV2.calculateMaScore(Double.POSITIVE_INFINITY));
+
+        assertThrows(IllegalArgumentException.class, () -> RepositoryHealthEvidenceV2.calculateMa90Score(-0.05));
+        assertThrows(IllegalArgumentException.class, () -> RepositoryHealthEvidenceV2.calculateMa90Score(Double.NaN));
+        assertThrows(IllegalArgumentException.class, () -> RepositoryHealthEvidenceV2.calculateMa90Score(Double.POSITIVE_INFINITY));
+    }
+
+    @Test
+    @DisplayName("Verify RR mature-cohort numerator semantics and exact boundaries")
+    void testRrMatureCohortNumeratorSemanticsAndBoundaries() {
+        // 5 mature issues (3 timely <= 168h, 1 reply at 200h, 1 unreplied) + 2 immature issues (replied at 12h, 30h)
+        java.util.List<ResponsivenessEvidenceV2.IssueResponseEvent> issues = java.util.List.of(
+            new ResponsivenessEvidenceV2.IssueResponseEvent(200.0, 48.0, true),
+            new ResponsivenessEvidenceV2.IssueResponseEvent(180.0, 72.0, true),
+            new ResponsivenessEvidenceV2.IssueResponseEvent(168.0, 168.0, true), // boundary timely
+            new ResponsivenessEvidenceV2.IssueResponseEvent(300.0, 200.0, true), // mature untimely
+            new ResponsivenessEvidenceV2.IssueResponseEvent(500.0, null, true),  // mature unreplied
+            new ResponsivenessEvidenceV2.IssueResponseEvent(24.0, 12.0, true),   // immature (<168h) - excluded
+            new ResponsivenessEvidenceV2.IssueResponseEvent(50.0, 30.0, true)    // immature (<168h) - excluded
+        );
+
+        double cohortScore = ResponsivenessEvidenceV2.evaluateRrCohort(issues);
+        assertEquals(60.0, cohortScore, 1e-6, "Immature issues must contribute to neither numerator nor denominator");
+
+        // Exact boundary checks at 168.0h vs 168.001h
+        double boundTimely = ResponsivenessEvidenceV2.evaluateRrCohort(java.util.List.of(
+            new ResponsivenessEvidenceV2.IssueResponseEvent(168.0, 168.0, true)
+        ));
+        assertEquals(100.0, boundTimely, 1e-6);
+
+        double boundUntimely = ResponsivenessEvidenceV2.evaluateRrCohort(java.util.List.of(
+            new ResponsivenessEvidenceV2.IssueResponseEvent(168.0, 168.001, true)
+        ));
+        assertEquals(0.0, boundUntimely, 1e-6);
+    }
+
+    @Test
+    @DisplayName("Verify empty repository signal table, known zero semantics, and MA90 unavailability")
+    void testEmptyRepositorySignalTableAndKnownZeroSemantics() {
+        // Truly empty repository with complete queries:
+        // C90=0, PR30=0, AU90=0 (known zeros, available), MA90 unavailable (no code events ever)
+        RepositoryHealthEvidenceV2 hTrulyEmpty = new RepositoryHealthEvidenceV2();
+        hTrulyEmpty.setC90Score(RepositoryHealthEvidenceV2.calculateC90Score(0));
+        hTrulyEmpty.setC90Available(true);
+        hTrulyEmpty.setPr30Score(RepositoryHealthEvidenceV2.calculatePr30Score(0));
+        hTrulyEmpty.setPr30Available(true);
+        hTrulyEmpty.setAu90Score(RepositoryHealthEvidenceV2.calculateAu90Score(0));
+        hTrulyEmpty.setAu90Available(true);
+        hTrulyEmpty.setMa90Available(false); // No code activity timestamp exists
+
+        HealthComputationResult res = hTrulyEmpty.computeHealth();
+        assertTrue(res.available(), "Empty repository with K=3 known zero signals must be available");
+        assertEquals(3, res.signalCount());
+        assertEquals(0.80, res.coverageAh(), 1e-6);
+        assertEquals(0.0, res.score(), 1e-6);
+        assertEquals(0.80, res.confidence(), 1e-6);
+
+        // Non-empty inactive repo: 365 days since code activity
+        RepositoryHealthEvidenceV2 hInactive = new RepositoryHealthEvidenceV2();
+        hInactive.setC90Score(RepositoryHealthEvidenceV2.calculateC90Score(0));
+        hInactive.setC90Available(true);
+        hInactive.setPr30Score(RepositoryHealthEvidenceV2.calculatePr30Score(0));
+        hInactive.setPr30Available(true);
+        hInactive.setAu90Score(RepositoryHealthEvidenceV2.calculateAu90Score(0));
+        hInactive.setAu90Available(true);
+        hInactive.setMa90Score(RepositoryHealthEvidenceV2.calculateMa90Score(365.0));
+        hInactive.setMa90Available(true);
+
+        HealthComputationResult resInactive = hInactive.computeHealth();
+        assertTrue(resInactive.available());
+        assertEquals(4, resInactive.signalCount());
+        assertEquals(1.00, resInactive.coverageAh(), 1e-6);
+        assertEquals(1.2027, resInactive.score(), 1e-3);
     }
 }
 

@@ -380,8 +380,40 @@ struct ResponsivenessEvidenceV2 {
   bool pagination_complete{true};
   bool role_mapping_verified{true};
 
+  static constexpr double CLOCK_SKEW_TOLERANCE_DAYS = 0.001; // ~86.4 seconds
+
+  struct IssueResponseEvent {
+    double age_hours{0.0};
+    double first_reply_hours{-1.0};
+    bool has_reply{false};
+    bool complete_observation{true};
+
+    bool is_mature() const {
+      return age_hours >= 168.0 && complete_observation;
+    }
+    bool is_timely_replied() const {
+      return is_mature() && has_reply && first_reply_hours >= 0.0 && first_reply_hours <= 168.0;
+    }
+  };
+
+  static double evaluate_rr_cohort(const std::vector<IssueResponseEvent>& issues) {
+    int mature_total = 0;
+    int replied_within_7d = 0;
+    for (const auto& e : issues) {
+      if (e.is_mature()) {
+        mature_total++;
+        if (e.is_timely_replied()) {
+          replied_within_7d++;
+        }
+      }
+    }
+    return calculate_rr_score(replied_within_7d, mature_total);
+  }
+
   static double calculate_rt_score(double median_hours) {
-    if (median_hours < 0.0) median_hours = 0.0;
+    if (!std::isfinite(median_hours) || median_hours < 0.0) {
+      throw std::invalid_argument("Negative or non-finite reply duration: " + std::to_string(median_hours));
+    }
     return 100.0 / (1.0 + median_hours / 48.0);
   }
 
@@ -391,12 +423,22 @@ struct ResponsivenessEvidenceV2 {
   }
 
   static double calculate_pr_score(double median_review_hours) {
-    if (median_review_hours < 0.0) median_review_hours = 0.0;
+    if (!std::isfinite(median_review_hours) || median_review_hours < 0.0) {
+      throw std::invalid_argument("Negative or non-finite review duration: " + std::to_string(median_review_hours));
+    }
     return 100.0 / (1.0 + median_review_hours / 72.0);
   }
 
   static double calculate_ma_score(double days_since_act) {
-    if (days_since_act < 0.0) days_since_act = 0.0;
+    if (!std::isfinite(days_since_act)) {
+      throw std::invalid_argument("Non-finite days_since_act: " + std::to_string(days_since_act));
+    }
+    if (days_since_act < -CLOCK_SKEW_TOLERANCE_DAYS) {
+      throw std::invalid_argument("Future timestamp exceeds clock skew tolerance: " + std::to_string(days_since_act));
+    }
+    if (days_since_act < 0.0) {
+      days_since_act = 0.0;
+    }
     return 100.0 * std::pow(0.5, days_since_act / 14.0);
   }
 
@@ -526,8 +568,19 @@ struct RepositoryHealthEvidenceV2 {
     return 100.0 * std::min(1.0, std::max(0, distinct_authors_90d) / 6.0);
   }
 
+  static constexpr double CLOCK_SKEW_TOLERANCE_DAYS = 0.001; // ~86.4 seconds
+
   static double calculate_ma90_score(double days_since_code_activity) {
-    return 100.0 * std::pow(0.5, std::max(0.0, days_since_code_activity) / 90.0);
+    if (!std::isfinite(days_since_code_activity)) {
+      throw std::invalid_argument("Non-finite days_since_code_activity: " + std::to_string(days_since_code_activity));
+    }
+    if (days_since_code_activity < -CLOCK_SKEW_TOLERANCE_DAYS) {
+      throw std::invalid_argument("Future timestamp exceeds clock skew tolerance: " + std::to_string(days_since_code_activity));
+    }
+    if (days_since_code_activity < 0.0) {
+      days_since_code_activity = 0.0;
+    }
+    return 100.0 * std::pow(0.5, days_since_code_activity / 90.0);
   }
 
   HealthComputationResult compute_health() const {
