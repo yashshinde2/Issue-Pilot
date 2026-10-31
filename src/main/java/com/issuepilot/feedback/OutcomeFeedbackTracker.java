@@ -111,13 +111,11 @@ public class OutcomeFeedbackTracker {
                 // Duplicate completion event ignored
                 return false;
             }
-            // Out-of-order handling: completion implies prior acceptance
-            if (state.acceptanceDecision == null) {
-                state.acceptanceDecision = EventType.ACCEPTED;
-            } else if (state.acceptanceDecision == EventType.REJECTED) {
+            if (state.acceptanceDecision == EventType.REJECTED) {
                 // Conflicting state: issue was rejected, cannot complete
                 return false;
             }
+            // Preserve completion event independently; do NOT create a synthetic acceptance trial
             state.completionDecision = event.eventType();
             return true;
         }
@@ -179,8 +177,9 @@ public class OutcomeFeedbackTracker {
                 }
             }
 
-            // Completion accounting
-            if (s.completionDecision != null) {
+            // Completion accounting:
+            // V2.3 Section 9: completion trials are accepted issues with a final completed/not-completed outcome (n_complete <= a_accept)
+            if (s.acceptanceDecision == EventType.ACCEPTED && s.completionDecision != null) {
                 l1CompTrials++;
                 if (s.completionDecision == EventType.COMPLETED) {
                     l1CompSuccess++;

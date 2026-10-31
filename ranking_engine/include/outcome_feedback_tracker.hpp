@@ -111,14 +111,12 @@ public:
         // Duplicate completion event ignored
         return false;
       }
-      // Out-of-order handling: completion implies prior acceptance
-      if (!state.has_acceptance_decision) {
-        state.has_acceptance_decision = true;
-        state.acceptance_decision = OutcomeEventType::ACCEPTED;
-      } else if (state.acceptance_decision == OutcomeEventType::REJECTED) {
+      if (state.has_acceptance_decision &&
+          state.acceptance_decision == OutcomeEventType::REJECTED) {
         // Conflicting state: rejected issue cannot be completed
         return false;
       }
+      // Preserve completion event independently; do NOT create a synthetic acceptance trial
       state.has_completion_decision = true;
       state.completion_decision = event.event_type;
       return true;
@@ -183,7 +181,9 @@ public:
         }
       }
 
-      if (s.has_completion_decision) {
+      // Completion accounting:
+      // V2.3 Section 9: completion trials are accepted issues with a final completed/not-completed outcome (n_complete <= a_accept)
+      if (s.has_acceptance_decision && s.acceptance_decision == OutcomeEventType::ACCEPTED && s.has_completion_decision) {
         l1_comp_trials++;
         if (s.completion_decision == OutcomeEventType::COMPLETED) {
           l1_comp_success++;

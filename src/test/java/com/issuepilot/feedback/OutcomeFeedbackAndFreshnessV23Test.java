@@ -198,7 +198,7 @@ class OutcomeFeedbackAndFreshnessV23Test {
     }
 
     @Test
-    @DisplayName("OutcomeFeedbackTracker enforces deduplication, idempotency, and out-of-order resolution")
+    @DisplayName("OutcomeFeedbackTracker enforces deduplication, idempotency, and out-of-order resolution without synthetic acceptance")
     void testOutcomeFeedbackTrackerDeduplicationAndOrder() {
         OutcomeFeedbackTracker tracker = new OutcomeFeedbackTracker();
 
@@ -207,7 +207,7 @@ class OutcomeFeedbackAndFreshnessV23Test {
                 Instant.now(), "cohort1", "win1");
         assertTrue(tracker.recordEvent(e1));
 
-        // 2. Duplicate ACCEPTED ignored
+        // 2. Duplicate ACCEPTED ignored (idempotent)
         OutcomeEvent e2 = new OutcomeEvent("e2", "user1", "gh:org/repo#1", "python", "EASY", EventType.ACCEPTED,
                 Instant.now(), "cohort1", "win1");
         assertFalse(tracker.recordEvent(e2));
@@ -217,7 +217,7 @@ class OutcomeFeedbackAndFreshnessV23Test {
                 Instant.now(), "cohort1", "win1");
         assertFalse(tracker.recordEvent(e3));
 
-        // 4. Out-of-order: COMPLETED without prior ACCEPTED auto-registers ACCEPTED
+        // 4. Out-of-order arrival: COMPLETED arrives before ACCEPTED (independent preservation, NO synthetic acceptance)
         OutcomeEvent e4 = new OutcomeEvent("e4", "user1", "gh:org/repo#2", "python", "EASY", EventType.COMPLETED,
                 Instant.now(), "cohort1", "win1");
         assertTrue(tracker.recordEvent(e4));
@@ -227,11 +227,43 @@ class OutcomeFeedbackAndFreshnessV23Test {
                 Instant.now(), "cohort1", "win1");
         assertFalse(tracker.recordEvent(e5));
 
-        OutcomeFeedbackEvidenceV2 ev = tracker.buildEvidence("user1", "python", "EASY");
-        assertEquals(2, ev.getL1Accept().trials());
-        assertEquals(2, ev.getL1Accept().successes());
-        assertEquals(1, ev.getL1Complete().trials());
-        assertEquals(1, ev.getL1Complete().successes());
+        // Prior to ACCEPTED arrival, repo#2 does NOT create a synthetic acceptance trial
+        OutcomeFeedbackEvidenceV2 evPre = tracker.buildEvidence("user1", "python", "EASY");
+        assertEquals(1, evPre.getL1Accept().trials(), "Acceptance population must NOT contain synthetic trial");
+        assertEquals(1, evPre.getL1Accept().successes());
+        assertEquals(0, evPre.getL1Complete().trials(), "Completion trials must have accepted denominator (n_complete <= a_accept)");
+        assertEquals(0, evPre.getL1Complete().successes());
+
+        // 6. Now subsequent ACCEPTED arrives for repo#2 (reconciles out-of-order completion)
+        OutcomeEvent e4Acc = new OutcomeEvent("e4_acc", "user1", "gh:org/repo#2", "python", "EASY", EventType.ACCEPTED,
+                Instant.now(), "cohort1", "win1");
+        assertTrue(tracker.recordEvent(e4Acc));
+
+        OutcomeFeedbackEvidenceV2 evPost = tracker.buildEvidence("user1", "python", "EASY");
+        assertEquals(2, evPost.getL1Accept().trials());
+        assertEquals(2, evPost.getL1Accept().successes());
+        assertEquals(1, evPost.getL1Complete().trials());
+        assertEquals(1, evPost.getL1Complete().successes());
+
+        // 7. Arrival order permutation invariance: reverse order (ACCEPTED then COMPLETED) produces identical outcome counts
+        OutcomeFeedbackTracker trackerRev = new OutcomeFeedbackTracker();
+        assertTrue(trackerRev.recordEvent(new OutcomeEvent("r1", "user1", "gh:org/repo#1", "python", "EASY", EventType.ACCEPTED, Instant.now(), "c1", "w1")));
+        assertTrue(trackerRev.recordEvent(new OutcomeEvent("r2_acc", "user1", "gh:org/repo#2", "python", "EASY", EventType.ACCEPTED, Instant.now(), "c1", "w1")));
+        assertTrue(trackerRev.recordEvent(new OutcomeEvent("r2_comp", "user1", "gh:org/repo#2", "python", "EASY", EventType.COMPLETED, Instant.now(), "c1", "w1")));
+        OutcomeFeedbackEvidenceV2 evRev = trackerRev.buildEvidence("user1", "python", "EASY");
+        assertEquals(evPost.getL1Accept().trials(), evRev.getL1Accept().trials(), "Arrival order permutation must yield identical acceptance trials");
+        assertEquals(evPost.getL1Accept().successes(), evRev.getL1Accept().successes(), "Arrival order permutation must yield identical acceptance successes");
+        assertEquals(evPost.getL1Complete().trials(), evRev.getL1Complete().trials(), "Arrival order permutation must yield identical completion trials");
+        assertEquals(evPost.getL1Complete().successes(), evRev.getL1Complete().successes(), "Arrival order permutation must yield identical completion successes");
+
+        // 8. Conflicting events: REJECTED after COMPLETED, or COMPLETED after REJECTED
+        OutcomeEvent confRej = new OutcomeEvent("c_rej", "user1", "gh:org/repo#2", "python", "EASY", EventType.REJECTED, Instant.now(), "c1", "w1");
+        assertFalse(tracker.recordEvent(confRej), "Cannot reject an issue that was already completed");
+
+        OutcomeEvent rejFirst = new OutcomeEvent("r3_rej", "user1", "gh:org/repo#3", "python", "EASY", EventType.REJECTED, Instant.now(), "c1", "w1");
+        assertTrue(tracker.recordEvent(rejFirst));
+        OutcomeEvent compAfterRej = new OutcomeEvent("r3_comp", "user1", "gh:org/repo#3", "python", "EASY", EventType.COMPLETED, Instant.now(), "c1", "w1");
+        assertFalse(tracker.recordEvent(compAfterRej), "Cannot complete an issue that was rejected");
     }
 
     @Test

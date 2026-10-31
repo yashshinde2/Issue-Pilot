@@ -1850,22 +1850,59 @@ int main() {
         e3.event_type = issue_pilot::OutcomeEventType::REJECTED;
         report_test("Tracker Conflicting REJECTED Ignored", !tracker.record_event(e3), 1.0, 1.0);
 
-        // Out-of-order: COMPLETED without prior ACCEPTED auto-registers ACCEPTED
+        // Out-of-order arrival: COMPLETED arrives before ACCEPTED (independent preservation, no synthetic acceptance)
         issue_pilot::OutcomeEvent e4;
         e4.user_id = "user1"; e4.issue_key = "gh:org/repo#2"; e4.technology = "python"; e4.difficulty_band = "EASY";
         e4.event_type = issue_pilot::OutcomeEventType::COMPLETED;
         report_test("Tracker Out-of-Order COMPLETED Recorded", tracker.record_event(e4), 1.0, 1.0);
 
-        // Duplicate COMPLETED
+        // Duplicate COMPLETED ignored
         issue_pilot::OutcomeEvent e5 = e4;
         e5.event_id = "dup_comp";
         report_test("Tracker Duplicate COMPLETED Ignored", !tracker.record_event(e5), 1.0, 1.0);
+
+        // Prior to ACCEPTED arrival, repo#2 does NOT create a synthetic acceptance trial
+        auto track_ev_pre = tracker.build_evidence("user1", "python", "EASY");
+        report_test("Tracker Pre-Accept Acceptance Trials is 1", track_ev_pre.l1_accept.trials == 1, 1.0, static_cast<double>(track_ev_pre.l1_accept.trials));
+        report_test("Tracker Pre-Accept Completion Trials is 0", track_ev_pre.l1_complete.trials == 0, 0.0, static_cast<double>(track_ev_pre.l1_complete.trials));
+
+        // Now subsequent ACCEPTED arrives for repo#2 (reconciles out-of-order completion)
+        issue_pilot::OutcomeEvent e4_acc;
+        e4_acc.user_id = "user1"; e4_acc.issue_key = "gh:org/repo#2"; e4_acc.technology = "python"; e4_acc.difficulty_band = "EASY";
+        e4_acc.event_type = issue_pilot::OutcomeEventType::ACCEPTED;
+        report_test("Tracker Subsequent ACCEPTED Recorded", tracker.record_event(e4_acc), 1.0, 1.0);
 
         auto track_ev = tracker.build_evidence("user1", "python", "EASY");
         report_test("Tracker Global Accept Trials is 2", track_ev.l1_accept.trials, 2.0, static_cast<double>(track_ev.l1_accept.trials));
         report_test("Tracker Global Accept Successes is 2", track_ev.l1_accept.successes, 2.0, static_cast<double>(track_ev.l1_accept.successes));
         report_test("Tracker Global Comp Trials is 1", track_ev.l1_complete.trials, 1.0, static_cast<double>(track_ev.l1_complete.trials));
         report_test("Tracker Global Comp Successes is 1", track_ev.l1_complete.successes, 1.0, static_cast<double>(track_ev.l1_complete.successes));
+
+        // Arrival order invariance: reverse order (ACCEPTED then COMPLETED) produces IDENTICAL counts
+        issue_pilot::OutcomeFeedbackTracker tracker_rev;
+        issue_pilot::OutcomeEvent r1 = e1;
+        issue_pilot::OutcomeEvent r2_acc = e4_acc;
+        issue_pilot::OutcomeEvent r2_comp = e4;
+        tracker_rev.record_event(r1);
+        tracker_rev.record_event(r2_acc);
+        tracker_rev.record_event(r2_comp);
+        auto track_ev_rev = tracker_rev.build_evidence("user1", "python", "EASY");
+        report_test("Arrival Order Invariance Accept Trials", track_ev.l1_accept.trials == track_ev_rev.l1_accept.trials, static_cast<double>(track_ev.l1_accept.trials), static_cast<double>(track_ev_rev.l1_accept.trials));
+        report_test("Arrival Order Invariance Complete Trials", track_ev.l1_complete.trials == track_ev_rev.l1_complete.trials, static_cast<double>(track_ev.l1_complete.trials), static_cast<double>(track_ev_rev.l1_complete.trials));
+
+        // Conflicting events
+        issue_pilot::OutcomeEvent conf_rej = e4;
+        conf_rej.event_type = issue_pilot::OutcomeEventType::REJECTED;
+        report_test("Tracker REJECTED After COMPLETED Ignored", !tracker.record_event(conf_rej), 1.0, 1.0);
+
+        issue_pilot::OutcomeEvent rej_first;
+        rej_first.user_id = "user1"; rej_first.issue_key = "gh:org/repo#3"; rej_first.technology = "python"; rej_first.difficulty_band = "EASY";
+        rej_first.event_type = issue_pilot::OutcomeEventType::REJECTED;
+        report_test("Tracker REJECTED Recorded", tracker.record_event(rej_first), 1.0, 1.0);
+
+        issue_pilot::OutcomeEvent comp_after_rej = rej_first;
+        comp_after_rej.event_type = issue_pilot::OutcomeEventType::COMPLETED;
+        report_test("Tracker COMPLETED After REJECTED Ignored", !tracker.record_event(comp_after_rej), 1.0, 1.0);
     }
 
     std::cout << "\nALL UNIT TEST CHECKS (INCLUDING PHASE 1 CONTRACTS) PASSED SUCCESSFULLY!\n";
