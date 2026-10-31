@@ -268,5 +268,140 @@ class ResponsivenessAndHealthV23Test {
         h.setC90Confidence(Double.POSITIVE_INFINITY);
         assertThrows(IllegalArgumentException.class, h::computeHealth);
     }
+
+    @Test
+    @DisplayName("Verify rejection of negative durations and handling of clock skew")
+    void testNegativeDurationsAndClockSkew() {
+        assertThrows(IllegalArgumentException.class, () -> ResponsivenessEvidenceV2.calculateRtScore(-5.0));
+        assertThrows(IllegalArgumentException.class, () -> ResponsivenessEvidenceV2.calculatePrScore(-10.0));
+
+        // Tolerated negative duration / clock skew clamped to zero in recency
+        assertEquals(100.0, ResponsivenessEvidenceV2.calculateMaScore(-0.01), 1e-6);
+        assertEquals(100.0, RepositoryHealthEvidenceV2.calculateMa90Score(-0.05), 1e-6);
+    }
+
+    @Test
+    @DisplayName("Verify confidence aggregation and non-default propagation (C_R, C_H)")
+    void testConfidenceAggregationAndPropagation() {
+        ResponsivenessEvidenceV2 r = new ResponsivenessEvidenceV2();
+        r.setResponseTimeScore(80.0);
+        r.setRtSamples(8);
+        r.setRtAvailable(true);
+        r.setRtConfidence(0.80);
+
+        r.setResponseRateScore(70.0);
+        r.setRrSamples(6);
+        r.setRrAvailable(true);
+        r.setRrConfidence(0.70);
+
+        ResponsivenessComputationResult resR = r.computeResponsiveness();
+        assertTrue(resR.available());
+        assertEquals(75.0, resR.score(), 1e-4);
+        assertEquals(0.60, resR.coverageAr(), 1e-6);
+        // C_R = 0.30 * 0.80 + 0.30 * 0.70 = 0.24 + 0.21 = 0.45
+        assertEquals(0.45, resR.confidence(), 1e-4);
+
+        RepositoryHealthEvidenceV2 h = new RepositoryHealthEvidenceV2();
+        h.setC90Score(100.0);
+        h.setC90Available(true);
+        h.setC90Confidence(0.90);
+
+        h.setPr30Score(80.0);
+        h.setPr30Available(true);
+        h.setPr30Confidence(0.80);
+
+        HealthComputationResult resH = h.computeHealth();
+        assertTrue(resH.available());
+        // C_H = 0.30 * 0.90 + 0.25 * 0.80 = 0.27 + 0.20 = 0.47
+        assertEquals(0.47, resH.confidence(), 1e-4);
+        assertEquals(0.55, resH.coverageAh(), 1e-6);
+        // Score = (0.30*100 + 0.25*80) / 0.55 = 50 / 0.55 = 90.909091
+        assertEquals(90.909091, resH.score(), 1e-4);
+    }
+
+    @Test
+    @DisplayName("Verify empty repository with complete queries yields known zero, not unavailable")
+    void testEmptyRepositoryVsUnavailableData() {
+        // Complete queries returning 0 commits, 0 PRs, 0 authors, 365d idle
+        RepositoryHealthEvidenceV2 emptyRepo = RepositoryHealthEvidenceV2.fromMeasurements(0, 0, 0, 365.0);
+        HealthComputationResult res = emptyRepo.computeHealth();
+
+        assertTrue(res.available(), "Complete queries proving zero activity must be available with known zero");
+        assertEquals(0.0, emptyRepo.getC90Score(), 1e-6);
+        assertEquals(0.0, emptyRepo.getPr30Score(), 1e-6);
+        assertEquals(0.0, emptyRepo.getAu90Score(), 1e-6);
+        assertTrue(emptyRepo.getMa90Score() < 7.0); // 100 * 0.5^(365/90) ~ 6.0136
+
+        // Conversely, missing repository measurements must be unavailable
+        RepositoryHealthEvidenceV2 missingRepo = new RepositoryHealthEvidenceV2();
+        missingRepo.setC90Available(false);
+        missingRepo.setPr30Available(false);
+        assertFalse(missingRepo.computeHealth().available(), "Missing data must be unavailable, not zero");
+    }
+
+    @Test
+    @DisplayName("Verify window filtering excludes activity outside 30-day and 90-day windows")
+    void testTimeWindowExclusions() {
+        // PR merged 35 days ago is strictly outside PR30 window -> 0 PRs in 30d
+        assertEquals(0.0, RepositoryHealthEvidenceV2.calculatePr30Score(0), 1e-6);
+
+        // Commits 120 days ago are strictly outside 90d window -> 0 commits in 90d
+        assertEquals(0.0, RepositoryHealthEvidenceV2.calculateC90Score(0), 1e-6);
+
+        // Authors active only outside 90d are strictly outside AU90 window -> 0 authors in 90d
+        assertEquals(0.0, RepositoryHealthEvidenceV2.calculateAu90Score(0), 1e-6);
+    }
+
+    @Test
+    @DisplayName("Verify exact 5-observation boundary and 4-observation rejection for all R signals")
+    void testExactFiveObservationSampleGateForAllSignals() {
+        // Test RT
+        ResponsivenessEvidenceV2 rRt = new ResponsivenessEvidenceV2();
+        rRt.setResponseTimeScore(80.0); rRt.setRtSamples(4); rRt.setRtAvailable(true);
+        rRt.setResponseRateScore(80.0); rRt.setRrSamples(5); rRt.setRrAvailable(true);
+        // RT has N=4, so only RR is available -> count = 1 < 2 -> overall unavailable
+        assertFalse(rRt.computeResponsiveness().available());
+
+        rRt.setRtSamples(5); // Now N=5 -> count = 2 -> overall available
+        assertTrue(rRt.computeResponsiveness().available());
+
+        // Test PR
+        ResponsivenessEvidenceV2 rPr = new ResponsivenessEvidenceV2();
+        rPr.setResponseTimeScore(80.0); rPr.setRtSamples(5); rPr.setRtAvailable(true);
+        rPr.setPrReviewScore(70.0); rPr.setPrSamples(4); rPr.setPrAvailable(true);
+        // PR has N=4 -> only RT available -> count = 1 < 2 -> overall unavailable
+        assertFalse(rPr.computeResponsiveness().available());
+
+        rPr.setPrSamples(5); // Now N=5 -> count = 2, coverage = 0.55 -> overall available
+        assertTrue(rPr.computeResponsiveness().available());
+
+        // Test MA
+        ResponsivenessEvidenceV2 rMa = new ResponsivenessEvidenceV2();
+        rMa.setResponseTimeScore(80.0); rMa.setRtSamples(5); rMa.setRtAvailable(true);
+        rMa.setRecentMaintainerAct(60.0); rMa.setMaSamples(4); rMa.setMaAvailable(true);
+        // MA has N=4 -> only RT available -> count = 1 < 2 -> overall unavailable
+        assertFalse(rMa.computeResponsiveness().available());
+
+        rMa.setMaSamples(5); // Now N=5 -> count = 2, coverage = 0.45 -> overall available
+        assertTrue(rMa.computeResponsiveness().available());
+    }
+
+    @Test
+    @DisplayName("Verify unverified maintainer roles and missing permissions invalidate Responsiveness")
+    void testAmbiguousRolesAndMissingPermissions() {
+        ResponsivenessEvidenceV2 r = new ResponsivenessEvidenceV2();
+        r.setResponseTimeScore(80.0); r.setRtSamples(10); r.setRtAvailable(true);
+        r.setResponseRateScore(80.0); r.setRrSamples(10); r.setRrAvailable(true);
+        r.setRoleMappingVerified(null); // unverified/ambiguous role
+
+        // False or null role mapping must fail closed
+        ResponsivenessComputationResult resNull = r.computeResponsiveness();
+        assertFalse(resNull.available());
+
+        r.setRoleMappingVerified(false);
+        ResponsivenessComputationResult resFalse = r.computeResponsiveness();
+        assertFalse(resFalse.available());
+        assertTrue(resFalse.explanation().contains("unverified"));
+    }
 }
 

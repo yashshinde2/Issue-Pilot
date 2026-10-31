@@ -524,11 +524,11 @@ public final class EvidenceModelsV2 {
         }
 
         public ResponsivenessComputationResult computeResponsiveness() {
-            if (Boolean.FALSE.equals(roleMappingVerified)) {
+            if (!Boolean.TRUE.equals(roleMappingVerified)) {
                 return ResponsivenessComputationResult.unavailable(0.0, 0,
                         "Maintainer role mapping unverified (e.g. Bugzilla without explicit maintainer role).");
             }
-            if (Boolean.FALSE.equals(paginationComplete)) {
+            if (!Boolean.TRUE.equals(paginationComplete)) {
                 return ResponsivenessComputationResult.unavailable(0.0, 0, "Comment pagination incomplete.");
             }
 
@@ -865,7 +865,7 @@ public final class EvidenceModelsV2 {
         }
 
         public HealthComputationResult computeHealth() {
-            if (Boolean.FALSE.equals(codeHostAvailable)) {
+            if (!Boolean.TRUE.equals(codeHostAvailable)) {
                 return HealthComputationResult.unavailable(0.0, 0,
                         "Direct code-host evidence unavailable (Bugzilla H unavailable).");
             }

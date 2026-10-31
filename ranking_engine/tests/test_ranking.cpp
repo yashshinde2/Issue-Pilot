@@ -1515,6 +1515,46 @@ int main() {
         report_test("Engine V2.3: Responsiveness Score = 75.0", std::abs(scores_rh.responsiveness - 75.0) < 1e-4, 75.0, scores_rh.responsiveness);
         report_test("Engine V2.3: Repository Health Available", scores_rh.health_available, 1.0, scores_rh.health_available ? 1.0 : 0.0);
         report_test("Engine V2.3: Repository Health Score (~90.909)", std::abs(scores_rh.repository_health - 90.909091) < 1e-3, 90.909091, scores_rh.repository_health);
+
+        // 4. Confidence Propagation (Non-Default Values)
+        issue_pilot::ResponsivenessEvidenceV2 r_conf;
+        r_conf.response_time_score = 80.0; r_conf.rt_samples = 6; r_conf.rt_available = true; r_conf.rt_confidence = 0.80;
+        r_conf.response_rate_score = 70.0; r_conf.rr_samples = 6; r_conf.rr_available = true; r_conf.rr_confidence = 0.70;
+        auto res_r_conf = r_conf.compute_responsiveness();
+        report_test("Responsiveness Confidence Propagation (0.45)", std::abs(res_r_conf.confidence - 0.45) < 1e-4, 0.45, res_r_conf.confidence);
+
+        issue_pilot::RepositoryHealthEvidenceV2 h_conf;
+        h_conf.c90_score = 100.0; h_conf.c90_available = true; h_conf.c90_confidence = 0.90;
+        h_conf.pr30_score = 80.0; h_conf.pr30_available = true; h_conf.pr30_confidence = 0.80;
+        auto res_h_conf = h_conf.compute_health();
+        report_test("Repository Health Confidence Propagation (0.47)", std::abs(res_h_conf.confidence - 0.47) < 1e-4, 0.47, res_h_conf.confidence);
+
+        // 5. Sample Count Gate 5 vs 4 for All R Signals
+        issue_pilot::ResponsivenessEvidenceV2 r_gate;
+        r_gate.response_time_score = 80.0; r_gate.rt_available = true; r_gate.rt_samples = 4;
+        r_gate.response_rate_score = 80.0; r_gate.rr_available = true; r_gate.rr_samples = 5;
+        // RT has N=4 -> rejected -> count = 1 -> overall unavailable
+        report_test("Responsiveness Sample Gate Rejects N=4", !r_gate.compute_responsiveness().available, 1.0, !r_gate.compute_responsiveness().available ? 1.0 : 0.0);
+        r_gate.rt_samples = 5;
+        report_test("Responsiveness Sample Gate Accepts N=5", r_gate.compute_responsiveness().available, 1.0, r_gate.compute_responsiveness().available ? 1.0 : 0.0);
+
+        // 6. Clock Skew Clamping vs Negative Duration
+        double ma_skew = issue_pilot::ResponsivenessEvidenceV2::calculate_ma_score(-0.01);
+        report_test("MA Negative Clock Skew Clamped to 0.0 -> Score 100.0", std::abs(ma_skew - 100.0) < 1e-6, 100.0, ma_skew);
+
+        double ma90_skew = issue_pilot::RepositoryHealthEvidenceV2::calculate_ma90_score(-0.05);
+        report_test("MA90 Negative Clock Skew Clamped to 0.0 -> Score 100.0", std::abs(ma90_skew - 100.0) < 1e-6, 100.0, ma90_skew);
+
+        // 7. Empty Repository Known Zero
+        issue_pilot::RepositoryHealthEvidenceV2 h_empty;
+        h_empty.c90_score = issue_pilot::RepositoryHealthEvidenceV2::calculate_c90_score(0); h_empty.c90_available = true;
+        h_empty.pr30_score = issue_pilot::RepositoryHealthEvidenceV2::calculate_pr30_score(0); h_empty.pr30_available = true;
+        h_empty.au90_score = issue_pilot::RepositoryHealthEvidenceV2::calculate_au90_score(0); h_empty.au90_available = true;
+        h_empty.ma90_score = issue_pilot::RepositoryHealthEvidenceV2::calculate_ma90_score(365.0); h_empty.ma90_available = true;
+        auto res_h_empty = h_empty.compute_health();
+        report_test("Empty Repository Available with Complete Measurements", res_h_empty.available, 1.0, res_h_empty.available ? 1.0 : 0.0);
+        report_test("Empty Repository C90 is Exactly 0.0", std::abs(h_empty.c90_score - 0.0) < 1e-6, 0.0, h_empty.c90_score);
+        report_test("Empty Repository PR30 is Exactly 0.0", std::abs(h_empty.pr30_score - 0.0) < 1e-6, 0.0, h_empty.pr30_score);
     }
 
     std::cout << "\nALL UNIT TEST CHECKS (INCLUDING PHASE 1 CONTRACTS) PASSED SUCCESSFULLY!\n";
