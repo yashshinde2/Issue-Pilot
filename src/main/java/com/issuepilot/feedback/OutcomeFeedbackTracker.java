@@ -66,6 +66,10 @@ public class OutcomeFeedbackTracker {
             this.technology = canonicalTech(technology);
             this.difficultyBand = canonicalBand(difficultyBand);
         }
+
+        public String getIssueKey() {
+            return issueKey;
+        }
     }
 
     private final Map<String, Map<String, IssueDecisionState>> userIssueStates = new ConcurrentHashMap<>();
