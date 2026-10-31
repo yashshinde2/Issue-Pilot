@@ -2,6 +2,7 @@
 
 #include "types.hpp"
 #include <algorithm>
+#include <map>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -28,6 +29,7 @@ struct OutcomeEvent {
   int64_t timestamp_utc{0};
   std::string cohort_key;
   std::string exposure_window;
+  int64_t decision_revision{1};
 };
 
 class OutcomeFeedbackTracker {
@@ -82,6 +84,11 @@ public:
       return false;
     }
 
+    if (event.decision_revision <= 0) {
+      // Mandatory decision_revision check: must be >= 1
+      return false;
+    }
+
     std::string user_id = trim_str(event.user_id);
     std::string issue_key = trim_str(event.issue_key);
     if (user_id.empty() || issue_key.empty()) {
@@ -108,45 +115,72 @@ public:
     auto &state = it->second;
     state.event_history.push_back(event);
 
-    // Sort events deterministically by authoritative UTC timestamp, then event_id
+    // Sort events deterministically by (decision_revision, timestamp_utc, event_id)
     std::sort(state.event_history.begin(), state.event_history.end(),
               [](const OutcomeEvent &a, const OutcomeEvent &b) {
+                if (a.decision_revision != b.decision_revision) {
+                  return a.decision_revision < b.decision_revision;
+                }
                 if (a.timestamp_utc != b.timestamp_utc) {
                   return a.timestamp_utc < b.timestamp_utc;
                 }
                 return a.event_id < b.event_id;
               });
 
-    // Deterministic state machine replay over canonical timeline
+    // Group events by decision_revision
+    std::map<int64_t, std::vector<OutcomeEvent>> rev_groups;
+    for (const auto &ev : state.event_history) {
+      rev_groups[ev.decision_revision].push_back(ev);
+    }
+
     bool has_acc = false;
     OutcomeEventType eff_acc = OutcomeEventType::RECOMMENDATION_SHOWN;
     bool has_comp = false;
     OutcomeEventType eff_comp = OutcomeEventType::RECOMMENDATION_SHOWN;
 
-    for (const auto &ev : state.event_history) {
-      if (ev.event_type == OutcomeEventType::RECOMMENDATION_SHOWN) {
-        continue;
+    for (const auto &pair : rev_groups) {
+      const auto &rev_events = pair.second;
+      bool r_has_acc = false;
+      bool r_has_rej = false;
+      bool r_has_comp = false;
+      OutcomeEventType r_comp_type = OutcomeEventType::RECOMMENDATION_SHOWN;
+      bool r_has_reopen = false;
+
+      for (const auto &ev : rev_events) {
+        if (ev.event_type == OutcomeEventType::ACCEPTED) r_has_acc = true;
+        else if (ev.event_type == OutcomeEventType::REJECTED) r_has_rej = true;
+        else if (ev.event_type == OutcomeEventType::COMPLETED || ev.event_type == OutcomeEventType::NOT_COMPLETED) {
+          r_has_comp = true;
+          r_comp_type = ev.event_type;
+        } else if (ev.event_type == OutcomeEventType::REOPENED) {
+          r_has_reopen = true;
+        }
       }
-      if (ev.event_type == OutcomeEventType::ACCEPTED ||
-          ev.event_type == OutcomeEventType::REJECTED) {
-        // Cannot retroactively reject an issue that was already completed
-        if (has_comp && ev.event_type == OutcomeEventType::REJECTED) {
-          continue;
-        }
+
+      if (r_has_acc && r_has_rej) {
+        // Conflicting decisions at the EXACT SAME revision: QUARANTINE!
+        has_acc = false;
+        eff_acc = OutcomeEventType::RECOMMENDATION_SHOWN;
+      } else if (r_has_acc) {
         has_acc = true;
-        eff_acc = ev.event_type;
-      } else if (ev.event_type == OutcomeEventType::COMPLETED ||
-                 ev.event_type == OutcomeEventType::NOT_COMPLETED) {
-        // Rejected issues cannot complete
-        if (has_acc && eff_acc == OutcomeEventType::REJECTED) {
-          continue;
+        eff_acc = OutcomeEventType::ACCEPTED;
+      } else if (r_has_rej) {
+        if (!has_comp) {
+          has_acc = true;
+          eff_acc = OutcomeEventType::REJECTED;
         }
-        has_comp = true;
-        eff_comp = ev.event_type;
-      } else if (ev.event_type == OutcomeEventType::REOPENED) {
-        // Reopening reverses previous terminal completion outcome, returning issue to in-progress
+      }
+
+      if (r_has_reopen) {
         has_comp = false;
         eff_comp = OutcomeEventType::RECOMMENDATION_SHOWN;
+      } else if (r_has_comp) {
+        if (has_acc && eff_acc == OutcomeEventType::REJECTED) {
+          // rejected cannot complete
+        } else {
+          has_comp = true;
+          eff_comp = r_comp_type;
+        }
       }
     }
 

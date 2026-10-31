@@ -32,15 +32,23 @@ public class OutcomeFeedbackTracker {
             EventType eventType,
             Instant timestamp,
             String cohortKey,
-            String exposureWindow) {
+            String exposureWindow,
+            long decisionRevision) {
+
+        public OutcomeEvent(
+                String eventId,
+                String userId,
+                String issueKey,
+                String technology,
+                String difficultyBand,
+                EventType eventType,
+                Instant timestamp,
+                String cohortKey,
+                String exposureWindow) {
+            this(eventId, userId, issueKey, technology, difficultyBand, eventType, timestamp, cohortKey, exposureWindow, 1L);
+        }
 
         public OutcomeEvent {
-            if (userId == null || userId.isBlank()) {
-                throw new IllegalArgumentException("userId must not be blank");
-            }
-            if (issueKey == null || issueKey.isBlank()) {
-                throw new IllegalArgumentException("issueKey must not be blank");
-            }
             if (eventType == null) {
                 throw new IllegalArgumentException("eventType must not be null");
             }
@@ -97,6 +105,11 @@ public class OutcomeFeedbackTracker {
             return false;
         }
 
+        // Mandatory decisionRevision check: must be >= 1
+        if (event.decisionRevision() <= 0L) {
+            return false;
+        }
+
         // Mandatory user and issue identifiers
         if (event.userId() == null || event.userId().isBlank() || event.issueKey() == null || event.issueKey().isBlank()) {
             return false;
@@ -116,41 +129,67 @@ public class OutcomeFeedbackTracker {
         IssueDecisionState state = userMap.computeIfAbsent(issueKey, k -> new IssueDecisionState(issueKey, event.technology(), event.difficultyBand()));
         state.eventHistory.add(event);
 
-        // Sort events deterministically by authoritative UTC timestamp, then eventId
+        // Sort events deterministically by (decisionRevision, timestamp, eventId)
         state.eventHistory.sort((a, b) -> {
-            long tA = a.timestamp().toEpochMilli();
-            long tB = b.timestamp().toEpochMilli();
-            int cmp = Long.compare(tA, tB);
-            if (cmp != 0) {
-                return cmp;
+            int cmpRev = Long.compare(a.decisionRevision(), b.decisionRevision());
+            if (cmpRev != 0) {
+                return cmpRev;
+            }
+            int cmpTs = Long.compare(a.timestamp().toEpochMilli(), b.timestamp().toEpochMilli());
+            if (cmpTs != 0) {
+                return cmpTs;
             }
             return a.eventId().trim().compareTo(b.eventId().trim());
         });
 
-        // Deterministic state machine replay over canonical timeline
+        // Deterministic state machine replay grouped by per-exposure decision revision
+        Map<Long, List<OutcomeEvent>> revGroups = new TreeMap<>();
+        for (OutcomeEvent ev : state.eventHistory) {
+            revGroups.computeIfAbsent(ev.decisionRevision(), k -> new ArrayList<>()).add(ev);
+        }
+
         EventType effectiveAcc = null;
         EventType effectiveComp = null;
 
-        for (OutcomeEvent ev : state.eventHistory) {
-            EventType t = ev.eventType();
-            if (t == EventType.RECOMMENDATION_SHOWN) {
-                continue;
+        for (Map.Entry<Long, List<OutcomeEvent>> entry : revGroups.entrySet()) {
+            List<OutcomeEvent> revEvents = entry.getValue();
+
+            boolean hasAcc = false;
+            boolean hasRej = false;
+            OutcomeEvent compEv = null;
+            boolean hasReopen = false;
+
+            for (OutcomeEvent ev : revEvents) {
+                EventType t = ev.eventType();
+                if (t == EventType.ACCEPTED) hasAcc = true;
+                else if (t == EventType.REJECTED) hasRej = true;
+                else if (t == EventType.COMPLETED || t == EventType.NOT_COMPLETED) compEv = ev;
+                else if (t == EventType.REOPENED) hasReopen = true;
             }
-            if (t == EventType.ACCEPTED || t == EventType.REJECTED) {
-                // Cannot retroactively reject an issue that was already completed
-                if (effectiveComp != null && t == EventType.REJECTED) {
-                    continue;
+
+            if (hasAcc && hasRej) {
+                // Conflicting decisions at the EXACT SAME revision: QUARANTINE!
+                // An arbitrary UUID must NOT pick a winner. Quarantine unresolvable conflict.
+                effectiveAcc = null;
+            } else if (hasAcc) {
+                effectiveAcc = EventType.ACCEPTED;
+            } else if (hasRej) {
+                if (effectiveComp != null) {
+                    // Cannot retroactively reject an issue that was already completed at a prior revision
+                } else {
+                    effectiveAcc = EventType.REJECTED;
                 }
-                effectiveAcc = t;
-            } else if (t == EventType.COMPLETED || t == EventType.NOT_COMPLETED) {
-                // Completion trials are accepted issues; rejected issues cannot complete
-                if (effectiveAcc == EventType.REJECTED) {
-                    continue;
-                }
-                effectiveComp = t;
-            } else if (t == EventType.REOPENED) {
-                // Reopening reverses previous terminal completion outcome, returning issue to in-progress
+            }
+
+            if (hasReopen) {
+                // Reopening reverses previous terminal completion outcome
                 effectiveComp = null;
+            } else if (compEv != null) {
+                if (effectiveAcc == EventType.REJECTED) {
+                    // Rejected issues cannot complete
+                } else {
+                    effectiveComp = compEv.eventType();
+                }
             }
         }
 
