@@ -480,8 +480,6 @@ public final class TechnologyRegistry {
      * Checks if text contains technology mention respecting whole-token boundaries and context rules.
      */
     private static boolean matchesInTextWithContext(TechnologyDefinition def, String text, boolean isTitle) {
-        String lower = text.toLowerCase(Locale.ROOT);
-
         if (def.isShortAlias()) {
             return matchesShortAliasWithContext(def, text);
         }
@@ -609,4 +607,5 @@ public final class TechnologyRegistry {
         return list;
     }
 }
+
 

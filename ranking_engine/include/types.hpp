@@ -333,47 +333,269 @@ struct DifficultyEvidenceV2 {
 };
 
 // V2.3 Responsiveness Evidence: RT (30%), RR (30%), PR (25%), MA (15%)
-struct ResponsivenessEvidenceV2 {
-  double response_time_score{80.0};
-  double response_rate_score{80.0};
-  double pr_review_score{80.0};
-  double recent_maintainer_act{80.0};
+// Minimum 5 samples per signal, count >= 2 signals, A_R >= 0.45.
+// Role mapping verified required (Bugzilla R unavailable without verified role mapping).
+// Pagination completeness required.
+struct ResponsivenessComputationResult {
+  bool available{false};
+  double score{0.0};
+  double confidence{0.0};
+  double coverage_ar{0.0};
+  int signal_count{0};
+  std::string explanation;
+
+  static ResponsivenessComputationResult unavailable(double coverage, int count, const std::string& reason) {
+    ResponsivenessComputationResult r;
+    r.available = false;
+    r.score = 0.0;
+    r.confidence = 0.0;
+    r.coverage_ar = coverage;
+    r.signal_count = count;
+    r.explanation = reason;
+    return r;
+  }
 };
 
-// V2.3 Repository Health Evidence: C90 (30%), PR30 (25%), AU90 (25%), MA90
-// (20%)
-struct RepositoryHealthEvidenceV2 {
-  double c90_score{80.0};
-  double pr30_score{80.0};
-  double au90_score{80.0};
-  double ma90_score{80.0};
-  bool c90_available{true};
-  bool pr30_available{true};
-  bool au90_available{true};
-  bool ma90_available{true};
+struct ResponsivenessEvidenceV2 {
+  double response_time_score{0.0};
+  bool rt_available{false};
+  int rt_samples{0};
+  double rt_confidence{1.0};
 
-  double compute_health() const {
-    double sum_w = 0.0;
-    double w_val = 0.0;
-    if (c90_available) {
-      w_val += 0.30 * c90_score;
-      sum_w += 0.30;
+  double response_rate_score{0.0};
+  bool rr_available{false};
+  int rr_samples{0};
+  double rr_confidence{1.0};
+
+  double pr_review_score{0.0};
+  bool pr_available{false};
+  int pr_samples{0};
+  double pr_confidence{1.0};
+
+  double recent_maintainer_act{0.0};
+  bool ma_available{false};
+  int ma_samples{0};
+  double ma_confidence{1.0};
+
+  bool pagination_complete{true};
+  bool role_mapping_verified{true};
+
+  static double calculate_rt_score(double median_hours) {
+    if (median_hours < 0.0) median_hours = 0.0;
+    return 100.0 / (1.0 + median_hours / 48.0);
+  }
+
+  static double calculate_rr_score(int replied_7d, int mature_total_7d) {
+    if (mature_total_7d <= 0) return 0.0;
+    return 100.0 * (static_cast<double>(std::max(0, replied_7d)) / static_cast<double>(mature_total_7d));
+  }
+
+  static double calculate_pr_score(double median_review_hours) {
+    if (median_review_hours < 0.0) median_review_hours = 0.0;
+    return 100.0 / (1.0 + median_review_hours / 72.0);
+  }
+
+  static double calculate_ma_score(double days_since_act) {
+    if (days_since_act < 0.0) days_since_act = 0.0;
+    return 100.0 * std::pow(0.5, days_since_act / 14.0);
+  }
+
+  ResponsivenessComputationResult compute_responsiveness() const {
+    if (!role_mapping_verified) {
+      return ResponsivenessComputationResult::unavailable(0.0, 0, "Maintainer role mapping unverified (e.g. Bugzilla without explicit maintainer role).");
     }
-    if (pr30_available) {
-      w_val += 0.25 * pr30_score;
-      sum_w += 0.25;
+    if (!pagination_complete) {
+      return ResponsivenessComputationResult::unavailable(0.0, 0, "Comment pagination incomplete.");
     }
-    if (au90_available) {
-      w_val += 0.25 * au90_score;
-      sum_w += 0.25;
+
+    double a_r = 0.0;
+    double weighted_sum = 0.0;
+    double conf_sum = 0.0;
+    int count = 0;
+
+    // RT: 0.30, needs samples >= 5
+    if (rt_available && rt_samples >= 5) {
+      if (rt_confidence < 0.0 || rt_confidence > 1.0 || !std::isfinite(rt_confidence)) {
+        throw std::invalid_argument("Invalid RT confidence");
+      }
+      a_r += 0.30;
+      weighted_sum += 0.30 * std::max(0.0, std::min(100.0, response_time_score));
+      conf_sum += 0.30 * rt_confidence;
+      count++;
     }
-    if (ma90_available) {
-      w_val += 0.20 * ma90_score;
-      sum_w += 0.20;
+
+    // RR: 0.30, needs samples >= 5
+    if (rr_available && rr_samples >= 5) {
+      if (rr_confidence < 0.0 || rr_confidence > 1.0 || !std::isfinite(rr_confidence)) {
+        throw std::invalid_argument("Invalid RR confidence");
+      }
+      a_r += 0.30;
+      weighted_sum += 0.30 * std::max(0.0, std::min(100.0, response_rate_score));
+      conf_sum += 0.30 * rr_confidence;
+      count++;
     }
-    if (sum_w <= 0.0)
-      return 0.0;
-    return w_val / sum_w;
+
+    // PR: 0.25, needs samples >= 5
+    if (pr_available && pr_samples >= 5) {
+      if (pr_confidence < 0.0 || pr_confidence > 1.0 || !std::isfinite(pr_confidence)) {
+        throw std::invalid_argument("Invalid PR confidence");
+      }
+      a_r += 0.25;
+      weighted_sum += 0.25 * std::max(0.0, std::min(100.0, pr_review_score));
+      conf_sum += 0.25 * pr_confidence;
+      count++;
+    }
+
+    // MA: 0.15, needs samples >= 5
+    if (ma_available && ma_samples >= 5) {
+      if (ma_confidence < 0.0 || ma_confidence > 1.0 || !std::isfinite(ma_confidence)) {
+        throw std::invalid_argument("Invalid MA confidence");
+      }
+      a_r += 0.15;
+      weighted_sum += 0.15 * std::max(0.0, std::min(100.0, recent_maintainer_act));
+      conf_sum += 0.15 * ma_confidence;
+      count++;
+    }
+
+    if (count < 2 || a_r < 0.45 - 1e-9) {
+      return ResponsivenessComputationResult::unavailable(a_r, count, "R requires >= 2 available signals and A_R >= 0.45.");
+    }
+
+    ResponsivenessComputationResult res;
+    res.available = true;
+    res.score = weighted_sum / a_r;
+    res.confidence = conf_sum;
+    res.coverage_ar = a_r;
+    res.signal_count = count;
+    res.explanation = "R computed successfully";
+    return res;
+  }
+};
+
+// V2.3 Repository Health Evidence: C90 (30%), PR30 (25%), AU90 (25%), MA90 (20%)
+// Requires at least 2 direct signals and available nominal weight A_H >= 0.40.
+// Bugzilla H is strictly unavailable.
+struct HealthComputationResult {
+  bool available{false};
+  double score{0.0};
+  double confidence{0.0};
+  double coverage_ah{0.0};
+  int signal_count{0};
+  std::string explanation;
+
+  static HealthComputationResult unavailable(double coverage, int count, const std::string& reason) {
+    HealthComputationResult r;
+    r.available = false;
+    r.score = 0.0;
+    r.confidence = 0.0;
+    r.coverage_ah = coverage;
+    r.signal_count = count;
+    r.explanation = reason;
+    return r;
+  }
+};
+
+struct RepositoryHealthEvidenceV2 {
+  double c90_score{0.0};
+  bool c90_available{false};
+  double c90_confidence{1.0};
+
+  double pr30_score{0.0};
+  bool pr30_available{false};
+  double pr30_confidence{1.0};
+
+  double au90_score{0.0};
+  bool au90_available{false};
+  double au90_confidence{1.0};
+
+  double ma90_score{0.0};
+  bool ma90_available{false};
+  double ma90_confidence{1.0};
+
+  bool code_host_available{true};
+
+  static double calculate_c90_score(int human_commits_90d) {
+    return 100.0 * std::min(1.0, std::log(1.0 + std::max(0, human_commits_90d)) / std::log(61.0));
+  }
+
+  static double calculate_pr30_score(int merged_prs_30d) {
+    return 100.0 * std::min(1.0, std::max(0, merged_prs_30d) / 8.0);
+  }
+
+  static double calculate_au90_score(int distinct_authors_90d) {
+    return 100.0 * std::min(1.0, std::max(0, distinct_authors_90d) / 6.0);
+  }
+
+  static double calculate_ma90_score(double days_since_code_activity) {
+    return 100.0 * std::pow(0.5, std::max(0.0, days_since_code_activity) / 90.0);
+  }
+
+  HealthComputationResult compute_health() const {
+    if (!code_host_available) {
+      return HealthComputationResult::unavailable(0.0, 0, "Direct code-host evidence unavailable (Bugzilla H unavailable).");
+    }
+
+    double a_h = 0.0;
+    double weighted_sum = 0.0;
+    double conf_sum = 0.0;
+    int count = 0;
+
+    // C90: 0.30
+    if (c90_available && !std::isnan(c90_score)) {
+      if (c90_confidence < 0.0 || c90_confidence > 1.0 || !std::isfinite(c90_confidence)) {
+        throw std::invalid_argument("Invalid C90 confidence");
+      }
+      a_h += 0.30;
+      weighted_sum += 0.30 * std::max(0.0, std::min(100.0, c90_score));
+      conf_sum += 0.30 * c90_confidence;
+      count++;
+    }
+
+    // PR30: 0.25
+    if (pr30_available && !std::isnan(pr30_score)) {
+      if (pr30_confidence < 0.0 || pr30_confidence > 1.0 || !std::isfinite(pr30_confidence)) {
+        throw std::invalid_argument("Invalid PR30 confidence");
+      }
+      a_h += 0.25;
+      weighted_sum += 0.25 * std::max(0.0, std::min(100.0, pr30_score));
+      conf_sum += 0.25 * pr30_confidence;
+      count++;
+    }
+
+    // AU90: 0.25
+    if (au90_available && !std::isnan(au90_score)) {
+      if (au90_confidence < 0.0 || au90_confidence > 1.0 || !std::isfinite(au90_confidence)) {
+        throw std::invalid_argument("Invalid AU90 confidence");
+      }
+      a_h += 0.25;
+      weighted_sum += 0.25 * std::max(0.0, std::min(100.0, au90_score));
+      conf_sum += 0.25 * au90_confidence;
+      count++;
+    }
+
+    // MA90: 0.20
+    if (ma90_available && !std::isnan(ma90_score)) {
+      if (ma90_confidence < 0.0 || ma90_confidence > 1.0 || !std::isfinite(ma90_confidence)) {
+        throw std::invalid_argument("Invalid MA90 confidence");
+      }
+      a_h += 0.20;
+      weighted_sum += 0.20 * std::max(0.0, std::min(100.0, ma90_score));
+      conf_sum += 0.20 * ma90_confidence;
+      count++;
+    }
+
+    if (count < 2 || a_h < 0.40 - 1e-9) {
+      return HealthComputationResult::unavailable(a_h, count, "H requires >= 2 direct signals and A_H >= 0.40.");
+    }
+
+    HealthComputationResult res;
+    res.available = true;
+    res.score = weighted_sum / a_h;
+    res.confidence = conf_sum;
+    res.coverage_ah = a_h;
+    res.signal_count = count;
+    res.explanation = "H computed successfully";
+    return res;
   }
 };
 

@@ -198,7 +198,36 @@ bool JsonAdapter::parse_request(const std::string& json_str,
                 issue.difficulty_evidence.coordination_complexity = d.get("coordination_complexity").as_double(50.0);
             }
 
-            // Responsiveness Evidence
+            // Responsiveness Evidence (V2 & V1)
+            if (item.has("responsiveness_evidence_v2")) {
+                const auto& r2 = item.get("responsiveness_evidence_v2");
+                issue.responsiveness_evidence_v2.available = r2.get("available").as_bool(true);
+                issue.responsiveness_evidence_v2.confidence = r2.get("confidence").as_double(1.0);
+                const auto& val = r2.has("value") ? r2.get("value") : r2;
+
+                issue.responsiveness_evidence_v2.value.rt_available = val.has("rt_available") ? val.get("rt_available").as_bool(true) : (val.has("rt_score") || val.has("response_time_score"));
+                issue.responsiveness_evidence_v2.value.response_time_score = val.get(val.has("rt_score") ? "rt_score" : "response_time_score").as_double(0.0);
+                issue.responsiveness_evidence_v2.value.rt_samples = val.get("rt_samples").as_int(5);
+                issue.responsiveness_evidence_v2.value.rt_confidence = val.get("rt_confidence").as_double(1.0);
+
+                issue.responsiveness_evidence_v2.value.rr_available = val.has("rr_available") ? val.get("rr_available").as_bool(true) : (val.has("rr_score") || val.has("response_rate_score"));
+                issue.responsiveness_evidence_v2.value.response_rate_score = val.get(val.has("rr_score") ? "rr_score" : "response_rate_score").as_double(0.0);
+                issue.responsiveness_evidence_v2.value.rr_samples = val.get("rr_samples").as_int(5);
+                issue.responsiveness_evidence_v2.value.rr_confidence = val.get("rr_confidence").as_double(1.0);
+
+                issue.responsiveness_evidence_v2.value.pr_available = val.has("pr_available") ? val.get("pr_available").as_bool(true) : (val.has("pr_score") || val.has("pr_review_score"));
+                issue.responsiveness_evidence_v2.value.pr_review_score = val.get(val.has("pr_score") ? "pr_score" : "pr_review_score").as_double(0.0);
+                issue.responsiveness_evidence_v2.value.pr_samples = val.get("pr_samples").as_int(5);
+                issue.responsiveness_evidence_v2.value.pr_confidence = val.get("pr_confidence").as_double(1.0);
+
+                issue.responsiveness_evidence_v2.value.ma_available = val.has("ma_available") ? val.get("ma_available").as_bool(true) : (val.has("ma_score") || val.has("recent_maintainer_act"));
+                issue.responsiveness_evidence_v2.value.recent_maintainer_act = val.get(val.has("ma_score") ? "ma_score" : "recent_maintainer_act").as_double(0.0);
+                issue.responsiveness_evidence_v2.value.ma_samples = val.get("ma_samples").as_int(5);
+                issue.responsiveness_evidence_v2.value.ma_confidence = val.get("ma_confidence").as_double(1.0);
+
+                issue.responsiveness_evidence_v2.value.pagination_complete = val.get("pagination_complete").as_bool(true);
+                issue.responsiveness_evidence_v2.value.role_mapping_verified = val.get("role_mapping_verified").as_bool(true);
+            }
             if (item.has("responsiveness_evidence")) {
                 const auto& r = item.get("responsiveness_evidence");
                 issue.responsiveness_evidence.available = r.get("available").as_bool(true);
@@ -214,14 +243,19 @@ bool JsonAdapter::parse_request(const std::string& json_str,
                 issue.health_evidence_v2.available = h2.get("available").as_bool(true);
                 issue.health_evidence_v2.confidence = h2.get("confidence").as_double(1.0);
                 const auto& val = h2.has("value") ? h2.get("value") : h2;
-                issue.health_evidence_v2.value.c90_available = val.has("c90_score");
-                issue.health_evidence_v2.value.pr30_available = val.has("pr30_score");
-                issue.health_evidence_v2.value.au90_available = val.has("au90_score");
-                issue.health_evidence_v2.value.ma90_available = val.has("ma90_score");
-                issue.health_evidence_v2.value.c90_score = val.get("c90_score").as_double(80.0);
-                issue.health_evidence_v2.value.pr30_score = val.get("pr30_score").as_double(80.0);
-                issue.health_evidence_v2.value.au90_score = val.get("au90_score").as_double(80.0);
-                issue.health_evidence_v2.value.ma90_score = val.get("ma90_score").as_double(80.0);
+                issue.health_evidence_v2.value.c90_available = val.has("c90_available") ? val.get("c90_available").as_bool(true) : val.has("c90_score");
+                issue.health_evidence_v2.value.pr30_available = val.has("pr30_available") ? val.get("pr30_available").as_bool(true) : val.has("pr30_score");
+                issue.health_evidence_v2.value.au90_available = val.has("au90_available") ? val.get("au90_available").as_bool(true) : val.has("au90_score");
+                issue.health_evidence_v2.value.ma90_available = val.has("ma90_available") ? val.get("ma90_available").as_bool(true) : val.has("ma90_score");
+                issue.health_evidence_v2.value.c90_score = val.get("c90_score").as_double(0.0);
+                issue.health_evidence_v2.value.pr30_score = val.get("pr30_score").as_double(0.0);
+                issue.health_evidence_v2.value.au90_score = val.get("au90_score").as_double(0.0);
+                issue.health_evidence_v2.value.ma90_score = val.get("ma90_score").as_double(0.0);
+                issue.health_evidence_v2.value.c90_confidence = val.get("c90_confidence").as_double(1.0);
+                issue.health_evidence_v2.value.pr30_confidence = val.get("pr30_confidence").as_double(1.0);
+                issue.health_evidence_v2.value.au90_confidence = val.get("au90_confidence").as_double(1.0);
+                issue.health_evidence_v2.value.ma90_confidence = val.get("ma90_confidence").as_double(1.0);
+                issue.health_evidence_v2.value.code_host_available = val.get("code_host_available").as_bool(true);
             }
             if (item.has("health_evidence")) {
                 const auto& h = item.get("health_evidence");
@@ -233,14 +267,15 @@ bool JsonAdapter::parse_request(const std::string& json_str,
                 issue.health_evidence.recent_releases = h.get("recent_releases").as_double(80.0);
                 if (h.has("c90_score") || h.has("pr30_score") || h.has("au90_score") || h.has("ma90_score")) {
                     issue.health_evidence_v2.available = h.get("available").as_bool(true);
-                    issue.health_evidence_v2.value.c90_available = h.has("c90_score");
-                    issue.health_evidence_v2.value.pr30_available = h.has("pr30_score");
-                    issue.health_evidence_v2.value.au90_available = h.has("au90_score");
-                    issue.health_evidence_v2.value.ma90_available = h.has("ma90_score");
-                    issue.health_evidence_v2.value.c90_score = h.get("c90_score").as_double(80.0);
-                    issue.health_evidence_v2.value.pr30_score = h.get("pr30_score").as_double(80.0);
-                    issue.health_evidence_v2.value.au90_score = h.get("au90_score").as_double(80.0);
-                    issue.health_evidence_v2.value.ma90_score = h.get("ma90_score").as_double(80.0);
+                    issue.health_evidence_v2.value.c90_available = h.has("c90_available") ? h.get("c90_available").as_bool(true) : h.has("c90_score");
+                    issue.health_evidence_v2.value.pr30_available = h.has("pr30_available") ? h.get("pr30_available").as_bool(true) : h.has("pr30_score");
+                    issue.health_evidence_v2.value.au90_available = h.has("au90_available") ? h.get("au90_available").as_bool(true) : h.has("au90_score");
+                    issue.health_evidence_v2.value.ma90_available = h.has("ma90_available") ? h.get("ma90_available").as_bool(true) : h.has("ma90_score");
+                    issue.health_evidence_v2.value.c90_score = h.get("c90_score").as_double(0.0);
+                    issue.health_evidence_v2.value.pr30_score = h.get("pr30_score").as_double(0.0);
+                    issue.health_evidence_v2.value.au90_score = h.get("au90_score").as_double(0.0);
+                    issue.health_evidence_v2.value.ma90_score = h.get("ma90_score").as_double(0.0);
+                    issue.health_evidence_v2.value.code_host_available = h.get("code_host_available").as_bool(true);
                 }
             }
 

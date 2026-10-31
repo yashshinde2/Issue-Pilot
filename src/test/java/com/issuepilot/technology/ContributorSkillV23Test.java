@@ -305,6 +305,7 @@ class ContributorSkillV23Test {
 
         // Fixture 6: Multi-technology pass
         JsonNode f6 = fixtures.get(5);
+        assertEquals("skill_case_6_multi_tech_pass", f6.get("id").asText());
         List<TechnologyRelevance> issueTechs6 = List.of(
                 new TechnologyRelevance("Python", 3.0),
                 new TechnologyRelevance("JavaScript", 1.0)
@@ -322,6 +323,7 @@ class ContributorSkillV23Test {
 
         // Fixture 7: Multi-technology fail
         JsonNode f7 = fixtures.get(6);
+        assertEquals("skill_case_7_multi_tech_fail", f7.get("id").asText());
         Map<String, ContributorSkill> skillMap7 = Map.of(
                 "JavaScript", new ContributorSkill("JavaScript", 80.0, 0.90)
         );

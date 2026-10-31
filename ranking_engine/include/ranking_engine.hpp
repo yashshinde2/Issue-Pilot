@@ -43,6 +43,9 @@ public:
   double calculate_responsiveness(const ResponsivenessEvidence &evidence) const;
 
   double
+  calculate_responsiveness_v2(const ResponsivenessEvidenceV2 &evidence) const;
+
+  double
   calculate_repository_health(const RepositoryHealthEvidence &evidence) const;
 
   double

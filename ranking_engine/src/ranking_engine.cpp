@@ -148,14 +148,19 @@ double RankingEngine::calculate_responsiveness(const ResponsivenessEvidence& evi
     return std::max(0.0, std::min(100.0, r));
 }
 
+double RankingEngine::calculate_responsiveness_v2(const ResponsivenessEvidenceV2& evidence) const {
+    auto res = evidence.compute_responsiveness();
+    return res.available ? std::max(0.0, std::min(100.0, res.score)) : 0.0;
+}
+
 double RankingEngine::calculate_repository_health(const RepositoryHealthEvidence& evidence) const {
     double h = evidence.compute_health();
     return std::max(0.0, std::min(100.0, h));
 }
 
 double RankingEngine::calculate_repository_health_v2(const RepositoryHealthEvidenceV2& evidence) const {
-    double h = evidence.compute_health();
-    return std::max(0.0, std::min(100.0, h));
+    auto res = evidence.compute_health();
+    return res.available ? std::max(0.0, std::min(100.0, res.score)) : 0.0;
 }
 
 bool RankingEngine::calculate_feedback(const ContributorProfile& profile,
@@ -248,17 +253,33 @@ ComponentScores RankingEngine::compute_scores(const ContributorProfile& profile,
     }
 
     // R
-    s.responsiveness_available = issue.responsiveness_evidence.available;
-    if (s.responsiveness_available) {
+    if (issue.responsiveness_evidence_v2.available) {
+        auto r_res = issue.responsiveness_evidence_v2.value.compute_responsiveness();
+        if (r_res.available) {
+            s.responsiveness_available = true;
+            s.responsiveness = r_res.score;
+        } else {
+            s.responsiveness_available = false;
+            s.missing_components.push_back("Responsiveness");
+        }
+    } else if (issue.responsiveness_evidence.available) {
+        s.responsiveness_available = true;
         s.responsiveness = calculate_responsiveness(issue.responsiveness_evidence);
     } else {
+        s.responsiveness_available = false;
         s.missing_components.push_back("Responsiveness");
     }
 
     // H
     if (issue.health_evidence_v2.available) {
-        s.health_available = true;
-        s.repository_health = calculate_repository_health_v2(issue.health_evidence_v2.value);
+        auto h_res = issue.health_evidence_v2.value.compute_health();
+        if (h_res.available) {
+            s.health_available = true;
+            s.repository_health = h_res.score;
+        } else {
+            s.health_available = false;
+            s.missing_components.push_back("Repository Health");
+        }
     } else if (issue.health_evidence.available) {
         s.health_available = true;
         s.repository_health = calculate_repository_health(issue.health_evidence);

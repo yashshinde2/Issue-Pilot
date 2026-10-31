@@ -602,21 +602,28 @@ int main() {
         // Test 25: Repository Health V2 Mathematical Contract (Weights: 0.30 C90, 0.25 PR30, 0.25 AU90, 0.20 MA90)
         issue_pilot::RepositoryHealthEvidenceV2 h_full;
         h_full.c90_score = 100.0;
+        h_full.c90_available = true;
         h_full.pr30_score = 80.0;
+        h_full.pr30_available = true;
         h_full.au90_score = 60.0;
+        h_full.au90_available = true;
         h_full.ma90_score = 40.0;
+        h_full.ma90_available = true;
         // 0.30*100 + 0.25*80 + 0.25*60 + 0.20*40 = 30 + 20 + 15 + 8 = 73.0
-        double h_full_val = h_full.compute_health();
+        double h_full_val = h_full.compute_health().score;
         report_test("Repository Health V2 Full Weights Exact (73.0)", std::abs(h_full_val - 73.0) < 1e-6, 1.0, std::abs(h_full_val - 73.0) < 1e-6 ? 1.0 : 0.0);
 
         // Missing sub-signal renormalization: e.g. ma90 unavailable
         issue_pilot::RepositoryHealthEvidenceV2 h_missing_ma;
         h_missing_ma.c90_score = 100.0;
+        h_missing_ma.c90_available = true;
         h_missing_ma.pr30_score = 80.0;
+        h_missing_ma.pr30_available = true;
         h_missing_ma.au90_score = 60.0;
+        h_missing_ma.au90_available = true;
         h_missing_ma.ma90_available = false;
         // Remaining weights: 0.30 + 0.25 + 0.25 = 0.80. Weighted sum: 65.0. 65.0 / 0.80 = 81.25.
-        double h_renorm_val = h_missing_ma.compute_health();
+        double h_renorm_val = h_missing_ma.compute_health().score;
         report_test("Repository Health V2 Missing Sub-signal Renormalization (81.25)", std::abs(h_renorm_val - 81.25) < 1e-6, 1.0, std::abs(h_renorm_val - 81.25) < 1e-6 ? 1.0 : 0.0);
 
         // Engine integration test: H evidence v2 feeds compute_scores correctly
@@ -1280,6 +1287,234 @@ int main() {
         prof_no_skill.skill_evidence_v2["Rust"] = issue_pilot::ContributorSkillEvidenceV2{}; // not matching Python
         auto scores_b = engine_diff.compute_scores(prof_no_skill, issue_diff);
         report_test("Engine V2.3 Difficulty Match Unavailable when Skill Unavailable", !scores_b.difficulty_available, 1.0, !scores_b.difficulty_available ? 1.0 : 0.0);
+    }
+
+    // Test 36: Golden Responsiveness & Health Fixtures Execution (V2.3 Sections 7 & 8)
+    {
+        std::string rh_fix_path = "ranking_engine/tests/fixtures/golden_responsiveness_health_v23_fixtures.json";
+        std::ifstream f(rh_fix_path);
+        if (!f.is_open()) {
+            rh_fix_path = "tests/fixtures/golden_responsiveness_health_v23_fixtures.json";
+            f.open(rh_fix_path);
+        }
+        if (!f.is_open()) {
+            rh_fix_path = "../tests/fixtures/golden_responsiveness_health_v23_fixtures.json";
+            f.open(rh_fix_path);
+        }
+        report_test("Golden Responsiveness & Health JSON Fixture Opened", f.is_open(), 1.0, f.is_open() ? 1.0 : 0.0);
+
+        std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        bool err = false;
+        size_t pos = 0;
+        auto root = issue_pilot::SimpleJsonParser::parse(content, pos, err);
+        report_test("Golden Responsiveness & Health JSON Valid AST", !err && root.has("fixtures"), 1.0, (!err && root.has("fixtures")) ? 1.0 : 0.0);
+
+        // Case 1: Full signals for both R and H
+        {
+            issue_pilot::ResponsivenessEvidenceV2 r1;
+            r1.response_time_score = 80.0; r1.rt_samples = 10; r1.rt_available = true;
+            r1.response_rate_score = 75.0; r1.rr_samples = 8; r1.rr_available = true;
+            r1.pr_review_score = 70.0; r1.pr_samples = 6; r1.pr_available = true;
+            r1.recent_maintainer_act = 60.0; r1.ma_samples = 5; r1.ma_available = true;
+            auto res_r1 = r1.compute_responsiveness();
+            report_test("Golden RH 1: R Available", res_r1.available, 1.0, res_r1.available ? 1.0 : 0.0);
+            report_test("Golden RH 1: R Coverage (1.0)", std::abs(res_r1.coverage_ar - 1.0) < 1e-6, 1.0, res_r1.coverage_ar);
+            report_test("Golden RH 1: R Score (73.0)", std::abs(res_r1.score - 73.0) < 1e-4, 73.0, res_r1.score);
+            report_test("Golden RH 1: R Confidence (1.0)", std::abs(res_r1.confidence - 1.0) < 1e-6, 1.0, res_r1.confidence);
+
+            issue_pilot::RepositoryHealthEvidenceV2 h1;
+            h1.c90_score = 100.0; h1.c90_available = true;
+            h1.pr30_score = 80.0; h1.pr30_available = true;
+            h1.au90_score = 60.0; h1.au90_available = true;
+            h1.ma90_score = 40.0; h1.ma90_available = true;
+            auto res_h1 = h1.compute_health();
+            report_test("Golden RH 1: H Available", res_h1.available, 1.0, res_h1.available ? 1.0 : 0.0);
+            report_test("Golden RH 1: H Coverage (1.0)", std::abs(res_h1.coverage_ah - 1.0) < 1e-6, 1.0, res_h1.coverage_ah);
+            report_test("Golden RH 1: H Score (73.0)", std::abs(res_h1.score - 73.0) < 1e-4, 73.0, res_h1.score);
+            report_test("Golden RH 1: H Confidence (1.0)", std::abs(res_h1.confidence - 1.0) < 1e-6, 1.0, res_h1.confidence);
+        }
+
+        // Case 2: R sample gate N >= 5: PR (N=4) and MA (N=3) rejected
+        {
+            issue_pilot::ResponsivenessEvidenceV2 r2;
+            r2.response_time_score = 80.0; r2.rt_samples = 5; r2.rt_available = true;
+            r2.response_rate_score = 70.0; r2.rr_samples = 5; r2.rr_available = true;
+            r2.pr_review_score = 90.0; r2.pr_samples = 4; r2.pr_available = false;
+            r2.recent_maintainer_act = 85.0; r2.ma_samples = 3; r2.ma_available = false;
+            auto res_r2 = r2.compute_responsiveness();
+            report_test("Golden RH 2: R Available with N=5", res_r2.available, 1.0, res_r2.available ? 1.0 : 0.0);
+            report_test("Golden RH 2: R Coverage (0.60)", std::abs(res_r2.coverage_ar - 0.60) < 1e-6, 0.60, res_r2.coverage_ar);
+            report_test("Golden RH 2: R Score (75.0)", std::abs(res_r2.score - 75.0) < 1e-4, 75.0, res_r2.score);
+            report_test("Golden RH 2: R Signal Count (2)", res_r2.signal_count == 2, 2, res_r2.signal_count);
+        }
+
+        // Case 3: R coverage boundary: 0.45 passes, 0.40 fails
+        {
+            issue_pilot::ResponsivenessEvidenceV2 r3_pass;
+            r3_pass.response_time_score = 80.0; r3_pass.rt_samples = 5; r3_pass.rt_available = true;
+            r3_pass.recent_maintainer_act = 60.0; r3_pass.ma_samples = 5; r3_pass.ma_available = true;
+            auto res_p = r3_pass.compute_responsiveness();
+            report_test("Golden RH 3 Pass: Available at A_R = 0.45", res_p.available, 1.0, res_p.available ? 1.0 : 0.0);
+            report_test("Golden RH 3 Pass: Coverage (0.45)", std::abs(res_p.coverage_ar - 0.45) < 1e-6, 0.45, res_p.coverage_ar);
+            report_test("Golden RH 3 Pass: Score (~73.3333)", std::abs(res_p.score - 73.333333) < 1e-4, 73.333333, res_p.score);
+
+            issue_pilot::ResponsivenessEvidenceV2 r3_fail;
+            r3_fail.pr_review_score = 80.0; r3_fail.pr_samples = 5; r3_fail.pr_available = true;
+            r3_fail.recent_maintainer_act = 60.0; r3_fail.ma_samples = 5; r3_fail.ma_available = true;
+            auto res_f = r3_fail.compute_responsiveness();
+            report_test("Golden RH 3 Fail: Unavailable at A_R = 0.40", !res_f.available, 1.0, !res_f.available ? 1.0 : 0.0);
+            report_test("Golden RH 3 Fail: Coverage (0.40)", std::abs(res_f.coverage_ar - 0.40) < 1e-6, 0.40, res_f.coverage_ar);
+        }
+
+        // Case 4: R signal count gate: only 1 signal -> unavailable
+        {
+            issue_pilot::ResponsivenessEvidenceV2 r4;
+            r4.response_time_score = 85.0; r4.rt_samples = 20; r4.rt_available = true;
+            auto res_r4 = r4.compute_responsiveness();
+            report_test("Golden RH 4: Unavailable when Count = 1", !res_r4.available, 1.0, !res_r4.available ? 1.0 : 0.0);
+            report_test("Golden RH 4: Signal Count (1)", res_r4.signal_count == 1, 1, res_r4.signal_count);
+        }
+
+        // Case 5: H coverage and renormalization over 0.80
+        {
+            issue_pilot::RepositoryHealthEvidenceV2 h5;
+            h5.c90_score = 100.0; h5.c90_available = true;
+            h5.pr30_score = 80.0; h5.pr30_available = true;
+            h5.au90_score = 60.0; h5.au90_available = true;
+            h5.ma90_available = false;
+            auto res_h5 = h5.compute_health();
+            report_test("Golden RH 5: H Available at A_H = 0.80", res_h5.available, 1.0, res_h5.available ? 1.0 : 0.0);
+            report_test("Golden RH 5: H Coverage (0.80)", std::abs(res_h5.coverage_ah - 0.80) < 1e-6, 0.80, res_h5.coverage_ah);
+            report_test("Golden RH 5: H Score (81.25)", std::abs(res_h5.score - 81.25) < 1e-4, 81.25, res_h5.score);
+            report_test("Golden RH 5: H Signal Count (3)", res_h5.signal_count == 3, 3, res_h5.signal_count);
+        }
+
+        // Case 6: H requires >= 2 direct signals (1 signal -> unavailable)
+        {
+            issue_pilot::RepositoryHealthEvidenceV2 h6;
+            h6.c90_score = 100.0; h6.c90_available = true;
+            h6.pr30_available = false; h6.au90_available = false; h6.ma90_available = false;
+            auto res_h6 = h6.compute_health();
+            report_test("Golden RH 6: H Unavailable with 1 signal", !res_h6.available, 1.0, !res_h6.available ? 1.0 : 0.0);
+            report_test("Golden RH 6: H Signal Count (1)", res_h6.signal_count == 1, 1, res_h6.signal_count);
+        }
+
+        // Case 7: RR mature cohort and right-censoring
+        {
+            double rr_score = issue_pilot::ResponsivenessEvidenceV2::calculate_rr_score(3, 5);
+            report_test("Golden RH 7: RR Score with right-censoring (60.0)", std::abs(rr_score - 60.0) < 1e-6, 60.0, rr_score);
+        }
+
+        // Case 8: Author self-reply and bot exclusion (median reply = 36h)
+        {
+            double rt_score = issue_pilot::ResponsivenessEvidenceV2::calculate_rt_score(36.0);
+            report_test("Golden RH 8: RT Score (~57.1429)", std::abs(rt_score - 57.142857) < 1e-4, 57.142857, rt_score);
+        }
+
+        // Case 9: Window filtering H
+        {
+            double c90 = issue_pilot::RepositoryHealthEvidenceV2::calculate_c90_score(10);
+            double pr30 = issue_pilot::RepositoryHealthEvidenceV2::calculate_pr30_score(6);
+            double au90 = issue_pilot::RepositoryHealthEvidenceV2::calculate_au90_score(5);
+            double ma90 = issue_pilot::RepositoryHealthEvidenceV2::calculate_ma90_score(15.0);
+
+            report_test("Golden RH 9: C90 (~58.3305)", std::abs(c90 - 58.330548) < 1e-4, 58.330548, c90);
+            report_test("Golden RH 9: PR30 (75.0)", std::abs(pr30 - 75.0) < 1e-4, 75.0, pr30);
+            report_test("Golden RH 9: AU90 (~83.3333)", std::abs(au90 - 83.333333) < 1e-4, 83.333333, au90);
+            report_test("Golden RH 9: MA90 (~89.0899)", std::abs(ma90 - 89.089872) < 1e-4, 89.089872, ma90);
+
+            issue_pilot::RepositoryHealthEvidenceV2 h9;
+            h9.c90_score = c90; h9.c90_available = true;
+            h9.pr30_score = pr30; h9.pr30_available = true;
+            h9.au90_score = au90; h9.au90_available = true;
+            h9.ma90_score = ma90; h9.ma90_available = true;
+            auto res_h9 = h9.compute_health();
+            report_test("Golden RH 9: Total H (~74.9005)", std::abs(res_h9.score - 74.900472) < 1e-4, 74.900472, res_h9.score);
+        }
+
+        // Case 10: Bugzilla strict unavailability
+        {
+            issue_pilot::ResponsivenessEvidenceV2 r10;
+            r10.response_time_score = 80.0; r10.rt_samples = 10; r10.rt_available = true;
+            r10.response_rate_score = 80.0; r10.rr_samples = 10; r10.rr_available = true;
+            r10.role_mapping_verified = false;
+            auto res_r10 = r10.compute_responsiveness();
+            report_test("Golden RH 10: Bugzilla R Unavailable without role mapping", !res_r10.available, 1.0, !res_r10.available ? 1.0 : 0.0);
+
+            issue_pilot::RepositoryHealthEvidenceV2 h10;
+            h10.c90_score = 80.0; h10.c90_available = true;
+            h10.pr30_score = 80.0; h10.pr30_available = true;
+            h10.code_host_available = false;
+            auto res_h10 = h10.compute_health();
+            report_test("Golden RH 10: Bugzilla H Strictly Unavailable", !res_h10.available, 1.0, !res_h10.available ? 1.0 : 0.0);
+        }
+    }
+
+    // Test 37: Mathematical Formulations and Engine Renormalization for R & H
+    {
+        // 1. Component Formulas at Nominal Midpoints
+        double rt_mid = issue_pilot::ResponsivenessEvidenceV2::calculate_rt_score(48.0);
+        report_test("Responsiveness RT at 48h is exactly 50.0", std::abs(rt_mid - 50.0) < 1e-6, 50.0, rt_mid);
+
+        double rr_mid = issue_pilot::ResponsivenessEvidenceV2::calculate_rr_score(4, 8);
+        report_test("Responsiveness RR at 4/8 is exactly 50.0", std::abs(rr_mid - 50.0) < 1e-6, 50.0, rr_mid);
+
+        double pr_mid = issue_pilot::ResponsivenessEvidenceV2::calculate_pr_score(72.0);
+        report_test("Responsiveness PR at 72h is exactly 50.0", std::abs(pr_mid - 50.0) < 1e-6, 50.0, pr_mid);
+
+        double ma_mid = issue_pilot::ResponsivenessEvidenceV2::calculate_ma_score(14.0);
+        report_test("Responsiveness MA at 14d is exactly 50.0", std::abs(ma_mid - 50.0) < 1e-6, 50.0, ma_mid);
+
+        double c90_max = issue_pilot::RepositoryHealthEvidenceV2::calculate_c90_score(60);
+        report_test("Health C90 at 60 commits is 100.0", std::abs(c90_max - 100.0) < 1e-6, 100.0, c90_max);
+
+        double pr30_max = issue_pilot::RepositoryHealthEvidenceV2::calculate_pr30_score(8);
+        report_test("Health PR30 at 8 merged PRs is 100.0", std::abs(pr30_max - 100.0) < 1e-6, 100.0, pr30_max);
+
+        double au90_max = issue_pilot::RepositoryHealthEvidenceV2::calculate_au90_score(6);
+        report_test("Health AU90 at 6 distinct authors is 100.0", std::abs(au90_max - 100.0) < 1e-6, 100.0, au90_max);
+
+        double ma90_half = issue_pilot::RepositoryHealthEvidenceV2::calculate_ma90_score(90.0);
+        report_test("Health MA90 at 90d is exactly 50.0", std::abs(ma90_half - 50.0) < 1e-6, 50.0, ma90_half);
+
+        // 2. Pagination Incomplete Rejection
+        issue_pilot::ResponsivenessEvidenceV2 r_pag;
+        r_pag.response_time_score = 80.0; r_pag.rt_samples = 10; r_pag.rt_available = true;
+        r_pag.response_rate_score = 80.0; r_pag.rr_samples = 10; r_pag.rr_available = true;
+        r_pag.pagination_complete = false;
+        auto res_pag = r_pag.compute_responsiveness();
+        report_test("Responsiveness: Pagination Incomplete causes Unavailable", !res_pag.available, 1.0, !res_pag.available ? 1.0 : 0.0);
+
+        // 3. Engine Integration: compute_scores with V2.3 R and H
+        issue_pilot::RankingEngine engine_rh;
+        issue_pilot::IssueRecord issue_rh;
+        issue_rh.id = "engine_rh_test";
+        issue_rh.issue_url = "https://github.com/test/repo/issues/200";
+
+        // Provide R v2
+        issue_rh.responsiveness_evidence_v2.available = true;
+        issue_rh.responsiveness_evidence_v2.value.response_time_score = 80.0;
+        issue_rh.responsiveness_evidence_v2.value.rt_samples = 10;
+        issue_rh.responsiveness_evidence_v2.value.rt_available = true;
+        issue_rh.responsiveness_evidence_v2.value.response_rate_score = 70.0;
+        issue_rh.responsiveness_evidence_v2.value.rr_samples = 10;
+        issue_rh.responsiveness_evidence_v2.value.rr_available = true;
+
+        // Provide H v2
+        issue_rh.health_evidence_v2.available = true;
+        issue_rh.health_evidence_v2.value.c90_score = 100.0;
+        issue_rh.health_evidence_v2.value.c90_available = true;
+        issue_rh.health_evidence_v2.value.pr30_score = 80.0;
+        issue_rh.health_evidence_v2.value.pr30_available = true;
+
+        issue_pilot::ContributorProfile prof_dummy;
+        prof_dummy.user_id = "user_rh";
+
+        auto scores_rh = engine_rh.compute_scores(prof_dummy, issue_rh);
+        report_test("Engine V2.3: Responsiveness Available", scores_rh.responsiveness_available, 1.0, scores_rh.responsiveness_available ? 1.0 : 0.0);
+        report_test("Engine V2.3: Responsiveness Score = 75.0", std::abs(scores_rh.responsiveness - 75.0) < 1e-4, 75.0, scores_rh.responsiveness);
+        report_test("Engine V2.3: Repository Health Available", scores_rh.health_available, 1.0, scores_rh.health_available ? 1.0 : 0.0);
+        report_test("Engine V2.3: Repository Health Score (~90.909)", std::abs(scores_rh.repository_health - 90.909091) < 1e-3, 90.909091, scores_rh.repository_health);
     }
 
     std::cout << "\nALL UNIT TEST CHECKS (INCLUDING PHASE 1 CONTRACTS) PASSED SUCCESSFULLY!\n";

@@ -1,0 +1,195 @@
+{
+  "schema_version": "2.3.0",
+  "algorithm_version": "2.3.0",
+  "fixtures": [
+    {
+      "id": "rh_case_1_full_r_and_h",
+      "description": "Full signals for both R and H with complete weights and confidence = 1.0",
+      "responsiveness": {
+        "rt_score": 80.0,
+        "rt_samples": 10,
+        "rt_available": true,
+        "rr_score": 75.0,
+        "rr_samples": 8,
+        "rr_available": true,
+        "pr_score": 70.0,
+        "pr_samples": 6,
+        "pr_available": true,
+        "ma_score": 60.0,
+        "ma_samples": 5,
+        "ma_available": true
+      },
+      "repository_health": {
+        "c90_score": 100.0,
+        "c90_available": true,
+        "pr30_score": 80.0,
+        "pr30_available": true,
+        "au90_score": 60.0,
+        "au90_available": true,
+        "ma90_score": 40.0,
+        "ma90_available": true
+      },
+      "expected": {
+        "r_available": true,
+        "r_coverage": 1.0,
+        "r_score": 73.0,
+        "r_confidence": 1.0,
+        "h_available": true,
+        "h_coverage": 1.0,
+        "h_score": 73.0,
+        "h_confidence": 1.0
+      }
+    },
+    {
+      "id": "rh_case_2_r_sample_gate_5_vs_4",
+      "description": "R sample gate N >= 5: RT and RR have N=5, PR (N=4) and MA (N=3) are unavailable",
+      "responsiveness": {
+        "rt_score": 80.0,
+        "rt_samples": 5,
+        "rt_available": true,
+        "rr_score": 70.0,
+        "rr_samples": 5,
+        "rr_available": true,
+        "pr_score": 90.0,
+        "pr_samples": 4,
+        "pr_available": false,
+        "ma_score": 85.0,
+        "ma_samples": 3,
+        "ma_available": false
+      },
+      "expected": {
+        "r_available": true,
+        "r_coverage": 0.60,
+        "r_score": 75.0,
+        "r_signal_count": 2
+      }
+    },
+    {
+      "id": "rh_case_3_r_coverage_boundary_045",
+      "description": "R coverage boundary: RT(0.30)+MA(0.15) = 0.45 passes; PR(0.25)+MA(0.15) = 0.40 fails",
+      "pass_input": {
+        "rt_score": 80.0,
+        "rt_samples": 5,
+        "rt_available": true,
+        "ma_score": 60.0,
+        "ma_samples": 5,
+        "ma_available": true
+      },
+      "fail_input": {
+        "pr_score": 80.0,
+        "pr_samples": 5,
+        "pr_available": true,
+        "ma_score": 60.0,
+        "ma_samples": 5,
+        "ma_available": true
+      },
+      "expected": {
+        "pass_available": true,
+        "pass_coverage": 0.45,
+        "pass_score": 73.333333,
+        "fail_available": false,
+        "fail_coverage": 0.40
+      }
+    },
+    {
+      "id": "rh_case_4_r_signal_count_gate_2_vs_1",
+      "description": "R signal count gate: only 1 signal available -> unavailable even if sample count is high",
+      "responsiveness": {
+        "rt_score": 85.0,
+        "rt_samples": 20,
+        "rt_available": true
+      },
+      "expected": {
+        "r_available": false,
+        "r_signal_count": 1,
+        "r_coverage": 0.30
+      }
+    },
+    {
+      "id": "rh_case_5_h_coverage_and_renormalization",
+      "description": "H renormalization over 0.80 when MA90 is unavailable: (0.30*100 + 0.25*80 + 0.25*60) / 0.80 = 81.25",
+      "repository_health": {
+        "c90_score": 100.0,
+        "c90_available": true,
+        "pr30_score": 80.0,
+        "pr30_available": true,
+        "au90_score": 60.0,
+        "au90_available": true,
+        "ma90_available": false
+      },
+      "expected": {
+        "h_available": true,
+        "h_coverage": 0.80,
+        "h_score": 81.25,
+        "h_signal_count": 3
+      }
+    },
+    {
+      "id": "rh_case_6_h_signal_count_gate_2_vs_1",
+      "description": "H requires at least 2 direct signals: 1 signal available -> unavailable",
+      "repository_health": {
+        "c90_score": 100.0,
+        "c90_available": true,
+        "pr30_available": false,
+        "au90_available": false,
+        "ma90_available": false
+      },
+      "expected": {
+        "h_available": false,
+        "h_signal_count": 1,
+        "h_coverage": 0.30
+      }
+    },
+    {
+      "id": "rh_case_7_rr_mature_cohort_and_right_censoring",
+      "description": "RR 7d mature cohort: 5 mature issues (3 replied <= 7d, 1 replied > 7d, 1 unreplied) + 2 immature right-censored issues",
+      "input": {
+        "mature_issues_replied_7d": 3,
+        "mature_issues_total_7d": 5,
+        "immature_unanswered_issues": 2
+      },
+      "expected": {
+        "rr_samples": 5,
+        "rr_available": true,
+        "rr_score": 60.0
+      }
+    },
+    {
+      "id": "rh_case_8_author_self_reply_and_bot_exclusion",
+      "description": "Author comments and bot comments excluded; first maintainer reply at 36h -> RT = 57.142857",
+      "input": {
+        "median_first_maintainer_reply_hours": 36.0,
+        "valid_samples": 5
+      },
+      "expected": {
+        "rt_score": 57.142857,
+        "rt_available": true
+      }
+    },
+    {
+      "id": "rh_case_9_window_filtering_h",
+      "description": "H signals computed over strict windows: 10 human commits (90d), 6 merged PRs (30d), 5 authors (90d), 15d recency",
+      "input": {
+        "human_commits_90d": 10,
+        "merged_prs_30d": 6,
+        "distinct_authors_90d": 5,
+        "days_since_code_activity": 15.0
+      },
+      "expected": {
+        "c90_score": 58.330548,
+        "pr30_score": 75.0,
+        "au90_score": 83.333333,
+        "ma90_score": 89.089872,
+        "h_score": 74.900472
+      }
+    },
+    {
+      "id": "rh_case_10_bugzilla_strict_unavailability",
+      "description": "Bugzilla source: R unavailable without maintainer role mapping; H strictly unavailable",
+      "expected": {
+        "r_available": false,
+        "h_available": false
+      }
+    }
+  ]
+}
