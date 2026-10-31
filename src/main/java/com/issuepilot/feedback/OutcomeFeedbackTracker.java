@@ -19,7 +19,8 @@ public class OutcomeFeedbackTracker {
         ACCEPTED,
         REJECTED,
         COMPLETED,
-        NOT_COMPLETED
+        NOT_COMPLETED,
+        REOPENED
     }
 
     public record OutcomeEvent(
@@ -69,6 +70,7 @@ public class OutcomeFeedbackTracker {
 
     private final Map<String, Map<String, IssueDecisionState>> userIssueStates = new ConcurrentHashMap<>();
     private final List<OutcomeEvent> auditLog = Collections.synchronizedList(new ArrayList<>());
+    private final Set<String> seenEventIds = ConcurrentHashMap.newKeySet();
 
     private static String canonicalTech(String tech) {
         return tech != null && !tech.isBlank() ? tech.trim().toLowerCase(Locale.ROOT) : null;
@@ -79,6 +81,12 @@ public class OutcomeFeedbackTracker {
     }
 
     public synchronized boolean recordEvent(OutcomeEvent event) {
+        if (event.eventId() != null && !event.eventId().isBlank()) {
+            if (!seenEventIds.add(event.eventId().trim())) {
+                // Duplicate event ID ignored (idempotency)
+                return false;
+            }
+        }
         auditLog.add(event);
 
         if (event.eventType() == EventType.RECOMMENDATION_SHOWN) {
@@ -95,11 +103,11 @@ public class OutcomeFeedbackTracker {
 
         if (event.eventType() == EventType.ACCEPTED || event.eventType() == EventType.REJECTED) {
             if (state.acceptanceDecision != null) {
-                // Duplicate acceptance event ignored
+                // Contradictory decision (ACCEPTED then REJECTED, or REJECTED then ACCEPTED) or duplicate decision ignored
                 return false;
             }
             if (state.completionDecision != null && event.eventType() == EventType.REJECTED) {
-                // Cannot reject an issue that was already completed
+                // Cannot reject an issue that has already completed
                 return false;
             }
             state.acceptanceDecision = event.eventType();
@@ -118,6 +126,15 @@ public class OutcomeFeedbackTracker {
             // Preserve completion event independently; do NOT create a synthetic acceptance trial
             state.completionDecision = event.eventType();
             return true;
+        }
+
+        if (event.eventType() == EventType.REOPENED) {
+            // Reopening an accepted issue reverses its terminal completion state, returning it to in-progress
+            if (state.completionDecision != null) {
+                state.completionDecision = null;
+                return true;
+            }
+            return false;
         }
 
         return true;
@@ -219,6 +236,7 @@ public class OutcomeFeedbackTracker {
     public void clear() {
         userIssueStates.clear();
         auditLog.clear();
+        seenEventIds.clear();
     }
 }
 

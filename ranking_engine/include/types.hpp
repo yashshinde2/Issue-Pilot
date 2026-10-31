@@ -957,8 +957,27 @@ struct OutcomeFeedbackEvidenceV2 {
     return r;
   }
 
+  void validate_cohort_consistency() const {
+    auto check_lvl = [](const HierarchyCounts &comp, const HierarchyCounts &acc, const std::string &lvl) {
+      if (comp.trials > 0 && acc.trials == 0) {
+        throw std::invalid_argument(lvl + " completion trials cannot exist without acceptance trials");
+      }
+      if (comp.trials > acc.trials) {
+        throw std::invalid_argument(lvl + " completion trials (" + std::to_string(comp.trials) + ") cannot exceed acceptance trials (" + std::to_string(acc.trials) + ")");
+      }
+      if (comp.trials > acc.successes) {
+        throw std::invalid_argument(lvl + " completion trials (" + std::to_string(comp.trials) + ") cannot exceed accepted recommendations (" + std::to_string(acc.successes) + ")");
+      }
+    };
+    check_lvl(l1_complete, l1_accept, "L1 (User Global)");
+    check_lvl(l2_complete, l2_accept, "L2 (User+Tech)");
+    check_lvl(l3_complete, l3_accept, "L3 (User+Tech+Diff)");
+  }
+
   FeedbackComputationResult compute_feedback(const std::string &src_override = "",
                                             double cap_override = 1.0) const {
+    validate_cohort_consistency();
+
     std::string eff_src = src_override.empty() ? source : src_override;
     double eff_cap = (cap_override < 1.0 - 1e-9) ? cap_override : source_cap;
     double cap = FreshnessEvidenceV2::resolve_source_cap(eff_src, eff_cap);
@@ -1012,22 +1031,10 @@ struct OutcomeFeedbackEvidenceV2 {
       return r;
     }
 
-    // !acc_res.available && comp_res.available
-    double comp_score = 100.0 * comp_res.smoothed_p;
-    r.available = true;
-    r.score = comp_score; // available-weight normalized: 0.60 / 0.60 = 1.0
-    double c_comp = static_cast<double>(comp_res.trials) / (comp_res.trials + 10.0);
-    r.confidence = std::min(cap, c_comp);
-    r.coverage_af = 0.60;
-    r.has_accept_score = false;
-    r.has_complete_score = true;
-    r.complete_score = comp_score;
-    r.accept_level = "none";
-    r.complete_level = comp_res.level_name;
-    r.accept_trials = 0;
-    r.complete_trials = comp_res.trials;
-    r.explanation = "Outcome feedback: completion only available (acceptance unavailable)";
-    return r;
+    // By the mathematical subset invariant n_complete <= a_accept <= n_accept,
+    // completion can never be available if acceptance is unavailable.
+    throw std::invalid_argument(
+        "Mathematical contradiction: completion cannot be available when acceptance is unavailable under n_complete <= a_accept <= n_accept");
   }
 };
 

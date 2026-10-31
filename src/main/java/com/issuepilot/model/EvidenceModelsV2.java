@@ -1576,11 +1576,37 @@ public final class EvidenceModelsV2 {
             return new HierarchicalLevelResult("user_global", l1.trials(), l1.successes(), p1, true);
         }
 
+        public void validateCohortConsistency() {
+            validateLevelConsistency(l1Complete, l1Accept, "L1 (User Global)");
+            validateLevelConsistency(l2Complete, l2Accept, "L2 (User+Tech)");
+            validateLevelConsistency(l3Complete, l3Accept, "L3 (User+Tech+Diff)");
+        }
+
+        private static void validateLevelConsistency(HierarchyCounts comp, HierarchyCounts acc, String levelName) {
+            if (comp != null && acc != null) {
+                if (comp.trials() > acc.trials()) {
+                    throw new IllegalArgumentException(
+                            levelName + " completion trials (" + comp.trials()
+                                    + ") cannot exceed acceptance trials (" + acc.trials() + ")");
+                }
+                if (comp.trials() > acc.successes()) {
+                    throw new IllegalArgumentException(
+                            levelName + " completion trials (" + comp.trials()
+                                    + ") cannot exceed accepted recommendations (" + acc.successes() + ")");
+                }
+            } else if (comp != null && comp.trials() > 0 && (acc == null || acc.trials() == 0)) {
+                throw new IllegalArgumentException(
+                        levelName + " completion trials (" + comp.trials() + ") cannot exist without prior acceptance trials");
+            }
+        }
+
         public FeedbackComputationResult computeFeedback() {
             return computeFeedback(this.source, this.sourceCap);
         }
 
         public FeedbackComputationResult computeFeedback(String sourceOverride, Double capOverride) {
+            validateCohortConsistency();
+
             String effSource = sourceOverride != null ? sourceOverride : this.source;
             Double effCap = capOverride != null ? capOverride : this.sourceCap;
             double cap = ResponsivenessEvidenceV2.resolveSourceCap(effSource, effCap);
@@ -1616,14 +1642,10 @@ public final class EvidenceModelsV2 {
                         "Outcome feedback: acceptance only available (completion unavailable)");
             }
 
-            // !accRes.available() && compRes.available()
-            double compScore = 100.0 * compRes.smoothedP();
-            double fScore = compScore; // available-weight normalized: 0.60 / 0.60 = 1.0
-            double cComp = (double) compRes.trials() / (compRes.trials() + 10.0);
-            double conf = Math.min(cap, cComp);
-            return new FeedbackComputationResult(true, fScore, conf, 0.60, null, compScore,
-                    "none", compRes.levelName(), 0, compRes.trials(),
-                    "Outcome feedback: completion only available (acceptance unavailable)");
+            // By the mathematical subset invariant n_complete <= a_accept <= n_accept,
+            // completion can never be available if acceptance is unavailable.
+            throw new IllegalStateException(
+                    "Mathematical contradiction: completion cannot be available when acceptance is unavailable under n_complete <= a_accept <= n_accept");
         }
 
         public String getUserId() {

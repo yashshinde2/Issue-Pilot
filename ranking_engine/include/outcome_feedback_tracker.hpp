@@ -14,7 +14,8 @@ enum class OutcomeEventType {
   ACCEPTED,
   REJECTED,
   COMPLETED,
-  NOT_COMPLETED
+  NOT_COMPLETED,
+  REOPENED
 };
 
 struct OutcomeEvent {
@@ -31,6 +32,8 @@ struct OutcomeEvent {
 
 class OutcomeFeedbackTracker {
 private:
+  std::unordered_set<std::string> seen_event_ids_;
+
   struct IssueDecisionState {
     std::string issue_key;
     std::string technology;
@@ -65,6 +68,15 @@ public:
 
   bool record_event(const OutcomeEvent &event) {
     audit_log_.push_back(event);
+
+    std::string ev_id = trim_str(event.event_id);
+    if (!ev_id.empty()) {
+      if (seen_event_ids_.find(ev_id) != seen_event_ids_.end()) {
+        // Exact duplicate event ID ignored
+        return false;
+      }
+      seen_event_ids_.insert(ev_id);
+    }
 
     if (event.event_type == OutcomeEventType::RECOMMENDATION_SHOWN) {
       return true; // Exposure-logged
@@ -120,6 +132,15 @@ public:
       state.has_completion_decision = true;
       state.completion_decision = event.event_type;
       return true;
+    }
+
+    if (event.event_type == OutcomeEventType::REOPENED) {
+      // Reopening an accepted issue reverses its terminal completion state
+      if (state.has_completion_decision) {
+        state.has_completion_decision = false;
+        return true;
+      }
+      return false;
     }
 
     return true;
@@ -219,6 +240,7 @@ public:
   void clear() {
     user_issue_states_.clear();
     audit_log_.clear();
+    seen_event_ids_.clear();
   }
 };
 

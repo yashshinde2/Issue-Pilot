@@ -1809,19 +1809,35 @@ int main() {
         report_test("Feedback Acc-Only Coverage is 0.40", std::abs(res_fb_acc.coverage_af - 0.40) < 1e-6, 0.40, res_fb_acc.coverage_af);
         report_test("Feedback Acc-Only Confidence (5/15 = 0.3333)", std::abs(res_fb_acc.confidence - (5.0/15.0)) < 1e-6, 5.0/15.0, res_fb_acc.confidence);
 
-        // 10. Feedback Normalization: Completion Only
-        issue_pilot::OutcomeFeedbackEvidenceV2 fb_ev_comp;
-        fb_ev_comp.l1_accept = issue_pilot::HierarchyCounts(1, 2); // Under 5 -> acceptance unavailable
-        fb_ev_comp.l1_complete = issue_pilot::HierarchyCounts(5, 5); // 5/5 -> p1 = (5+2)/9 = 7/9
-        auto res_fb_comp = fb_ev_comp.compute_feedback();
-        report_test("Feedback Comp-Only Available", res_fb_comp.available, 1.0, res_fb_comp.available ? 1.0 : 0.0);
-        report_test("Feedback Comp-Only Score (~77.7778)", std::abs(res_fb_comp.score - (100.0 * 7.0 / 9.0)) < 1e-6, 100.0 * 7.0 / 9.0, res_fb_comp.score);
-        report_test("Feedback Comp-Only Coverage is 0.60", std::abs(res_fb_comp.coverage_af - 0.60) < 1e-6, 0.60, res_fb_comp.coverage_af);
+        // 10. Cohort Subset Invariant Validation: n_complete <= a_accept <= n_accept
+        issue_pilot::OutcomeFeedbackEvidenceV2 fb_ev_bad1;
+        fb_ev_bad1.l1_accept = issue_pilot::HierarchyCounts(1, 2);
+        fb_ev_bad1.l1_complete = issue_pilot::HierarchyCounts(5, 5); // 5 comp trials > 1 acc success
+        bool threw_bad1 = false;
+        try {
+            fb_ev_bad1.compute_feedback();
+        } catch (const std::invalid_argument &) {
+            threw_bad1 = true;
+        }
+        report_test("Cohort Invariant Violating Comp > Acc Throws", threw_bad1, 1.0, threw_bad1 ? 1.0 : 0.0);
 
-        // 11. Feedback Both Dimensions Available
+        issue_pilot::OutcomeFeedbackEvidenceV2 fb_ev_bad2;
+        fb_ev_bad2.l1_accept = issue_pilot::HierarchyCounts(4, 5);
+        fb_ev_bad2.l1_complete = issue_pilot::HierarchyCounts(5, 5); // 5 comp trials > 4 acc successes
+        bool threw_bad2 = false;
+        try {
+            fb_ev_bad2.compute_feedback();
+        } catch (const std::invalid_argument &) {
+            threw_bad2 = true;
+        }
+        report_test("Cohort Invariant Violating Comp > Acc Successes Throws", threw_bad2, 1.0, threw_bad2 ? 1.0 : 0.0);
+
+        // 11. Feedback Both Dimensions Available (Consistent Cohort: n_comp = 5 <= a_acc = 6 <= n_acc = 8)
+        // acc: p1 = (6 + 2)/12 = 8/12 = 2/3 -> 66.6667
+        // comp: p1 = (5 + 2)/9 = 7/9 -> 77.7778
         issue_pilot::OutcomeFeedbackEvidenceV2 fb_ev_both;
-        fb_ev_both.l1_accept = issue_pilot::HierarchyCounts(4, 5); // 66.6667
-        fb_ev_both.l1_complete = issue_pilot::HierarchyCounts(5, 5); // 77.7778
+        fb_ev_both.l1_accept = issue_pilot::HierarchyCounts(6, 8);
+        fb_ev_both.l1_complete = issue_pilot::HierarchyCounts(5, 5);
         auto res_fb_both = fb_ev_both.compute_feedback();
         double expected_f = 0.40 * (100.0 * 2.0 / 3.0) + 0.60 * (100.0 * 7.0 / 9.0);
         report_test("Feedback Both Available Score", std::abs(res_fb_both.score - expected_f) < 1e-6, expected_f, res_fb_both.score);
@@ -1903,6 +1919,28 @@ int main() {
         issue_pilot::OutcomeEvent comp_after_rej = rej_first;
         comp_after_rej.event_type = issue_pilot::OutcomeEventType::COMPLETED;
         report_test("Tracker COMPLETED After REJECTED Ignored", !tracker.record_event(comp_after_rej), 1.0, 1.0);
+
+        // Contradictory decision: ACCEPTED then REJECTED, and REJECTED then ACCEPTED
+        issue_pilot::OutcomeEvent rej_after_acc;
+        rej_after_acc.event_id = "rej_after_acc_id";
+        rej_after_acc.user_id = "user1"; rej_after_acc.issue_key = "gh:org/repo#1"; rej_after_acc.technology = "python";
+        rej_after_acc.event_type = issue_pilot::OutcomeEventType::REJECTED;
+        report_test("Tracker REJECTED After ACCEPTED Ignored", !tracker.record_event(rej_after_acc), 1.0, 1.0);
+
+        issue_pilot::OutcomeEvent acc_after_rej;
+        acc_after_rej.event_id = "acc_after_rej_id";
+        acc_after_rej.user_id = "user1"; acc_after_rej.issue_key = "gh:org/repo#3"; acc_after_rej.technology = "python";
+        acc_after_rej.event_type = issue_pilot::OutcomeEventType::ACCEPTED;
+        report_test("Tracker ACCEPTED After REJECTED Ignored", !tracker.record_event(acc_after_rej), 1.0, 1.0);
+
+        // Terminal event reversal via REOPENED
+        issue_pilot::OutcomeEvent reopen_e4;
+        reopen_e4.event_id = "reopen_e4_id";
+        reopen_e4.user_id = "user1"; reopen_e4.issue_key = "gh:org/repo#2"; reopen_e4.technology = "python";
+        reopen_e4.event_type = issue_pilot::OutcomeEventType::REOPENED;
+        report_test("Tracker REOPENED Accepted Recorded", tracker.record_event(reopen_e4), 1.0, 1.0);
+        auto track_ev_reopened = tracker.build_evidence("user1", "python", "EASY");
+        report_test("Tracker Post-Reopen Completion Trials is 0", track_ev_reopened.l1_complete.trials == 0, 0.0, static_cast<double>(track_ev_reopened.l1_complete.trials));
     }
 
     std::cout << "\nALL UNIT TEST CHECKS (INCLUDING PHASE 1 CONTRACTS) PASSED SUCCESSFULLY!\n";

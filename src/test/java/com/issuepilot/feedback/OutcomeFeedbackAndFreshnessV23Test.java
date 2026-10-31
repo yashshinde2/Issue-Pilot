@@ -177,18 +177,22 @@ class OutcomeFeedbackAndFreshnessV23Test {
         assertEquals(0.40, resAcc.coverageAf(), EPS);
         assertEquals(5.0 / 15.0, resAcc.confidence(), EPS);
 
-        // Completion only: score = compScore, coverage = 0.60
-        OutcomeFeedbackEvidenceV2 fbCompOnly = new OutcomeFeedbackEvidenceV2();
-        fbCompOnly.setL1Accept(new HierarchyCounts(1, 2)); // < 5 trials -> unavailable
-        fbCompOnly.setL1Complete(new HierarchyCounts(5, 5)); // (5+2)/9 = 7/9
-        FeedbackComputationResult resComp = fbCompOnly.computeFeedback();
-        assertTrue(resComp.available());
-        assertEquals(100.0 * 7.0 / 9.0, resComp.score(), EPS);
-        assertEquals(0.60, resComp.coverageAf(), EPS);
+        // Cohort subset invariant validation: completion cannot exceed acceptance (n_complete <= a_accept <= n_accept)
+        OutcomeFeedbackEvidenceV2 fbBad1 = new OutcomeFeedbackEvidenceV2();
+        fbBad1.setL1Accept(new HierarchyCounts(1, 2));
+        fbBad1.setL1Complete(new HierarchyCounts(5, 5)); // 5 comp trials > 1 acc success
+        assertThrows(IllegalArgumentException.class, fbBad1::computeFeedback);
 
-        // Both available: 0.40 * (66.6667) + 0.60 * (77.7778) = 73.3333
+        OutcomeFeedbackEvidenceV2 fbBad2 = new OutcomeFeedbackEvidenceV2();
+        fbBad2.setL1Accept(new HierarchyCounts(4, 5));
+        fbBad2.setL1Complete(new HierarchyCounts(5, 5)); // 5 comp trials > 4 acc successes
+        assertThrows(IllegalArgumentException.class, fbBad2::computeFeedback);
+
+        // Both available (consistent cohort: n_complete = 5 <= a_accept = 6 <= n_accept = 8):
+        // acc: p1 = (6 + 2)/12 = 8/12 = 2/3 -> 66.6667
+        // comp: p1 = (5 + 2)/9 = 7/9 -> 77.7778
         OutcomeFeedbackEvidenceV2 fbBoth = new OutcomeFeedbackEvidenceV2();
-        fbBoth.setL1Accept(new HierarchyCounts(4, 5));
+        fbBoth.setL1Accept(new HierarchyCounts(6, 8));
         fbBoth.setL1Complete(new HierarchyCounts(5, 5));
         FeedbackComputationResult resBoth = fbBoth.computeFeedback();
         assertTrue(resBoth.available());
@@ -264,6 +268,23 @@ class OutcomeFeedbackAndFreshnessV23Test {
         assertTrue(tracker.recordEvent(rejFirst));
         OutcomeEvent compAfterRej = new OutcomeEvent("r3_comp", "user1", "gh:org/repo#3", "python", "EASY", EventType.COMPLETED, Instant.now(), "c1", "w1");
         assertFalse(tracker.recordEvent(compAfterRej), "Cannot complete an issue that was rejected");
+
+        // 9. Contradictory acceptance decisions: ACCEPTED then REJECTED, and REJECTED then ACCEPTED
+        OutcomeEvent rejAfterAcc = new OutcomeEvent("rej_after_acc", "user1", "gh:org/repo#1", "python", "EASY", EventType.REJECTED, Instant.now(), "c1", "w1");
+        assertFalse(tracker.recordEvent(rejAfterAcc), "ACCEPTED decision cannot be retroactively REJECTED");
+
+        OutcomeEvent accAfterRej = new OutcomeEvent("acc_after_rej", "user1", "gh:org/repo#3", "python", "EASY", EventType.ACCEPTED, Instant.now(), "c1", "w1");
+        assertFalse(tracker.recordEvent(accAfterRej), "REJECTED decision cannot be retroactively ACCEPTED within same exposure");
+
+        // 10. Reopened issue reverses terminal completion state
+        OutcomeEvent reopenE4 = new OutcomeEvent("reopen_e4", "user1", "gh:org/repo#2", "python", "EASY", EventType.REOPENED, Instant.now(), "c1", "w1");
+        assertTrue(tracker.recordEvent(reopenE4));
+        OutcomeFeedbackEvidenceV2 evReopened = tracker.buildEvidence("user1", "python", "EASY");
+        assertEquals(0, evReopened.getL1Complete().trials(), "Reopened issue must be cleared from completion trials");
+
+        // 11. Duplicate event ID rejected
+        OutcomeEvent dupId = new OutcomeEvent("e1", "user1", "gh:org/repo#99", "python", "EASY", EventType.ACCEPTED, Instant.now(), "c1", "w1");
+        assertFalse(tracker.recordEvent(dupId), "Duplicate event ID must be rejected");
     }
 
     @Test
@@ -296,6 +317,26 @@ class OutcomeFeedbackAndFreshnessV23Test {
             HierarchyCounts l1 = new HierarchyCounts(s1, t1);
             HierarchyCounts l2 = new HierarchyCounts(s2, t2);
             HierarchyCounts l3 = new HierarchyCounts(s3, t3);
+
+            // Invariant assertion: completions <= accepted successes <= accepted trials
+            if (i % 100 == 0) {
+                OutcomeFeedbackTracker propTracker = new OutcomeFeedbackTracker();
+                for (int ev = 0; ev < 50; ev++) {
+                    String ik = "gh:repo#" + (ev % 10);
+                    EventType[] types = {EventType.ACCEPTED, EventType.REJECTED, EventType.COMPLETED, EventType.NOT_COMPLETED, EventType.REOPENED};
+                    EventType et = types[rnd.nextInt(types.length)];
+                    propTracker.recordEvent(new OutcomeEvent("p_" + i + "_" + ev, "u1", ik, "python", "EASY", et, Instant.now(), "c", "w"));
+                }
+                OutcomeFeedbackEvidenceV2 propEv = propTracker.buildEvidence("u1", "python", "EASY");
+                assertTrue(propEv.getL1Complete().trials() <= propEv.getL1Accept().successes(),
+                        "L1 Subset invariant: n_complete <= a_accept");
+                assertTrue(propEv.getL1Accept().successes() <= propEv.getL1Accept().trials(),
+                        "L1 Subset invariant: a_accept <= n_accept");
+                assertTrue(propEv.getL2Complete().trials() <= propEv.getL2Accept().successes(),
+                        "L2 Subset invariant: n_complete <= a_accept");
+                assertTrue(propEv.getL3Complete().trials() <= propEv.getL3Accept().successes(),
+                        "L3 Subset invariant: n_complete <= a_accept");
+            }
 
             HierarchicalLevelResult hRes = OutcomeFeedbackEvidenceV2.evaluateHierarchy(l3, l2, l1);
             if (t1 < 5) {
