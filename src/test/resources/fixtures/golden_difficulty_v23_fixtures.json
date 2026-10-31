@@ -1,0 +1,208 @@
+{
+  "schema_version": "2.3.0",
+  "algorithm_version": "2.3.0",
+  "fixtures": [
+    {
+      "id": "diff_case_1_full_anchors",
+      "description": "Full rubric anchors with coverage Aid = 1.0",
+      "input": {
+        "scope_change_size": 75.0,
+        "scope_available": true,
+        "scope_confidence": 1.0,
+        "technical_complexity": 50.0,
+        "technical_available": true,
+        "technical_confidence": 1.0,
+        "dependency_arch_impact": 50.0,
+        "dependency_available": true,
+        "dependency_confidence": 1.0,
+        "coordination_complexity": 25.0,
+        "coordination_available": true,
+        "coordination_confidence": 1.0,
+        "labels": []
+      },
+      "contributor": {
+        "capability": 50.0,
+        "confidence": 0.88
+      },
+      "expected": {
+        "difficulty_available": true,
+        "coverage_aid": 1.0,
+        "raw_difficulty": 52.5,
+        "issue_difficulty": 52.5,
+        "confidence_id": 1.0,
+        "fit_gap": 2.5,
+        "penalty": 0.0,
+        "difficulty_match": 100.0,
+        "confidence_d": 0.88
+      }
+    },
+    {
+      "id": "diff_case_2_spec_worked_example_1",
+      "description": "Spec Section 16 worked example: ID=80, cap_eff=60 -> g=20, penalty=22.5, D=77.5",
+      "input": {
+        "issue_difficulty": 80.0,
+        "confidence_id": 0.90
+      },
+      "contributor": {
+        "capability": 60.0,
+        "confidence": 0.85
+      },
+      "expected": {
+        "fit_gap": 20.0,
+        "penalty": 22.5,
+        "difficulty_match": 77.5,
+        "confidence_d": 0.85
+      }
+    },
+    {
+      "id": "diff_case_3_spec_worked_example_2",
+      "description": "Spec Section 16 worked example: ID=40, cap_eff=60 -> g=-20, penalty=15, D=85",
+      "input": {
+        "issue_difficulty": 40.0,
+        "confidence_id": 0.90
+      },
+      "contributor": {
+        "capability": 60.0,
+        "confidence": 0.85
+      },
+      "expected": {
+        "fit_gap": -20.0,
+        "penalty": 15.0,
+        "difficulty_match": 85.0,
+        "confidence_d": 0.85
+      }
+    },
+    {
+      "id": "diff_case_4_coverage_exact_boundary_050",
+      "description": "Coverage Aid = 0.50 exactly at the boundary (TC=0.30, CC=0.20 available; SC, DI unavailable)",
+      "input": {
+        "scope_available": false,
+        "technical_complexity": 50.0,
+        "technical_available": true,
+        "technical_confidence": 0.80,
+        "dependency_available": false,
+        "coordination_complexity": 50.0,
+        "coordination_available": true,
+        "coordination_confidence": 0.80,
+        "labels": []
+      },
+      "contributor": {
+        "capability": 50.0,
+        "confidence": 0.80
+      },
+      "expected": {
+        "difficulty_available": true,
+        "coverage_aid": 0.50,
+        "raw_difficulty": 50.0,
+        "issue_difficulty": 50.0,
+        "confidence_id": 0.40,
+        "fit_gap": 0.0,
+        "penalty": 0.0,
+        "difficulty_match": 100.0,
+        "confidence_d": 0.40
+      }
+    },
+    {
+      "id": "diff_case_5_coverage_below_gate_040",
+      "description": "Coverage Aid = 0.40 < 0.50 gate rejected (DI=0.20, CC=0.20 available; SC, TC unavailable)",
+      "input": {
+        "scope_available": false,
+        "technical_available": false,
+        "dependency_arch_impact": 50.0,
+        "dependency_available": true,
+        "dependency_confidence": 0.80,
+        "coordination_complexity": 50.0,
+        "coordination_available": true,
+        "coordination_confidence": 0.80,
+        "labels": []
+      },
+      "expected": {
+        "difficulty_available": false,
+        "coverage_aid": 0.40
+      }
+    },
+    {
+      "id": "diff_case_6_label_corroboration_easy",
+      "description": "Weak label corroboration for easy/beginner labels capped at -3.0",
+      "input": {
+        "scope_change_size": 50.0,
+        "scope_available": true,
+        "technical_complexity": 50.0,
+        "technical_available": true,
+        "dependency_arch_impact": 50.0,
+        "dependency_available": true,
+        "coordination_complexity": 50.0,
+        "coordination_available": true,
+        "labels": ["good-first-issue", "beginner", "starter"]
+      },
+      "expected": {
+        "difficulty_available": true,
+        "raw_difficulty": 50.0,
+        "label_adjustment": -3.0,
+        "issue_difficulty": 47.0
+      }
+    },
+    {
+      "id": "diff_case_7_label_corroboration_hard",
+      "description": "Weak label corroboration for complex/epic labels capped at +3.0",
+      "input": {
+        "scope_change_size": 50.0,
+        "scope_available": true,
+        "technical_complexity": 50.0,
+        "technical_available": true,
+        "dependency_arch_impact": 50.0,
+        "dependency_available": true,
+        "coordination_complexity": 50.0,
+        "coordination_available": true,
+        "labels": ["epic", "complex", "high-complexity"]
+      },
+      "expected": {
+        "difficulty_available": true,
+        "raw_difficulty": 50.0,
+        "label_adjustment": 3.0,
+        "issue_difficulty": 53.0
+      }
+    },
+    {
+      "id": "diff_case_8_dead_zone_evaluations",
+      "description": "Dead zone boundaries and slopes for fit gap g in [-6, 6]",
+      "evaluations": [
+        {"g": -6.0, "expected_penalty": 1.0, "expected_d": 99.0},
+        {"g": -5.1, "expected_penalty": 0.10, "expected_d": 99.90},
+        {"g": -5.0, "expected_penalty": 0.0, "expected_d": 100.0},
+        {"g": 0.0, "expected_penalty": 0.0, "expected_d": 100.0},
+        {"g": 5.0, "expected_penalty": 0.0, "expected_d": 100.0},
+        {"g": 5.1, "expected_penalty": 0.15, "expected_d": 99.85},
+        {"g": 6.0, "expected_penalty": 1.50, "expected_d": 98.50}
+      ]
+    },
+    {
+      "id": "diff_case_9_saturation_clamping",
+      "description": "Penalty saturation and score clamping to 0.0",
+      "evaluations": [
+        {"g": 80.0, "expected_penalty": 112.5, "expected_d": 0.0},
+        {"g": -110.0, "expected_penalty": 105.0, "expected_d": 0.0}
+      ]
+    },
+    {
+      "id": "diff_case_10_questionnaire_only_skill_fit_regression",
+      "description": "Observed skill below 0.40 coverage, but questionnaire available -> cap_eff = 75.0, C_cap = 0.40",
+      "input": {
+        "issue_difficulty": 75.0,
+        "confidence_id": 0.90
+      },
+      "contributor": {
+        "capability": 75.0,
+        "confidence": 0.40,
+        "source": "self_reported"
+      },
+      "expected": {
+        "fit_gap": 0.0,
+        "penalty": 0.0,
+        "difficulty_match": 100.0,
+        "confidence_d": 0.40
+      }
+    }
+  ]
+}
+

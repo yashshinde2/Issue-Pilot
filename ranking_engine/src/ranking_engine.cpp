@@ -127,6 +127,22 @@ double RankingEngine::calculate_difficulty_match(double capability,
     return std::max(0.0, std::min(100.0, d));
 }
 
+bool RankingEngine::calculate_difficulty_fit_v2(double issue_difficulty, double confidence_id,
+                                                double contributor_capability, double confidence_cap,
+                                                double &out_d, double &out_c_d,
+                                                double &out_penalty, double &out_g) const {
+    auto res = DifficultyEvidenceV2::compute_fit(issue_difficulty, confidence_id,
+                                                contributor_capability, confidence_cap);
+    if (!res.available) {
+        return false;
+    }
+    out_d = res.difficulty_match_score;
+    out_c_d = res.confidence;
+    out_penalty = res.penalty;
+    out_g = res.fit_gap;
+    return true;
+}
+
 double RankingEngine::calculate_responsiveness(const ResponsivenessEvidence& evidence) const {
     double r = evidence.compute_responsiveness();
     return std::max(0.0, std::min(100.0, r));
@@ -185,24 +201,49 @@ ComponentScores RankingEngine::compute_scores(const ContributorProfile& profile,
             double s_v2 = 0.0, c_v2 = 0.0, cov_v2 = 0.0;
             if (calculate_skill_match_v2(profile, issue, s_v2, c_v2, cov_v2)) {
                 s.skill_match = s_v2;
+                s.skill_confidence = c_v2;
             } else {
                 s.skill_available = false;
                 s.missing_components.push_back("Skill Match (Coverage < 0.50)");
             }
         } else {
             s.skill_match = calculate_skill_match(profile, issue);
+            s.skill_confidence = 1.0;
         }
     } else {
         s.missing_components.push_back("Skill Match");
     }
 
     // D
-    s.difficulty_available = issue.difficulty_evidence.available;
-    if (s.difficulty_available) {
+    if (issue.difficulty_evidence_v2.available) {
+        auto d_res = issue.difficulty_evidence_v2.value.compute_difficulty(issue.labels);
+        if (d_res.available && s.skill_available) {
+            double d_match = 0.0, c_d = 0.0, penalty = 0.0, g = 0.0;
+            bool ok = calculate_difficulty_fit_v2(d_res.issue_difficulty, d_res.confidence,
+                                                  s.skill_match, s.skill_confidence,
+                                                  d_match, c_d, penalty, g);
+            if (ok) {
+                s.difficulty_available = true;
+                s.difficulty_match = d_match;
+                s.computed_issue_difficulty = d_res.issue_difficulty;
+                s.difficulty_confidence = c_d;
+                s.fit_gap = g;
+                s.fit_penalty = penalty;
+            } else {
+                s.difficulty_available = false;
+                s.missing_components.push_back("Difficulty Match");
+            }
+        } else {
+            s.difficulty_available = false;
+            s.missing_components.push_back("Difficulty Match");
+        }
+    } else if (issue.difficulty_evidence.available) {
+        s.difficulty_available = true;
         s.difficulty_match = calculate_difficulty_match(profile.capability, 
                                                         issue.difficulty_evidence, 
                                                         s.computed_issue_difficulty);
     } else {
+        s.difficulty_available = false;
         s.missing_components.push_back("Difficulty Match");
     }
 

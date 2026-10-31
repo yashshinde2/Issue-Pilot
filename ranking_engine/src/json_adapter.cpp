@@ -170,7 +170,25 @@ bool JsonAdapter::parse_request(const std::string& json_str,
             }
 
             // Difficulty Evidence
-            if (item.has("difficulty_evidence")) {
+            if (item.has("difficulty_evidence_v2")) {
+                const auto& d = item.get("difficulty_evidence_v2");
+                issue.difficulty_evidence_v2.available = d.get("available").as_bool(true);
+                const auto& v = d.has("value") ? d.get("value") : d;
+                issue.difficulty_evidence_v2.value.scope_change_size = v.get("scope_change_size").as_double(50.0);
+                issue.difficulty_evidence_v2.value.technical_complexity = v.get("technical_complexity").as_double(50.0);
+                issue.difficulty_evidence_v2.value.dependency_arch_impact = v.get("dependency_arch_impact").as_double(50.0);
+                issue.difficulty_evidence_v2.value.coordination_complexity = v.get("coordination_complexity").as_double(50.0);
+                issue.difficulty_evidence_v2.value.scope_available = v.get("scope_available").as_bool(v.has("scope_change_size"));
+                issue.difficulty_evidence_v2.value.technical_available = v.get("technical_available").as_bool(v.has("technical_complexity"));
+                issue.difficulty_evidence_v2.value.dependency_available = v.get("dependency_available").as_bool(v.has("dependency_arch_impact"));
+                issue.difficulty_evidence_v2.value.coordination_available = v.get("coordination_available").as_bool(v.has("coordination_complexity"));
+                issue.difficulty_evidence_v2.value.scope_confidence = v.get("scope_confidence").as_double(1.0);
+                issue.difficulty_evidence_v2.value.technical_confidence = v.get("technical_confidence").as_double(1.0);
+                issue.difficulty_evidence_v2.value.dependency_confidence = v.get("dependency_confidence").as_double(1.0);
+                issue.difficulty_evidence_v2.value.coordination_confidence = v.get("coordination_confidence").as_double(1.0);
+                issue.difficulty_evidence_v2.value.label_adjustment = v.get("label_adjustment").as_double(0.0);
+                issue.difficulty_evidence_v2.confidence = d.get("confidence").as_double(1.0);
+            } else if (item.has("difficulty_evidence")) {
                 const auto& d = item.get("difficulty_evidence");
                 issue.difficulty_evidence.available = d.get("available").as_bool(true);
                 issue.difficulty_evidence.scope_change_size = d.get("scope_change_size").as_double(50.0);

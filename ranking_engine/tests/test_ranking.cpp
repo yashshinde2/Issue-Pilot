@@ -1029,6 +1029,259 @@ int main() {
         report_test("Technology Edge: tsconfig.json manifest accepted", ts_manifest, 1.0, ts_manifest ? 1.0 : 0.0);
     }
 
+    // =========================================================================
+    // PHASE 4: DIFFICULTY ESTIMATOR AND ENGINEERING CHALLENGE FIT MODEL TESTS
+    // =========================================================================
+    std::cout << "\n--- Phase 4: Difficulty Estimator & Engineering Challenge Fit Tests ---\n";
+
+    // Test 33: Golden Difficulty Fixtures Execution
+    {
+        std::string diff_fix_path = "ranking_engine/tests/fixtures/golden_difficulty_v23_fixtures.json";
+        std::ifstream f(diff_fix_path);
+        if (!f.is_open()) {
+            diff_fix_path = "tests/fixtures/golden_difficulty_v23_fixtures.json";
+            f.open(diff_fix_path);
+        }
+        if (!f.is_open()) {
+            diff_fix_path = "../tests/fixtures/golden_difficulty_v23_fixtures.json";
+            f.open(diff_fix_path);
+        }
+        report_test("Golden Difficulty JSON Fixture Opened", f.is_open(), 1.0, f.is_open() ? 1.0 : 0.0);
+
+        std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        bool err = false;
+        size_t pos = 0;
+        auto root = issue_pilot::SimpleJsonParser::parse(content, pos, err);
+        report_test("Golden Difficulty JSON Valid AST", !err && root.has("fixtures"), 1.0, (!err && root.has("fixtures")) ? 1.0 : 0.0);
+
+        // Case 1: Full anchors (SC=75, TC=50, DI=50, CC=25 -> ID=52.5, Aid=1.0, D=100.0, CD=0.88)
+        {
+            issue_pilot::DifficultyEvidenceV2 ev1;
+            ev1.scope_change_size = 75.0;
+            ev1.scope_available = true;
+            ev1.scope_confidence = 1.0;
+            ev1.technical_complexity = 50.0;
+            ev1.technical_available = true;
+            ev1.technical_confidence = 1.0;
+            ev1.dependency_arch_impact = 50.0;
+            ev1.dependency_available = true;
+            ev1.dependency_confidence = 1.0;
+            ev1.coordination_complexity = 25.0;
+            ev1.coordination_available = true;
+            ev1.coordination_confidence = 1.0;
+
+            auto res1 = ev1.compute_difficulty({});
+            report_test("Golden Difficulty 1: Available", res1.available, 1.0, res1.available ? 1.0 : 0.0);
+            report_test("Golden Difficulty 1: Aid (1.0)", std::abs(res1.coverage_aid - 1.0) < 1e-6, 1.0, res1.coverage_aid);
+            report_test("Golden Difficulty 1: ID (52.5)", std::abs(res1.issue_difficulty - 52.5) < 1e-4, 52.5, res1.issue_difficulty);
+            report_test("Golden Difficulty 1: Confidence (1.0)", std::abs(res1.confidence - 1.0) < 1e-6, 1.0, res1.confidence);
+
+            auto fit1 = issue_pilot::DifficultyEvidenceV2::compute_fit(res1.issue_difficulty, res1.confidence, 50.0, 0.88);
+            report_test("Golden Difficulty 1: Fit Available", fit1.available, 1.0, fit1.available ? 1.0 : 0.0);
+            report_test("Golden Difficulty 1: D (100.0, in 5-pt dead zone)", std::abs(fit1.difficulty_match_score - 100.0) < 1e-6, 100.0, fit1.difficulty_match_score);
+            report_test("Golden Difficulty 1: Penalty (0.0)", std::abs(fit1.penalty - 0.0) < 1e-6, 0.0, fit1.penalty);
+            report_test("Golden Difficulty 1: CD (0.88)", std::abs(fit1.confidence - 0.88) < 1e-4, 0.88, fit1.confidence);
+        }
+
+        // Case 2 & 3: Spec Section 16 worked examples
+        {
+            // ID=80, cap=60 -> g=20, penalty=22.5, D=77.5
+            auto fit2 = issue_pilot::DifficultyEvidenceV2::compute_fit(80.0, 0.90, 60.0, 0.85);
+            report_test("Spec Worked Example 1: g=20", std::abs(fit2.fit_gap - 20.0) < 1e-6, 20.0, fit2.fit_gap);
+            report_test("Spec Worked Example 1: penalty=22.5", std::abs(fit2.penalty - 22.5) < 1e-4, 22.5, fit2.penalty);
+            report_test("Spec Worked Example 1: D=77.5", std::abs(fit2.difficulty_match_score - 77.5) < 1e-4, 77.5, fit2.difficulty_match_score);
+            report_test("Spec Worked Example 1: CD=0.85", std::abs(fit2.confidence - 0.85) < 1e-4, 0.85, fit2.confidence);
+
+            // ID=40, cap=60 -> g=-20, penalty=15.0, D=85.0
+            auto fit3 = issue_pilot::DifficultyEvidenceV2::compute_fit(40.0, 0.90, 60.0, 0.85);
+            report_test("Spec Worked Example 2: g=-20", std::abs(fit3.fit_gap - (-20.0)) < 1e-6, -20.0, fit3.fit_gap);
+            report_test("Spec Worked Example 2: penalty=15.0", std::abs(fit3.penalty - 15.0) < 1e-4, 15.0, fit3.penalty);
+            report_test("Spec Worked Example 2: D=85.0", std::abs(fit3.difficulty_match_score - 85.0) < 1e-4, 85.0, fit3.difficulty_match_score);
+            report_test("Spec Worked Example 2: CD=0.85", std::abs(fit3.confidence - 0.85) < 1e-4, 0.85, fit3.confidence);
+        }
+
+        // Case 4: Exactly 0.50 coverage boundary (TC=50, CC=50 -> Aid=0.50 -> Available!)
+        {
+            issue_pilot::DifficultyEvidenceV2 ev4;
+            ev4.technical_complexity = 50.0;
+            ev4.technical_available = true;
+            ev4.technical_confidence = 0.80;
+            ev4.coordination_complexity = 50.0;
+            ev4.coordination_available = true;
+            ev4.coordination_confidence = 0.80;
+
+            auto res4 = ev4.compute_difficulty({});
+            report_test("Golden Difficulty 4: Aid == 0.50 Boundary Available", res4.available, 1.0, res4.available ? 1.0 : 0.0);
+            report_test("Golden Difficulty 4: Aid = 0.50", std::abs(res4.coverage_aid - 0.50) < 1e-6, 0.50, res4.coverage_aid);
+            report_test("Golden Difficulty 4: ID = 50.0", std::abs(res4.issue_difficulty - 50.0) < 1e-4, 50.0, res4.issue_difficulty);
+            report_test("Golden Difficulty 4: CID = 0.40", std::abs(res4.confidence - 0.40) < 1e-6, 0.40, res4.confidence);
+        }
+
+        // Case 5: 0.40 coverage below gate (DI=50, CC=50 -> Aid=0.40 -> Unavailable!)
+        {
+            issue_pilot::DifficultyEvidenceV2 ev5;
+            ev5.dependency_arch_impact = 50.0;
+            ev5.dependency_available = true;
+            ev5.dependency_confidence = 0.80;
+            ev5.coordination_complexity = 50.0;
+            ev5.coordination_available = true;
+            ev5.coordination_confidence = 0.80;
+
+            auto res5 = ev5.compute_difficulty({});
+            report_test("Golden Difficulty 5: Aid = 0.40 < 0.50 Gate Unavailable", !res5.available, 1.0, !res5.available ? 1.0 : 0.0);
+            report_test("Golden Difficulty 5: Aid = 0.40", std::abs(res5.coverage_aid - 0.40) < 1e-6, 0.40, res5.coverage_aid);
+        }
+
+        // Case 6 & 7: Weak label corroboration (easy -3.0, hard +3.0)
+        {
+            issue_pilot::DifficultyEvidenceV2 ev6;
+            ev6.scope_change_size = 50.0; ev6.scope_available = true;
+            ev6.technical_complexity = 50.0; ev6.technical_available = true;
+            ev6.dependency_arch_impact = 50.0; ev6.dependency_available = true;
+            ev6.coordination_complexity = 50.0; ev6.coordination_available = true;
+
+            auto res6 = ev6.compute_difficulty({"good-first-issue", "beginner", "starter"});
+            report_test("Label Corroboration Easy: Capped at -3.0", std::abs(res6.label_adjustment - (-3.0)) < 1e-6, -3.0, res6.label_adjustment);
+            report_test("Label Corroboration Easy: Final ID = 47.0", std::abs(res6.issue_difficulty - 47.0) < 1e-4, 47.0, res6.issue_difficulty);
+
+            issue_pilot::DifficultyEvidenceV2 ev7;
+            ev7.scope_change_size = 50.0; ev7.scope_available = true;
+            ev7.technical_complexity = 50.0; ev7.technical_available = true;
+            ev7.dependency_arch_impact = 50.0; ev7.dependency_available = true;
+            ev7.coordination_complexity = 50.0; ev7.coordination_available = true;
+
+            auto res7 = ev7.compute_difficulty({"epic", "complex", "high-complexity"});
+            report_test("Label Corroboration Hard: Capped at +3.0", std::abs(res7.label_adjustment - 3.0) < 1e-6, 3.0, res7.label_adjustment);
+            report_test("Label Corroboration Hard: Final ID = 53.0", std::abs(res7.issue_difficulty - 53.0) < 1e-4, 53.0, res7.issue_difficulty);
+        }
+
+        // Case 8: Dead zone evaluations (g in [-6, +6])
+        {
+            struct DeadZoneCheck { double g; double exp_pen; double exp_d; };
+            std::vector<DeadZoneCheck> dz_checks = {
+                {-6.0, 1.00, 99.00},
+                {-5.1, 0.10, 99.90},
+                {-5.0, 0.00, 100.00},
+                { 0.0, 0.00, 100.00},
+                { 5.0, 0.00, 100.00},
+                { 5.1, 0.15, 99.85},
+                { 6.0, 1.50, 98.50}
+            };
+            bool all_dz_ok = true;
+            for (const auto& c : dz_checks) {
+                auto fit = issue_pilot::DifficultyEvidenceV2::compute_fit(c.g, 1.0, 0.0, 1.0);
+                if (std::abs(fit.penalty - c.exp_pen) > 1e-4 || std::abs(fit.difficulty_match_score - c.exp_d) > 1e-4) {
+                    all_dz_ok = false;
+                }
+            }
+            report_test("Dead Zone Boundaries and Slopes Verified (g in [-6, 6])", all_dz_ok, 1.0, all_dz_ok ? 1.0 : 0.0);
+        }
+
+        // Case 9: Penalty saturation and clamping to 0.0
+        {
+            auto fit_sat_pos = issue_pilot::DifficultyEvidenceV2::compute_fit(80.0, 1.0, 0.0, 1.0);
+            report_test("Penalty Saturation Pos (g=80 -> D=0.0)", std::abs(fit_sat_pos.difficulty_match_score - 0.0) < 1e-6, 0.0, fit_sat_pos.difficulty_match_score);
+
+            auto fit_sat_neg = issue_pilot::DifficultyEvidenceV2::compute_fit(-110.0, 1.0, 0.0, 1.0);
+            report_test("Penalty Saturation Neg (g=-110 -> D=0.0)", std::abs(fit_sat_neg.difficulty_match_score - 0.0) < 1e-6, 0.0, fit_sat_neg.difficulty_match_score);
+        }
+
+        // Case 10: Questionnaire-only skill regression
+        {
+            auto fit10 = issue_pilot::DifficultyEvidenceV2::compute_fit(75.0, 0.90, 75.0, 0.40);
+            report_test("Questionnaire Only Fit: D=100.0", std::abs(fit10.difficulty_match_score - 100.0) < 1e-6, 100.0, fit10.difficulty_match_score);
+            report_test("Questionnaire Only Fit: CD=0.40", std::abs(fit10.confidence - 0.40) < 1e-6, 0.40, fit10.confidence);
+        }
+    }
+
+    // Test 34: Missing Signals, Non-Anchor Inputs, and Availability Independence
+    {
+        // Missing 1 signal: SC missing -> remaining 0.70 >= 0.50
+        issue_pilot::DifficultyEvidenceV2 ev_m1;
+        ev_m1.technical_complexity = 50.0; ev_m1.technical_available = true;
+        ev_m1.dependency_arch_impact = 50.0; ev_m1.dependency_available = true;
+        ev_m1.coordination_complexity = 50.0; ev_m1.coordination_available = true;
+        auto res_m1 = ev_m1.compute_difficulty({});
+        report_test("Missing 1 Signal (SC): Aid=0.70 Available", res_m1.available && std::abs(res_m1.coverage_aid - 0.70) < 1e-6, 1.0, res_m1.available ? 1.0 : 0.0);
+
+        // Missing 2 signals: SC + TC missing -> remaining 0.40 < 0.50
+        issue_pilot::DifficultyEvidenceV2 ev_m2;
+        ev_m2.dependency_arch_impact = 50.0; ev_m2.dependency_available = true;
+        ev_m2.coordination_complexity = 50.0; ev_m2.coordination_available = true;
+        auto res_m2 = ev_m2.compute_difficulty({});
+        report_test("Missing 2 Signals (SC+TC): Aid=0.40 Unavailable", !res_m2.available, 1.0, !res_m2.available ? 1.0 : 0.0);
+
+        // Missing 3 signals: only SC present -> remaining 0.30 < 0.50
+        issue_pilot::DifficultyEvidenceV2 ev_m3;
+        ev_m3.scope_change_size = 100.0; ev_m3.scope_available = true;
+        auto res_m3 = ev_m3.compute_difficulty({});
+        report_test("Missing 3 Signals (only SC): Aid=0.30 Unavailable", !res_m3.available, 1.0, !res_m3.available ? 1.0 : 0.0);
+
+        // Non-anchor input (e.g. 33.0 or 60.0) treated as invalid/unavailable
+        issue_pilot::DifficultyEvidenceV2 ev_non_anchor;
+        ev_non_anchor.scope_change_size = 33.0; ev_non_anchor.scope_available = true;
+        ev_non_anchor.technical_complexity = 60.0; ev_non_anchor.technical_available = true;
+        ev_non_anchor.dependency_arch_impact = 50.0; ev_non_anchor.dependency_available = true;
+        ev_non_anchor.coordination_complexity = 50.0; ev_non_anchor.coordination_available = true;
+        auto res_non_anchor = ev_non_anchor.compute_difficulty({});
+        report_test("Non-Anchor Inputs Discarded: Aid=0.40 Unavailable", !res_non_anchor.available && std::abs(res_non_anchor.coverage_aid - 0.40) < 1e-6, 1.0, !res_non_anchor.available ? 1.0 : 0.0);
+
+        // Score clamping at boundaries 0 and 100 with label adjustments
+        issue_pilot::DifficultyEvidenceV2 ev_top;
+        ev_top.scope_change_size = 100.0; ev_top.scope_available = true;
+        ev_top.technical_complexity = 100.0; ev_top.technical_available = true;
+        ev_top.dependency_arch_impact = 100.0; ev_top.dependency_available = true;
+        ev_top.coordination_complexity = 100.0; ev_top.coordination_available = true;
+        auto res_top = ev_top.compute_difficulty({"epic", "hard", "complex"});
+        report_test("Score Clamping Max at 100 (100 + 3 = 100)", std::abs(res_top.issue_difficulty - 100.0) < 1e-6, 100.0, res_top.issue_difficulty);
+
+        issue_pilot::DifficultyEvidenceV2 ev_bot;
+        ev_bot.scope_change_size = 0.0; ev_bot.scope_available = true;
+        ev_bot.technical_complexity = 0.0; ev_bot.technical_available = true;
+        ev_bot.dependency_arch_impact = 0.0; ev_bot.dependency_available = true;
+        ev_bot.coordination_complexity = 0.0; ev_bot.coordination_available = true;
+        auto res_bot = ev_bot.compute_difficulty({"good-first-issue", "easy", "beginner"});
+        report_test("Score Clamping Min at 0 (0 - 3 = 0)", std::abs(res_bot.issue_difficulty - 0.0) < 1e-6, 0.0, res_bot.issue_difficulty);
+    }
+
+    // Test 35: Engine Integration with DifficultyEvidenceV2 and Skill Availability Gate
+    {
+        issue_pilot::RankingEngine engine_diff;
+        issue_pilot::IssueRecord issue_diff;
+        issue_diff.id = "diff_engine_test";
+        issue_diff.issue_url = "https://github.com/test/repo/issues/100";
+        issue_diff.labels = {"good-first-issue"};
+
+        issue_pilot::DifficultyEvidenceV2 d_ev;
+        d_ev.scope_change_size = 50.0; d_ev.scope_available = true;
+        d_ev.technical_complexity = 50.0; d_ev.technical_available = true;
+        d_ev.dependency_arch_impact = 50.0; d_ev.dependency_available = true;
+        d_ev.coordination_complexity = 50.0; d_ev.coordination_available = true;
+        issue_diff.difficulty_evidence_v2.available = true;
+        issue_diff.difficulty_evidence_v2.value = d_ev;
+        issue_diff.difficulty_evidence_v2.confidence = 0.95;
+
+        // Subcase A: Contributor has skill available -> D computed
+        issue_pilot::ContributorProfile prof_with_skill;
+        prof_with_skill.user_id = "user_skill_ok";
+        prof_with_skill.skills["Python"] = issue_pilot::ContributorSkill{"Python", 50.0, 0.85};
+        issue_diff.technologies.push_back(issue_pilot::TechnologyRelevance{"Python", 1.0, 1.0});
+
+        auto scores_a = engine_diff.compute_scores(prof_with_skill, issue_diff);
+        report_test("Engine V2.3 Difficulty Match Available when Skill Available", scores_a.difficulty_available, 1.0, scores_a.difficulty_available ? 1.0 : 0.0);
+        // ID raw = 50, label "good-first-issue" -> -1.5 -> ID = 48.5
+        // cap = 50.0 -> g = 48.5 - 50.0 = -1.5 in dead zone -> D = 100.0
+        report_test("Engine V2.3 Computed ID = 48.5", std::abs(scores_a.computed_issue_difficulty - 48.5) < 1e-4, 48.5, scores_a.computed_issue_difficulty);
+        report_test("Engine V2.3 D Match = 100.0", std::abs(scores_a.difficulty_match - 100.0) < 1e-4, 100.0, scores_a.difficulty_match);
+
+        // Subcase B: Skill is UNAVAILABLE -> D must be UNAVAILABLE!
+        issue_pilot::ContributorProfile prof_no_skill;
+        prof_no_skill.user_id = "user_no_skill";
+        prof_no_skill.skill_evidence_v2["Rust"] = issue_pilot::ContributorSkillEvidenceV2{}; // not matching Python
+        auto scores_b = engine_diff.compute_scores(prof_no_skill, issue_diff);
+        report_test("Engine V2.3 Difficulty Match Unavailable when Skill Unavailable", !scores_b.difficulty_available, 1.0, !scores_b.difficulty_available ? 1.0 : 0.0);
+    }
+
     std::cout << "\nALL UNIT TEST CHECKS (INCLUDING PHASE 1 CONTRACTS) PASSED SUCCESSFULLY!\n";
     std::cout << "Executed: " << total_assertions << " | Passed: " << passed_assertions << " | Failed: " << (total_assertions - passed_assertions) << "\n";
     std::cout << "========================================\n";

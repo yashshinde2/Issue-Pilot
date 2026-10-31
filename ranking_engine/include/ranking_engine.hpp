@@ -35,6 +35,11 @@ public:
                                     const DifficultyEvidence &diff_evidence,
                                     double &out_issue_difficulty) const;
 
+  bool calculate_difficulty_fit_v2(double issue_difficulty, double confidence_id,
+                                   double contributor_capability, double confidence_cap,
+                                   double &out_d, double &out_c_d,
+                                   double &out_penalty, double &out_g) const;
+
   double calculate_responsiveness(const ResponsivenessEvidence &evidence) const;
 
   double

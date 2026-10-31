@@ -32,6 +32,45 @@ public final class EvidenceModelsV2 {
         @JsonProperty("coordination_complexity")
         private Double coordinationComplexity; // CC (20%)
 
+        @JsonProperty("scope_available")
+        private Boolean scopeAvailable;
+
+        @JsonProperty("technical_available")
+        private Boolean technicalAvailable;
+
+        @JsonProperty("dependency_available")
+        private Boolean dependencyAvailable;
+
+        @JsonProperty("coordination_available")
+        private Boolean coordinationAvailable;
+
+        @JsonProperty("scope_confidence")
+        private Double scopeConfidence = 1.0;
+
+        @JsonProperty("technical_confidence")
+        private Double technicalConfidence = 1.0;
+
+        @JsonProperty("dependency_confidence")
+        private Double dependencyConfidence = 1.0;
+
+        @JsonProperty("coordination_confidence")
+        private Double coordinationConfidence = 1.0;
+
+        @JsonProperty("scope_directness")
+        private String scopeDirectness = "explicit_structured";
+
+        @JsonProperty("technical_directness")
+        private String technicalDirectness = "explicit_structured";
+
+        @JsonProperty("dependency_directness")
+        private String dependencyDirectness = "explicit_structured";
+
+        @JsonProperty("coordination_directness")
+        private String coordinationDirectness = "explicit_structured";
+
+        @JsonProperty("label_adjustment")
+        private Double labelAdjustment = 0.0;
+
         public DifficultyEvidenceV2() {}
 
         public DifficultyEvidenceV2(Double scopeChangeSize, Double technicalComplexity,
@@ -40,6 +79,176 @@ public final class EvidenceModelsV2 {
             this.technicalComplexity = technicalComplexity;
             this.dependencyArchImpact = dependencyArchImpact;
             this.coordinationComplexity = coordinationComplexity;
+            if (scopeChangeSize != null) this.scopeAvailable = isValidAnchor(scopeChangeSize);
+            if (technicalComplexity != null) this.technicalAvailable = isValidAnchor(technicalComplexity);
+            if (dependencyArchImpact != null) this.dependencyAvailable = isValidAnchor(dependencyArchImpact);
+            if (coordinationComplexity != null) this.coordinationAvailable = isValidAnchor(coordinationComplexity);
+        }
+
+        public static boolean isValidAnchor(Double val) {
+            if (val == null || !Double.isFinite(val)) return false;
+            double v = val;
+            return Math.abs(v - 0.0) < 1e-6 ||
+                   Math.abs(v - 25.0) < 1e-6 ||
+                   Math.abs(v - 50.0) < 1e-6 ||
+                   Math.abs(v - 75.0) < 1e-6 ||
+                   Math.abs(v - 100.0) < 1e-6;
+        }
+
+        public static double directnessToConfidence(String directness) {
+            if (directness == null) return 0.55;
+            return switch (directness.trim().toLowerCase(java.util.Locale.ROOT)) {
+                case "structured", "explicit_structured" -> 1.00;
+                case "unambiguous_prose", "explicit_prose" -> 0.80;
+                case "lexical_context", "contextual_lexical" -> 0.55;
+                default -> 0.55;
+            };
+        }
+
+        public static double computeLabelCorroboration(java.util.List<String> labels) {
+            if (labels == null || labels.isEmpty()) return 0.0;
+            double adj = 0.0;
+            for (String l : labels) {
+                if (l == null) continue;
+                String norm = l.trim().toLowerCase(java.util.Locale.ROOT).replace('_', '-');
+                if (norm.contains("good-first-issue") || norm.contains("good first issue") ||
+                    norm.contains("easy") || norm.contains("beginner") ||
+                    norm.contains("starter") || norm.contains("trivial") ||
+                    norm.contains("low-hanging-fruit") || norm.contains("first-timers-only") ||
+                    norm.contains("quick-win")) {
+                    adj -= 1.5;
+                } else if (norm.contains("hard") || norm.contains("complex") ||
+                           norm.contains("advanced") || norm.contains("expert") ||
+                           norm.contains("epic") || norm.contains("high-complexity") ||
+                           norm.contains("difficult")) {
+                    adj += 1.5;
+                }
+            }
+            return Math.max(-3.0, Math.min(3.0, adj));
+        }
+
+        public record DifficultyComputationResult(
+                boolean available,
+                double issueDifficulty,
+                double rawDifficulty,
+                double confidence,
+                double coverageAid,
+                double labelAdjustment,
+                String explanation
+        ) {
+            public static DifficultyComputationResult unavailable(double coverageAid, String reason) {
+                return new DifficultyComputationResult(false, 0.0, 0.0, 0.0, coverageAid, 0.0, reason);
+            }
+        }
+
+        public record FitComputationResult(
+                boolean available,
+                double difficultyMatchScore,
+                double confidence,
+                double fitGap,
+                double penalty,
+                String explanation
+        ) {
+            public static FitComputationResult unavailable(String reason) {
+                return new FitComputationResult(false, 0.0, 0.0, 0.0, 0.0, reason);
+            }
+        }
+
+        public DifficultyComputationResult computeDifficulty(java.util.List<String> labels) {
+            double aId = 0.0;
+            double weightedSum = 0.0;
+            double confSum = 0.0;
+
+            // SC: 0.30
+            boolean scOk = Boolean.TRUE.equals(scopeAvailable) || (scopeAvailable == null && scopeChangeSize != null);
+            if (scOk && isValidAnchor(scopeChangeSize)) {
+                double cSc = scopeConfidence != null ? scopeConfidence : directnessToConfidence(scopeDirectness);
+                if (cSc < 0.0 || cSc > 1.0 || !Double.isFinite(cSc)) throw new IllegalArgumentException("Invalid SC confidence: " + cSc);
+                aId += 0.30;
+                weightedSum += 0.30 * scopeChangeSize;
+                confSum += 0.30 * cSc;
+            }
+
+            // TC: 0.30
+            boolean tcOk = Boolean.TRUE.equals(technicalAvailable) || (technicalAvailable == null && technicalComplexity != null);
+            if (tcOk && isValidAnchor(technicalComplexity)) {
+                double cTc = technicalConfidence != null ? technicalConfidence : directnessToConfidence(technicalDirectness);
+                if (cTc < 0.0 || cTc > 1.0 || !Double.isFinite(cTc)) throw new IllegalArgumentException("Invalid TC confidence: " + cTc);
+                aId += 0.30;
+                weightedSum += 0.30 * technicalComplexity;
+                confSum += 0.30 * cTc;
+            }
+
+            // DI: 0.20
+            boolean diOk = Boolean.TRUE.equals(dependencyAvailable) || (dependencyAvailable == null && dependencyArchImpact != null);
+            if (diOk && isValidAnchor(dependencyArchImpact)) {
+                double cDi = dependencyConfidence != null ? dependencyConfidence : directnessToConfidence(dependencyDirectness);
+                if (cDi < 0.0 || cDi > 1.0 || !Double.isFinite(cDi)) throw new IllegalArgumentException("Invalid DI confidence: " + cDi);
+                aId += 0.20;
+                weightedSum += 0.20 * dependencyArchImpact;
+                confSum += 0.20 * cDi;
+            }
+
+            // CC: 0.20
+            boolean ccOk = Boolean.TRUE.equals(coordinationAvailable) || (coordinationAvailable == null && coordinationComplexity != null);
+            if (ccOk && isValidAnchor(coordinationComplexity)) {
+                double cCc = coordinationConfidence != null ? coordinationConfidence : directnessToConfidence(coordinationDirectness);
+                if (cCc < 0.0 || cCc > 1.0 || !Double.isFinite(cCc)) throw new IllegalArgumentException("Invalid CC confidence: " + cCc);
+                aId += 0.20;
+                weightedSum += 0.20 * coordinationComplexity;
+                confSum += 0.20 * cCc;
+            }
+
+            if (aId < 0.50 - 1e-9) {
+                return DifficultyComputationResult.unavailable(aId,
+                        String.format(java.util.Locale.ROOT, "Coverage A_ID = %.4f < 0.50 gate; difficulty is unavailable.", aId));
+            }
+
+            double idRaw = weightedSum / aId;
+            double cId = confSum; // C_ID = sum_j (q_j * a_j * c_j)
+
+            double lAdj = 0.0;
+            if (labelAdjustment != null && Math.abs(labelAdjustment) > 1e-6) {
+                lAdj = Math.max(-3.0, Math.min(3.0, labelAdjustment));
+            } else if (labels != null && !labels.isEmpty()) {
+                lAdj = computeLabelCorroboration(labels);
+            }
+
+            double finalId = Math.max(0.0, Math.min(100.0, idRaw + lAdj));
+            return new DifficultyComputationResult(
+                    true, finalId, idRaw, cId, aId, lAdj,
+                    String.format(java.util.Locale.ROOT, "ID=%.2f (raw=%.2f, label_adj=%.2f, A_ID=%.2f, C_ID=%.4f)", finalId, idRaw, lAdj, aId, cId)
+            );
+        }
+
+        public static FitComputationResult computeFit(
+                Double issueDifficulty, Double confidenceId,
+                Double contributorCapability, Double confidenceCap
+        ) {
+            if (issueDifficulty == null || !Double.isFinite(issueDifficulty) ||
+                contributorCapability == null || !Double.isFinite(contributorCapability)) {
+                return FitComputationResult.unavailable("Missing issue difficulty or contributor capability.");
+            }
+            double cId = confidenceId != null ? Math.max(0.0, Math.min(1.0, confidenceId)) : 0.0;
+            double cCap = confidenceCap != null ? Math.max(0.0, Math.min(1.0, confidenceCap)) : 0.0;
+
+            double g = issueDifficulty - contributorCapability;
+            double penalty;
+            if (Math.abs(g) <= 5.0) {
+                penalty = 0.0;
+            } else if (g > 5.0) {
+                penalty = 1.5 * (g - 5.0);
+            } else {
+                penalty = -g - 5.0; // (-g - 5) == (|g| - 5)
+            }
+
+            double d = Math.max(0.0, Math.min(100.0, 100.0 - penalty));
+            double cD = Math.min(cId, cCap);
+
+            return new FitComputationResult(
+                    true, d, cD, g, penalty,
+                    String.format(java.util.Locale.ROOT, "Fit gap g=%.2f, penalty=%.2f, D=%.2f, C_D=%.4f", g, penalty, d, cD)
+            );
         }
 
         public Double getScopeChangeSize() { return scopeChangeSize; }
@@ -53,6 +262,45 @@ public final class EvidenceModelsV2 {
 
         public Double getCoordinationComplexity() { return coordinationComplexity; }
         public void setCoordinationComplexity(Double coordinationComplexity) { this.coordinationComplexity = coordinationComplexity; }
+
+        public Boolean getScopeAvailable() { return scopeAvailable; }
+        public void setScopeAvailable(Boolean scopeAvailable) { this.scopeAvailable = scopeAvailable; }
+
+        public Boolean getTechnicalAvailable() { return technicalAvailable; }
+        public void setTechnicalAvailable(Boolean technicalAvailable) { this.technicalAvailable = technicalAvailable; }
+
+        public Boolean getDependencyAvailable() { return dependencyAvailable; }
+        public void setDependencyAvailable(Boolean dependencyAvailable) { this.dependencyAvailable = dependencyAvailable; }
+
+        public Boolean getCoordinationAvailable() { return coordinationAvailable; }
+        public void setCoordinationAvailable(Boolean coordinationAvailable) { this.coordinationAvailable = coordinationAvailable; }
+
+        public Double getScopeConfidence() { return scopeConfidence; }
+        public void setScopeConfidence(Double scopeConfidence) { this.scopeConfidence = scopeConfidence; }
+
+        public Double getTechnicalConfidence() { return technicalConfidence; }
+        public void setTechnicalConfidence(Double technicalConfidence) { this.technicalConfidence = technicalConfidence; }
+
+        public Double getDependencyConfidence() { return dependencyConfidence; }
+        public void setDependencyConfidence(Double dependencyConfidence) { this.dependencyConfidence = dependencyConfidence; }
+
+        public Double getCoordinationConfidence() { return coordinationConfidence; }
+        public void setCoordinationConfidence(Double coordinationConfidence) { this.coordinationConfidence = coordinationConfidence; }
+
+        public String getScopeDirectness() { return scopeDirectness; }
+        public void setScopeDirectness(String scopeDirectness) { this.scopeDirectness = scopeDirectness; }
+
+        public String getTechnicalDirectness() { return technicalDirectness; }
+        public void setTechnicalDirectness(String technicalDirectness) { this.technicalDirectness = technicalDirectness; }
+
+        public String getDependencyDirectness() { return dependencyDirectness; }
+        public void setDependencyDirectness(String dependencyDirectness) { this.dependencyDirectness = dependencyDirectness; }
+
+        public String getCoordinationDirectness() { return coordinationDirectness; }
+        public void setCoordinationDirectness(String coordinationDirectness) { this.coordinationDirectness = coordinationDirectness; }
+
+        public Double getLabelAdjustment() { return labelAdjustment; }
+        public void setLabelAdjustment(Double labelAdjustment) { this.labelAdjustment = labelAdjustment; }
     }
 
     /**
