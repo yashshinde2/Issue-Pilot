@@ -501,7 +501,7 @@ public final class EvidenceModelsV2 {
             return switch (s) {
                 case "github" -> 0.90;
                 case "gitlab" -> 0.85;
-                case "forgejo", "gitea" -> 0.80;
+                case "forgejo", "codeberg", "gitea" -> 0.80;
                 case "bugzilla" -> 0.70;
                 case "inferred", "inferred_proxy", "proxy" -> 0.50;
                 default -> 1.0;
@@ -1240,17 +1240,15 @@ public final class EvidenceModelsV2 {
     }
 
     /**
-     * V2.3 Freshness Evidence: AgeScore (40%), ActivityScore (60%) with exponential
-     * decay.
+     * V2.3 Freshness Evidence: AgeScore (40%), ActivityScore (60%) with exponential decay.
+     * Conforms strictly to Section 10 of V2.3 Specification.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class FreshnessEvidenceV2 {
-        @JsonProperty("age_score")
-        private Double ageScore; // 100 * 0.5^(age_days / 14)
-
-        @JsonProperty("activity_score")
-        private Double activityScore; // 100 * 0.5^(idle_days / 7)
+        public static final double CLOCK_SKEW_TOLERANCE_DAYS = 0.001; // ~86.4 seconds
+        public static final double AGE_WEIGHT = 0.40;
+        public static final double ACTIVITY_WEIGHT = 0.60;
 
         @JsonProperty("age_days")
         private Double ageDays;
@@ -1258,18 +1256,115 @@ public final class EvidenceModelsV2 {
         @JsonProperty("idle_days")
         private Double idleDays;
 
+        @JsonProperty("age_score")
+        private Double ageScore;
+
+        @JsonProperty("activity_score")
+        private Double activityScore;
+
+        @JsonProperty("age_available")
+        private Boolean ageAvailable = true;
+
+        @JsonProperty("activity_available")
+        private Boolean activityAvailable = true;
+
+        @JsonProperty("is_bot_activity")
+        private Boolean isBotActivity = false;
+
+        @JsonProperty("source")
+        private String source = "github";
+
+        @JsonProperty("source_cap")
+        private Double sourceCap;
+
         public FreshnessEvidenceV2() {
         }
 
         public FreshnessEvidenceV2(Double ageDays, Double idleDays) {
             this.ageDays = ageDays;
             this.idleDays = idleDays;
-            if (ageDays != null && ageDays >= 0.0) {
-                this.ageScore = 100.0 * Math.pow(0.5, ageDays / 14.0);
+            if (ageDays != null) {
+                this.ageScore = calculateAgeScore(ageDays);
             }
-            if (idleDays != null && idleDays >= 0.0) {
-                this.activityScore = 100.0 * Math.pow(0.5, idleDays / 7.0);
+            if (idleDays != null) {
+                this.activityScore = calculateActivityScore(idleDays);
             }
+        }
+
+        public static double calculateAgeScore(double ageDays) {
+            if (Double.isNaN(ageDays) || !Double.isFinite(ageDays)) {
+                throw new IllegalArgumentException("Non-finite age days: " + ageDays);
+            }
+            if (ageDays < -CLOCK_SKEW_TOLERANCE_DAYS) {
+                throw new IllegalArgumentException("Creation timestamp materially in future: " + ageDays);
+            }
+            double clamped = Math.max(0.0, ageDays);
+            return 100.0 * Math.pow(0.5, clamped / 14.0);
+        }
+
+        public static double calculateActivityScore(double idleDays) {
+            if (Double.isNaN(idleDays) || !Double.isFinite(idleDays)) {
+                throw new IllegalArgumentException("Non-finite idle days: " + idleDays);
+            }
+            if (idleDays < -CLOCK_SKEW_TOLERANCE_DAYS) {
+                throw new IllegalArgumentException("Meaningful activity timestamp materially in future: " + idleDays);
+            }
+            double clamped = Math.max(0.0, idleDays);
+            return 100.0 * Math.pow(0.5, clamped / 7.0);
+        }
+
+        public static double calculateCombinedFreshness(double ageScore, double activityScore) {
+            return AGE_WEIGHT * ageScore + ACTIVITY_WEIGHT * activityScore;
+        }
+
+        public record FreshnessComputationResult(
+                boolean available,
+                double score,
+                double confidence,
+                double coverageAn,
+                int signalCount,
+                Double ageScore,
+                Double activityScore,
+                String explanation) {
+            public static FreshnessComputationResult unavailable(double coverageAn, int signalCount, String reason) {
+                return new FreshnessComputationResult(false, 0.0, 0.0, coverageAn, signalCount, null, null, reason);
+            }
+        }
+
+        public FreshnessComputationResult computeFreshness() {
+            return computeFreshness(this.source, this.sourceCap);
+        }
+
+        public FreshnessComputationResult computeFreshness(String sourceOverride, Double capOverride) {
+            String effSource = sourceOverride != null ? sourceOverride : this.source;
+            Double effCap = capOverride != null ? capOverride : this.sourceCap;
+            double cap = ResponsivenessEvidenceV2.resolveSourceCap(effSource, effCap);
+
+            boolean ageOk = (ageAvailable == null || Boolean.TRUE.equals(ageAvailable)) && ageDays != null;
+            if (!ageOk) {
+                return FreshnessComputationResult.unavailable(0.0, 0, "Issue creation timestamp unavailable");
+            }
+
+            double aScore = calculateAgeScore(ageDays);
+
+            boolean actOk = (activityAvailable == null || Boolean.TRUE.equals(activityAvailable))
+                    && idleDays != null && !Boolean.TRUE.equals(isBotActivity);
+            if (!actOk) {
+                // Age alone available -> available weight normalization
+                double cov = 0.40;
+                double cRaw = 1.0 * cov * 1.0;
+                double conf = Math.min(cap, cRaw);
+                return new FreshnessComputationResult(true, aScore, conf, cov, 1, aScore, null,
+                        "Freshness based on creation age only (activity unavailable/bot-only)");
+            }
+
+            double actScore = calculateActivityScore(idleDays);
+            double totalScore = AGE_WEIGHT * aScore + ACTIVITY_WEIGHT * actScore;
+            double cov = 1.00;
+            double cRaw = 1.0 * cov * 1.0;
+            double conf = Math.min(cap, cRaw);
+            return new FreshnessComputationResult(true, totalScore, conf, cov, 2, aScore, actScore,
+                    "Freshness based on creation age (40%) and recent human activity (60%)");
         }
 
         public Double getAgeScore() {
@@ -1303,14 +1398,96 @@ public final class EvidenceModelsV2 {
         public void setIdleDays(Double idleDays) {
             this.idleDays = idleDays;
         }
+
+        public Boolean getAgeAvailable() {
+            return ageAvailable;
+        }
+
+        public void setAgeAvailable(Boolean ageAvailable) {
+            this.ageAvailable = ageAvailable;
+        }
+
+        public Boolean getActivityAvailable() {
+            return activityAvailable;
+        }
+
+        public void setActivityAvailable(Boolean activityAvailable) {
+            this.activityAvailable = activityAvailable;
+        }
+
+        public Boolean getIsBotActivity() {
+            return isBotActivity;
+        }
+
+        public void setIsBotActivity(Boolean isBotActivity) {
+            this.isBotActivity = isBotActivity;
+        }
+
+        public String getSource() {
+            return source;
+        }
+
+        public void setSource(String source) {
+            this.source = source;
+        }
+
+        public Double getSourceCap() {
+            return sourceCap;
+        }
+
+        public void setSourceCap(Double sourceCap) {
+            this.sourceCap = sourceCap;
+        }
     }
 
     /**
      * V2.3 Outcome Feedback Evidence: hierarchical Beta(2,2) backoff.
+     * Conforms strictly to Section 9 of V2.3 Specification.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class OutcomeFeedbackEvidenceV2 {
+        public static final double ACCEPTANCE_WEIGHT = 0.40;
+        public static final double COMPLETION_WEIGHT = 0.60;
+        public static final double PRIOR_P0 = 0.50; // Beta(2,2) prior mean
+        public static final double PRIOR_WEIGHT = 4.0; // alpha + beta = 2 + 2 = 4
+
+        @JsonProperty("user_id")
+        private String userId;
+
+        @JsonProperty("technology")
+        private String technology;
+
+        @JsonProperty("difficulty_band")
+        private String difficultyBand;
+
+        @JsonProperty("source")
+        private String source = "issue_pilot";
+
+        @JsonProperty("source_cap")
+        private Double sourceCap;
+
+        // Hierarchy counts for Acceptance
+        @JsonProperty("l1_accept")
+        private HierarchyCounts l1Accept; // user_global
+
+        @JsonProperty("l2_accept")
+        private HierarchyCounts l2Accept; // user_tech
+
+        @JsonProperty("l3_accept")
+        private HierarchyCounts l3Accept; // user_tech_diff
+
+        // Hierarchy counts for Completion
+        @JsonProperty("l1_complete")
+        private HierarchyCounts l1Complete; // user_global
+
+        @JsonProperty("l2_complete")
+        private HierarchyCounts l2Complete; // user_tech
+
+        @JsonProperty("l3_complete")
+        private HierarchyCounts l3Complete; // user_tech_diff
+
+        // Computed summary fields for serialization/interop
         @JsonProperty("p_accept")
         private Double pAccept;
 
@@ -1318,7 +1495,13 @@ public final class EvidenceModelsV2 {
         private Double pCompleteGivenAccepted;
 
         @JsonProperty("hierarchy_level")
-        private String hierarchyLevel; // e.g., "user_tech_diff", "user_tech", "user_global", "population"
+        private String hierarchyLevel;
+
+        @JsonProperty("hierarchy_level_accept")
+        private String hierarchyLevelAccept;
+
+        @JsonProperty("hierarchy_level_complete")
+        private String hierarchyLevelComplete;
 
         @JsonProperty("cohort_key")
         private String cohortKey;
@@ -1329,7 +1512,206 @@ public final class EvidenceModelsV2 {
         @JsonProperty("trials_complete")
         private Integer trialsComplete;
 
+        public record HierarchyCounts(
+                @JsonProperty("successes") int successes,
+                @JsonProperty("trials") int trials) {
+            public HierarchyCounts {
+                if (successes < 0 || trials < 0 || successes > trials) {
+                    throw new IllegalArgumentException(
+                            "Invalid trials/successes: successes=" + successes + ", trials=" + trials);
+                }
+            }
+        }
+
+        public record HierarchicalLevelResult(
+                String levelName,
+                int trials,
+                int successes,
+                double smoothedP,
+                boolean available) {}
+
+        public record FeedbackComputationResult(
+                boolean available,
+                double score,
+                double confidence,
+                double coverageAf,
+                Double acceptScore,
+                Double completeScore,
+                String acceptLevel,
+                String completeLevel,
+                int acceptTrials,
+                int completeTrials,
+                String explanation) {
+            public static FeedbackComputationResult unavailable(double coverageAf, String reason) {
+                return new FeedbackComputationResult(false, 0.0, 0.0, coverageAf, null, null, "none", "none", 0, 0, reason);
+            }
+        }
+
         public OutcomeFeedbackEvidenceV2() {
+        }
+
+        public static HierarchicalLevelResult evaluateHierarchy(HierarchyCounts l3, HierarchyCounts l2, HierarchyCounts l1) {
+            if (l1 == null || l1.trials() < 5) {
+                return new HierarchicalLevelResult("none", l1 != null ? l1.trials() : 0, l1 != null ? l1.successes() : 0, 0.0, false);
+            }
+
+            double p1 = (l1.successes() + PRIOR_WEIGHT * PRIOR_P0) / (l1.trials() + PRIOR_WEIGHT);
+
+            double p2 = p1;
+            if (l2 != null && l2.trials() > 0) {
+                p2 = (l2.successes() + PRIOR_WEIGHT * p1) / (l2.trials() + PRIOR_WEIGHT);
+            }
+
+            double p3 = p2;
+            if (l3 != null && l3.trials() > 0) {
+                p3 = (l3.successes() + PRIOR_WEIGHT * p2) / (l3.trials() + PRIOR_WEIGHT);
+            }
+
+            if (l3 != null && l3.trials() >= 5) {
+                return new HierarchicalLevelResult("user_tech_diff", l3.trials(), l3.successes(), p3, true);
+            }
+            if (l2 != null && l2.trials() >= 5) {
+                return new HierarchicalLevelResult("user_tech", l2.trials(), l2.successes(), p2, true);
+            }
+            return new HierarchicalLevelResult("user_global", l1.trials(), l1.successes(), p1, true);
+        }
+
+        public FeedbackComputationResult computeFeedback() {
+            return computeFeedback(this.source, this.sourceCap);
+        }
+
+        public FeedbackComputationResult computeFeedback(String sourceOverride, Double capOverride) {
+            String effSource = sourceOverride != null ? sourceOverride : this.source;
+            Double effCap = capOverride != null ? capOverride : this.sourceCap;
+            double cap = ResponsivenessEvidenceV2.resolveSourceCap(effSource, effCap);
+
+            HierarchicalLevelResult accRes = evaluateHierarchy(l3Accept, l2Accept, l1Accept);
+            HierarchicalLevelResult compRes = evaluateHierarchy(l3Complete, l2Complete, l1Complete);
+
+            if (!accRes.available() && !compRes.available()) {
+                return FeedbackComputationResult.unavailable(0.0,
+                        "Insufficient outcome history: no level with at least 5 trials for acceptance or completion.");
+            }
+
+            if (accRes.available() && compRes.available()) {
+                double accScore = 100.0 * accRes.smoothedP();
+                double compScore = 100.0 * compRes.smoothedP();
+                double fScore = ACCEPTANCE_WEIGHT * accScore + COMPLETION_WEIGHT * compScore;
+                double cAcc = (double) accRes.trials() / (accRes.trials() + 10.0);
+                double cComp = (double) compRes.trials() / (compRes.trials() + 10.0);
+                double rawConf = ACCEPTANCE_WEIGHT * cAcc + COMPLETION_WEIGHT * cComp;
+                double conf = Math.min(cap, rawConf);
+                return new FeedbackComputationResult(true, fScore, conf, 1.00, accScore, compScore,
+                        accRes.levelName(), compRes.levelName(), accRes.trials(), compRes.trials(),
+                        "Full outcome feedback: acceptance and completion both available");
+            }
+
+            if (accRes.available() && !compRes.available()) {
+                double accScore = 100.0 * accRes.smoothedP();
+                double fScore = accScore; // available-weight normalized: 0.40 / 0.40 = 1.0
+                double cAcc = (double) accRes.trials() / (accRes.trials() + 10.0);
+                double conf = Math.min(cap, cAcc);
+                return new FeedbackComputationResult(true, fScore, conf, 0.40, accScore, null,
+                        accRes.levelName(), "none", accRes.trials(), 0,
+                        "Outcome feedback: acceptance only available (completion unavailable)");
+            }
+
+            // !accRes.available() && compRes.available()
+            double compScore = 100.0 * compRes.smoothedP();
+            double fScore = compScore; // available-weight normalized: 0.60 / 0.60 = 1.0
+            double cComp = (double) compRes.trials() / (compRes.trials() + 10.0);
+            double conf = Math.min(cap, cComp);
+            return new FeedbackComputationResult(true, fScore, conf, 0.60, null, compScore,
+                    "none", compRes.levelName(), 0, compRes.trials(),
+                    "Outcome feedback: completion only available (acceptance unavailable)");
+        }
+
+        public String getUserId() {
+            return userId;
+        }
+
+        public void setUserId(String userId) {
+            this.userId = userId;
+        }
+
+        public String getTechnology() {
+            return technology;
+        }
+
+        public void setTechnology(String technology) {
+            this.technology = technology;
+        }
+
+        public String getDifficultyBand() {
+            return difficultyBand;
+        }
+
+        public void setDifficultyBand(String difficultyBand) {
+            this.difficultyBand = difficultyBand;
+        }
+
+        public String getSource() {
+            return source;
+        }
+
+        public void setSource(String source) {
+            this.source = source;
+        }
+
+        public Double getSourceCap() {
+            return sourceCap;
+        }
+
+        public void setSourceCap(Double sourceCap) {
+            this.sourceCap = sourceCap;
+        }
+
+        public HierarchyCounts getL1Accept() {
+            return l1Accept;
+        }
+
+        public void setL1Accept(HierarchyCounts l1Accept) {
+            this.l1Accept = l1Accept;
+        }
+
+        public HierarchyCounts getL2Accept() {
+            return l2Accept;
+        }
+
+        public void setL2Accept(HierarchyCounts l2Accept) {
+            this.l2Accept = l2Accept;
+        }
+
+        public HierarchyCounts getL3Accept() {
+            return l3Accept;
+        }
+
+        public void setL3Accept(HierarchyCounts l3Accept) {
+            this.l3Accept = l3Accept;
+        }
+
+        public HierarchyCounts getL1Complete() {
+            return l1Complete;
+        }
+
+        public void setL1Complete(HierarchyCounts l1Complete) {
+            this.l1Complete = l1Complete;
+        }
+
+        public HierarchyCounts getL2Complete() {
+            return l2Complete;
+        }
+
+        public void setL2Complete(HierarchyCounts l2Complete) {
+            this.l2Complete = l2Complete;
+        }
+
+        public HierarchyCounts getL3Complete() {
+            return l3Complete;
+        }
+
+        public void setL3Complete(HierarchyCounts l3Complete) {
+            this.l3Complete = l3Complete;
         }
 
         public Double getPAccept() {
@@ -1356,6 +1738,22 @@ public final class EvidenceModelsV2 {
             this.hierarchyLevel = hierarchyLevel;
         }
 
+        public String getHierarchyLevelAccept() {
+            return hierarchyLevelAccept;
+        }
+
+        public void setHierarchyLevelAccept(String hierarchyLevelAccept) {
+            this.hierarchyLevelAccept = hierarchyLevelAccept;
+        }
+
+        public String getHierarchyLevelComplete() {
+            return hierarchyLevelComplete;
+        }
+
+        public void setHierarchyLevelComplete(String hierarchyLevelComplete) {
+            this.hierarchyLevelComplete = hierarchyLevelComplete;
+        }
+
         public String getCohortKey() {
             return cohortKey;
         }
@@ -1380,6 +1778,7 @@ public final class EvidenceModelsV2 {
             this.trialsComplete = trialsComplete;
         }
     }
+
 
     /**
      * V2.3 Contributor Skill Evidence per Technology conforming strictly to

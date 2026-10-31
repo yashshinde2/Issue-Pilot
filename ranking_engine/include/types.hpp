@@ -698,11 +698,337 @@ struct RepositoryHealthEvidenceV2 {
 };
 
 // V2.3 Freshness Evidence: AgeScore (40%), ActivityScore (60%)
+// Conforms strictly to Section 10 of V2.3 Specification
+struct FreshnessComputationResult {
+  bool available{false};
+  double score{0.0};
+  double confidence{0.0};
+  double coverage_an{0.0};
+  int signal_count{0};
+  bool has_age_score{false};
+  double age_score{0.0};
+  bool has_activity_score{false};
+  double activity_score{0.0};
+  std::string explanation;
+
+  static FreshnessComputationResult unavailable(double cov, int count, const std::string &reason) {
+    FreshnessComputationResult r;
+    r.available = false;
+    r.score = 0.0;
+    r.confidence = 0.0;
+    r.coverage_an = cov;
+    r.signal_count = count;
+    r.explanation = reason;
+    return r;
+  }
+};
+
 struct FreshnessEvidenceV2 {
-  double age_score{80.0};
-  double activity_score{80.0};
+  static constexpr double CLOCK_SKEW_TOLERANCE_DAYS = 0.001; // ~86.4 seconds
+  static constexpr double AGE_WEIGHT = 0.40;
+  static constexpr double ACTIVITY_WEIGHT = 0.60;
+
+  bool has_age_days{false};
   double age_days{0.0};
+  bool has_idle_days{false};
   double idle_days{0.0};
+  double age_score{0.0};
+  double activity_score{0.0};
+  bool age_available{true};
+  bool activity_available{true};
+  bool is_bot_activity{false};
+  std::string source{"github"};
+  double source_cap{1.0};
+
+  static double calculate_age_score(double days) {
+    if (std::isnan(days) || !std::isfinite(days)) {
+      throw std::invalid_argument("Non-finite age days: " + std::to_string(days));
+    }
+    if (days < -CLOCK_SKEW_TOLERANCE_DAYS) {
+      throw std::invalid_argument("Creation timestamp materially in future: " + std::to_string(days));
+    }
+    double clamped = std::max(0.0, days);
+    return 100.0 * std::pow(0.5, clamped / 14.0);
+  }
+
+  static double calculate_activity_score(double days) {
+    if (std::isnan(days) || !std::isfinite(days)) {
+      throw std::invalid_argument("Non-finite idle days: " + std::to_string(days));
+    }
+    if (days < -CLOCK_SKEW_TOLERANCE_DAYS) {
+      throw std::invalid_argument("Meaningful activity timestamp materially in future: " + std::to_string(days));
+    }
+    double clamped = std::max(0.0, days);
+    return 100.0 * std::pow(0.5, clamped / 7.0);
+  }
+
+  static double calculate_combined_freshness(double age_s, double act_s) {
+    return AGE_WEIGHT * age_s + ACTIVITY_WEIGHT * act_s;
+  }
+
+  static double resolve_source_cap(const std::string &src, double explicit_cap = 1.0) {
+    if (explicit_cap < 1.0 - 1e-9) {
+      if (explicit_cap < 0.0 || !std::isfinite(explicit_cap)) {
+        throw std::invalid_argument("Invalid explicit source cap: " + std::to_string(explicit_cap));
+      }
+      return explicit_cap;
+    }
+    std::string s = to_lower_str(trim_str(src));
+    if (s == "github") return 0.90;
+    if (s == "gitlab") return 0.85;
+    if (s == "codeberg" || s == "forgejo" || s == "gitea") return 0.80;
+    if (s == "bugzilla") return 0.70;
+    if (s == "inferred") return 0.50;
+    return 1.0;
+  }
+
+  FreshnessComputationResult compute_freshness(const std::string &src_override = "",
+                                              double cap_override = 1.0) const {
+    std::string eff_src = src_override.empty() ? source : src_override;
+    double eff_cap = (cap_override < 1.0 - 1e-9) ? cap_override : source_cap;
+    double cap = resolve_source_cap(eff_src, eff_cap);
+
+    if (!age_available || !has_age_days) {
+      return FreshnessComputationResult::unavailable(0.0, 0, "Issue creation timestamp unavailable");
+    }
+
+    double a_score = calculate_age_score(age_days);
+
+    bool act_ok = activity_available && has_idle_days && !is_bot_activity;
+    if (!act_ok) {
+      // Age alone available -> available weight normalization
+      double cov = 0.40;
+      double c_raw = 1.0 * cov * 1.0;
+      double conf = std::min(cap, c_raw);
+      FreshnessComputationResult r;
+      r.available = true;
+      r.score = a_score;
+      r.confidence = conf;
+      r.coverage_an = cov;
+      r.signal_count = 1;
+      r.has_age_score = true;
+      r.age_score = a_score;
+      r.has_activity_score = false;
+      r.explanation = "Freshness based on creation age only (activity unavailable/bot-only)";
+      return r;
+    }
+
+    double act_score = calculate_activity_score(idle_days);
+    double score = AGE_WEIGHT * a_score + ACTIVITY_WEIGHT * act_score;
+    double cov = 1.00;
+    double c_raw = 1.0 * cov * 1.0;
+    double conf = std::min(cap, c_raw);
+
+    FreshnessComputationResult r;
+    r.available = true;
+    r.score = score;
+    r.confidence = conf;
+    r.coverage_an = cov;
+    r.signal_count = 2;
+    r.has_age_score = true;
+    r.age_score = a_score;
+    r.has_activity_score = true;
+    r.activity_score = act_score;
+    r.explanation = "Freshness based on creation age (40%) and recent human activity (60%)";
+    return r;
+  }
+};
+
+// V2.3 Outcome Feedback Evidence: hierarchical Beta(2,2) backoff
+// Conforms strictly to Section 9 of V2.3 Specification
+struct HierarchyCounts {
+  int successes{0};
+  int trials{0};
+
+  HierarchyCounts() = default;
+  HierarchyCounts(int s, int t) : successes(s), trials(t) {
+    if (s < 0 || t < 0 || s > t) {
+      throw std::invalid_argument("Invalid trials/successes: successes=" + std::to_string(s) + ", trials=" + std::to_string(t));
+    }
+  }
+};
+
+struct HierarchicalLevelResult {
+  std::string level_name{"none"};
+  int trials{0};
+  int successes{0};
+  double smoothed_p{0.0};
+  bool available{false};
+};
+
+struct FeedbackComputationResult {
+  bool available{false};
+  double score{0.0};
+  double confidence{0.0};
+  double coverage_af{0.0};
+  bool has_accept_score{false};
+  double accept_score{0.0};
+  bool has_complete_score{false};
+  double complete_score{0.0};
+  std::string accept_level{"none"};
+  std::string complete_level{"none"};
+  int accept_trials{0};
+  int complete_trials{0};
+  std::string explanation;
+
+  static FeedbackComputationResult unavailable(double cov, const std::string &reason) {
+    FeedbackComputationResult r;
+    r.available = false;
+    r.score = 0.0;
+    r.confidence = 0.0;
+    r.coverage_af = cov;
+    r.explanation = reason;
+    return r;
+  }
+};
+
+struct OutcomeFeedbackEvidenceV2 {
+  static constexpr double ACCEPTANCE_WEIGHT = 0.40;
+  static constexpr double COMPLETION_WEIGHT = 0.60;
+  static constexpr double PRIOR_P0 = 0.50; // Beta(2,2) prior mean
+  static constexpr double PRIOR_WEIGHT = 4.0; // alpha + beta = 2 + 2 = 4
+
+  std::string user_id;
+  std::string technology;
+  std::string difficulty_band;
+  std::string source{"issue_pilot"};
+  double source_cap{1.0};
+
+  // Hierarchy counts for Acceptance
+  HierarchyCounts l1_accept; // user_global
+  HierarchyCounts l2_accept; // user_tech
+  HierarchyCounts l3_accept; // user_tech_diff
+
+  // Hierarchy counts for Completion
+  HierarchyCounts l1_complete; // user_global
+  HierarchyCounts l2_complete; // user_tech
+  HierarchyCounts l3_complete; // user_tech_diff
+
+  static HierarchicalLevelResult evaluate_hierarchy(const HierarchyCounts &l3,
+                                                    const HierarchyCounts &l2,
+                                                    const HierarchyCounts &l1) {
+    if (l1.trials < 5) {
+      HierarchicalLevelResult r;
+      r.level_name = "none";
+      r.trials = l1.trials;
+      r.successes = l1.successes;
+      r.smoothed_p = 0.0;
+      r.available = false;
+      return r;
+    }
+
+    double p1 = (static_cast<double>(l1.successes) + PRIOR_WEIGHT * PRIOR_P0) /
+                (static_cast<double>(l1.trials) + PRIOR_WEIGHT);
+
+    double p2 = p1;
+    if (l2.trials > 0) {
+      p2 = (static_cast<double>(l2.successes) + PRIOR_WEIGHT * p1) /
+           (static_cast<double>(l2.trials) + PRIOR_WEIGHT);
+    }
+
+    double p3 = p2;
+    if (l3.trials > 0) {
+      p3 = (static_cast<double>(l3.successes) + PRIOR_WEIGHT * p2) /
+           (static_cast<double>(l3.trials) + PRIOR_WEIGHT);
+    }
+
+    HierarchicalLevelResult r;
+    if (l3.trials >= 5) {
+      r.level_name = "user_tech_diff";
+      r.trials = l3.trials;
+      r.successes = l3.successes;
+      r.smoothed_p = p3;
+      r.available = true;
+      return r;
+    }
+    if (l2.trials >= 5) {
+      r.level_name = "user_tech";
+      r.trials = l2.trials;
+      r.successes = l2.successes;
+      r.smoothed_p = p2;
+      r.available = true;
+      return r;
+    }
+    r.level_name = "user_global";
+    r.trials = l1.trials;
+    r.successes = l1.successes;
+    r.smoothed_p = p1;
+    r.available = true;
+    return r;
+  }
+
+  FeedbackComputationResult compute_feedback(const std::string &src_override = "",
+                                            double cap_override = 1.0) const {
+    std::string eff_src = src_override.empty() ? source : src_override;
+    double eff_cap = (cap_override < 1.0 - 1e-9) ? cap_override : source_cap;
+    double cap = FreshnessEvidenceV2::resolve_source_cap(eff_src, eff_cap);
+
+    auto acc_res = evaluate_hierarchy(l3_accept, l2_accept, l1_accept);
+    auto comp_res = evaluate_hierarchy(l3_complete, l2_complete, l1_complete);
+
+    if (!acc_res.available && !comp_res.available) {
+      return FeedbackComputationResult::unavailable(0.0,
+          "Insufficient outcome history: no level with at least 5 trials for acceptance or completion.");
+    }
+
+    FeedbackComputationResult r;
+    if (acc_res.available && comp_res.available) {
+      double acc_score = 100.0 * acc_res.smoothed_p;
+      double comp_score = 100.0 * comp_res.smoothed_p;
+      r.available = true;
+      r.score = ACCEPTANCE_WEIGHT * acc_score + COMPLETION_WEIGHT * comp_score;
+      double c_acc = static_cast<double>(acc_res.trials) / (acc_res.trials + 10.0);
+      double c_comp = static_cast<double>(comp_res.trials) / (comp_res.trials + 10.0);
+      double raw_conf = ACCEPTANCE_WEIGHT * c_acc + COMPLETION_WEIGHT * c_comp;
+      r.confidence = std::min(cap, raw_conf);
+      r.coverage_af = 1.00;
+      r.has_accept_score = true;
+      r.accept_score = acc_score;
+      r.has_complete_score = true;
+      r.complete_score = comp_score;
+      r.accept_level = acc_res.level_name;
+      r.complete_level = comp_res.level_name;
+      r.accept_trials = acc_res.trials;
+      r.complete_trials = comp_res.trials;
+      r.explanation = "Full outcome feedback: acceptance and completion both available";
+      return r;
+    }
+
+    if (acc_res.available && !comp_res.available) {
+      double acc_score = 100.0 * acc_res.smoothed_p;
+      r.available = true;
+      r.score = acc_score; // available-weight normalized: 0.40 / 0.40 = 1.0
+      double c_acc = static_cast<double>(acc_res.trials) / (acc_res.trials + 10.0);
+      r.confidence = std::min(cap, c_acc);
+      r.coverage_af = 0.40;
+      r.has_accept_score = true;
+      r.accept_score = acc_score;
+      r.has_complete_score = false;
+      r.accept_level = acc_res.level_name;
+      r.complete_level = "none";
+      r.accept_trials = acc_res.trials;
+      r.complete_trials = 0;
+      r.explanation = "Outcome feedback: acceptance only available (completion unavailable)";
+      return r;
+    }
+
+    // !acc_res.available && comp_res.available
+    double comp_score = 100.0 * comp_res.smoothed_p;
+    r.available = true;
+    r.score = comp_score; // available-weight normalized: 0.60 / 0.60 = 1.0
+    double c_comp = static_cast<double>(comp_res.trials) / (comp_res.trials + 10.0);
+    r.confidence = std::min(cap, c_comp);
+    r.coverage_af = 0.60;
+    r.has_accept_score = false;
+    r.has_complete_score = true;
+    r.complete_score = comp_score;
+    r.accept_level = "none";
+    r.complete_level = comp_res.level_name;
+    r.accept_trials = 0;
+    r.complete_trials = comp_res.trials;
+    r.explanation = "Outcome feedback: completion only available (acceptance unavailable)";
+    return r;
+  }
 };
 
 // Technology Relevance for an Issue

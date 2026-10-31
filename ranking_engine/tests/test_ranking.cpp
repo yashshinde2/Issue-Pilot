@@ -2,6 +2,7 @@
 #include "../include/json_adapter.hpp"
 #include "../include/technology_registry.hpp"
 #include "../include/contribution_aggregator.hpp"
+#include "../include/outcome_feedback_tracker.hpp"
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -1672,6 +1673,199 @@ int main() {
         report_test("Inactive Repository Available with Complete Measurements", res_h_empty.available, 1.0, res_h_empty.available ? 1.0 : 0.0);
         report_test("Inactive Repository C90 is Exactly 0.0", std::abs(h_empty.c90_score - 0.0) < 1e-6, 0.0, h_empty.c90_score);
         report_test("Inactive Repository PR30 is Exactly 0.0", std::abs(h_empty.pr30_score - 0.0) < 1e-6, 0.0, h_empty.pr30_score);
+
+        // ========================================================
+        // PHASE 6: USER OUTCOME FEEDBACK (F) & ISSUE FRESHNESS (N)
+        // ========================================================
+
+        // 1. Freshness Half-Life Boundaries
+        report_test("Freshness AgeScore at 0d is 100.0", std::abs(issue_pilot::FreshnessEvidenceV2::calculate_age_score(0.0) - 100.0) < 1e-6, 100.0, issue_pilot::FreshnessEvidenceV2::calculate_age_score(0.0));
+        report_test("Freshness AgeScore at 14d is 50.0", std::abs(issue_pilot::FreshnessEvidenceV2::calculate_age_score(14.0) - 50.0) < 1e-6, 50.0, issue_pilot::FreshnessEvidenceV2::calculate_age_score(14.0));
+        report_test("Freshness AgeScore at 28d is 25.0", std::abs(issue_pilot::FreshnessEvidenceV2::calculate_age_score(28.0) - 25.0) < 1e-6, 25.0, issue_pilot::FreshnessEvidenceV2::calculate_age_score(28.0));
+        report_test("Freshness ActivityScore at 0d is 100.0", std::abs(issue_pilot::FreshnessEvidenceV2::calculate_activity_score(0.0) - 100.0) < 1e-6, 100.0, issue_pilot::FreshnessEvidenceV2::calculate_activity_score(0.0));
+        report_test("Freshness ActivityScore at 7d is 50.0", std::abs(issue_pilot::FreshnessEvidenceV2::calculate_activity_score(7.0) - 50.0) < 1e-6, 50.0, issue_pilot::FreshnessEvidenceV2::calculate_activity_score(7.0));
+        report_test("Freshness ActivityScore at 14d is 25.0", std::abs(issue_pilot::FreshnessEvidenceV2::calculate_activity_score(14.0) - 25.0) < 1e-6, 25.0, issue_pilot::FreshnessEvidenceV2::calculate_activity_score(14.0));
+
+        // 2. Combined Freshness Tests
+        issue_pilot::FreshnessEvidenceV2 fn_00;
+        fn_00.age_days = 0.0; fn_00.has_age_days = true;
+        fn_00.idle_days = 0.0; fn_00.has_idle_days = true;
+        auto res_fn_00 = fn_00.compute_freshness();
+        report_test("Freshness (0, 0) Score is 100.0", std::abs(res_fn_00.score - 100.0) < 1e-6, 100.0, res_fn_00.score);
+        report_test("Freshness (0, 0) Coverage is 1.00", std::abs(res_fn_00.coverage_an - 1.00) < 1e-6, 1.00, res_fn_00.coverage_an);
+
+        issue_pilot::FreshnessEvidenceV2 fn_14_7;
+        fn_14_7.age_days = 14.0; fn_14_7.has_age_days = true;
+        fn_14_7.idle_days = 7.0; fn_14_7.has_idle_days = true;
+        auto res_fn_14_7 = fn_14_7.compute_freshness();
+        report_test("Freshness (14, 7) Score is 50.0", std::abs(res_fn_14_7.score - 50.0) < 1e-6, 50.0, res_fn_14_7.score);
+
+        issue_pilot::FreshnessEvidenceV2 fn_14_0;
+        fn_14_0.age_days = 14.0; fn_14_0.has_age_days = true;
+        fn_14_0.idle_days = 0.0; fn_14_0.has_idle_days = true;
+        auto res_fn_14_0 = fn_14_0.compute_freshness();
+        // 0.40(50.0) + 0.60(100.0) = 80.0
+        report_test("Freshness (14, 0) Score is 80.0", std::abs(res_fn_14_0.score - 80.0) < 1e-6, 80.0, res_fn_14_0.score);
+
+        // 3. Bot-Only and Missing Activity -> Age alone available (coverage 0.40)
+        issue_pilot::FreshnessEvidenceV2 fn_bot;
+        fn_bot.age_days = 14.0; fn_bot.has_age_days = true;
+        fn_bot.idle_days = 0.0; fn_bot.has_idle_days = true;
+        fn_bot.is_bot_activity = true;
+        auto res_fn_bot = fn_bot.compute_freshness();
+        report_test("Freshness Bot-Only Activity Score is 50.0", std::abs(res_fn_bot.score - 50.0) < 1e-6, 50.0, res_fn_bot.score);
+        report_test("Freshness Bot-Only Activity Coverage is 0.40", std::abs(res_fn_bot.coverage_an - 0.40) < 1e-6, 0.40, res_fn_bot.coverage_an);
+        report_test("Freshness Bot-Only Signal Count is 1", res_fn_bot.signal_count, 1.0, static_cast<double>(res_fn_bot.signal_count));
+
+        issue_pilot::FreshnessEvidenceV2 fn_no_act;
+        fn_no_act.age_days = 14.0; fn_no_act.has_age_days = true;
+        fn_no_act.has_idle_days = false;
+        auto res_fn_no_act = fn_no_act.compute_freshness();
+        report_test("Freshness Missing Activity Score is 50.0", std::abs(res_fn_no_act.score - 50.0) < 1e-6, 50.0, res_fn_no_act.score);
+        report_test("Freshness Missing Activity Coverage is 0.40", std::abs(res_fn_no_act.coverage_an - 0.40) < 1e-6, 0.40, res_fn_no_act.coverage_an);
+
+        // 4. Missing Creation Timestamp -> Freshness Unavailable
+        issue_pilot::FreshnessEvidenceV2 fn_no_age;
+        fn_no_age.has_age_days = false;
+        fn_no_age.idle_days = 7.0; fn_no_age.has_idle_days = true;
+        auto res_fn_no_age = fn_no_age.compute_freshness();
+        report_test("Freshness Missing Creation Timestamp Unavailable", !res_fn_no_age.available, 1.0, res_fn_no_age.available ? 0.0 : 1.0);
+
+        // 5. Clock-Skew Tolerance & Exception Handling
+        issue_pilot::FreshnessEvidenceV2 fn_skew_ok;
+        fn_skew_ok.age_days = -0.0005; fn_skew_ok.has_age_days = true;
+        fn_skew_ok.idle_days = -0.0008; fn_skew_ok.has_idle_days = true;
+        auto res_fn_skew = fn_skew_ok.compute_freshness();
+        report_test("Freshness Permitted Skew Clamped -> 100.0", std::abs(res_fn_skew.score - 100.0) < 1e-6, 100.0, res_fn_skew.score);
+
+        bool skew_age_threw = false;
+        try { issue_pilot::FreshnessEvidenceV2::calculate_age_score(-0.002); } catch (const std::invalid_argument&) { skew_age_threw = true; }
+        report_test("Freshness Age > 0.001d Future Throws std::invalid_argument", skew_age_threw, 1.0, skew_age_threw ? 1.0 : 0.0);
+
+        bool skew_idle_threw = false;
+        try { issue_pilot::FreshnessEvidenceV2::calculate_activity_score(-0.002); } catch (const std::invalid_argument&) { skew_idle_threw = true; }
+        report_test("Freshness Idle > 0.001d Future Throws std::invalid_argument", skew_idle_threw, 1.0, skew_idle_threw ? 1.0 : 0.0);
+
+        bool nan_threw = false;
+        try { issue_pilot::FreshnessEvidenceV2::calculate_age_score(NAN); } catch (const std::invalid_argument&) { nan_threw = true; }
+        report_test("Freshness NaN Input Throws std::invalid_argument", nan_threw, 1.0, nan_threw ? 1.0 : 0.0);
+
+        // 6. Freshness Source Caps
+        auto res_gh = fn_00.compute_freshness("github");
+        report_test("Freshness GitHub Confidence Capped at 0.90", std::abs(res_gh.confidence - 0.90) < 1e-6, 0.90, res_gh.confidence);
+        auto res_gl = fn_00.compute_freshness("gitlab");
+        report_test("Freshness GitLab Confidence Capped at 0.85", std::abs(res_gl.confidence - 0.85) < 1e-6, 0.85, res_gl.confidence);
+        auto res_cb = fn_00.compute_freshness("codeberg");
+        report_test("Freshness Codeberg Confidence Capped at 0.80", std::abs(res_cb.confidence - 0.80) < 1e-6, 0.80, res_cb.confidence);
+        auto res_bz = fn_00.compute_freshness("bugzilla");
+        report_test("Freshness Bugzilla Confidence Capped at 0.70", std::abs(res_bz.confidence - 0.70) < 1e-6, 0.70, res_bz.confidence);
+        auto res_inf = fn_00.compute_freshness("inferred");
+        report_test("Freshness Inferred Confidence Capped at 0.50", std::abs(res_inf.confidence - 0.50) < 1e-6, 0.50, res_inf.confidence);
+
+        // 7. RankingEngine Helper calculate_freshness_v2
+        double eng_fresh = 0.0, eng_conf = 0.0, eng_cov = 0.0;
+        bool eng_fresh_ok = engine.calculate_freshness_v2(fn_14_7, eng_fresh, eng_conf, eng_cov);
+        report_test("Engine calculate_freshness_v2 Success", eng_fresh_ok, 1.0, eng_fresh_ok ? 1.0 : 0.0);
+        report_test("Engine calculate_freshness_v2 Score is 50.0", std::abs(eng_fresh - 50.0) < 1e-6, 50.0, eng_fresh);
+
+        // 8. User Outcome Feedback Hierarchical Backoff Tests
+        // Level 1 only: 5 trials, 4 successes -> p1 = (4 + 2) / 9 = 2/3
+        issue_pilot::HierarchyCounts l1_5_4(4, 5);
+        auto res_fb_l1 = issue_pilot::OutcomeFeedbackEvidenceV2::evaluate_hierarchy(issue_pilot::HierarchyCounts(0,0), issue_pilot::HierarchyCounts(0,0), l1_5_4);
+        report_test("Feedback Level 1 Available", res_fb_l1.available, 1.0, res_fb_l1.available ? 1.0 : 0.0);
+        report_test("Feedback Level 1 Name is user_global", res_fb_l1.level_name == "user_global", 1.0, res_fb_l1.level_name == "user_global" ? 1.0 : 0.0);
+        report_test("Feedback Level 1 Smoothed P (~0.6667)", std::abs(res_fb_l1.smoothed_p - (2.0/3.0)) < 1e-6, 2.0/3.0, res_fb_l1.smoothed_p);
+
+        // Fewer than 5 trials -> Unavailable
+        issue_pilot::HierarchyCounts l1_4_3(3, 4);
+        auto res_fb_under5 = issue_pilot::OutcomeFeedbackEvidenceV2::evaluate_hierarchy(issue_pilot::HierarchyCounts(0,0), issue_pilot::HierarchyCounts(0,0), l1_4_3);
+        report_test("Feedback Under 5 Trials Unavailable", !res_fb_under5.available, 1.0, res_fb_under5.available ? 0.0 : 1.0);
+
+        // Hierarchical Backoff: L3 has 2 trials (< 5), L2 has 6 trials (>= 5)
+        // L1: 8/10 -> p1 = 10/14 = 5/7; L2: 5/6 -> p2 = (5 + 4*(5/7))/10 = 55/70 = 11/14
+        issue_pilot::HierarchyCounts l1_10_8(8, 10);
+        issue_pilot::HierarchyCounts l2_6_5(5, 6);
+        issue_pilot::HierarchyCounts l3_2_2(2, 2);
+        auto res_backoff = issue_pilot::OutcomeFeedbackEvidenceV2::evaluate_hierarchy(l3_2_2, l2_6_5, l1_10_8);
+        report_test("Feedback Backoff from L3 to L2 Selected", res_backoff.available, 1.0, res_backoff.available ? 1.0 : 0.0);
+        report_test("Feedback Backoff Level Name is user_tech", res_backoff.level_name == "user_tech", 1.0, res_backoff.level_name == "user_tech" ? 1.0 : 0.0);
+        report_test("Feedback Backoff Smoothed P (~0.7857)", std::abs(res_backoff.smoothed_p - (11.0/14.0)) < 1e-6, 11.0/14.0, res_backoff.smoothed_p);
+
+        // Level 3 Selected when L3 has 6 trials (>= 5)
+        // p3 = (6 + 4*(11/14))/10 = 128/140 = 32/35
+        issue_pilot::HierarchyCounts l3_6_6(6, 6);
+        auto res_l3_ok = issue_pilot::OutcomeFeedbackEvidenceV2::evaluate_hierarchy(l3_6_6, l2_6_5, l1_10_8);
+        report_test("Feedback Level 3 Selected", res_l3_ok.available, 1.0, res_l3_ok.available ? 1.0 : 0.0);
+        report_test("Feedback Level 3 Name is user_tech_diff", res_l3_ok.level_name == "user_tech_diff", 1.0, res_l3_ok.level_name == "user_tech_diff" ? 1.0 : 0.0);
+        report_test("Feedback Level 3 Smoothed P (~0.9143)", std::abs(res_l3_ok.smoothed_p - (32.0/35.0)) < 1e-6, 32.0/35.0, res_l3_ok.smoothed_p);
+
+        // 9. Feedback Normalization: Acceptance Only
+        issue_pilot::OutcomeFeedbackEvidenceV2 fb_ev_acc;
+        fb_ev_acc.l1_accept = issue_pilot::HierarchyCounts(4, 5);
+        fb_ev_acc.l1_complete = issue_pilot::HierarchyCounts(1, 3); // Under 5 -> completion unavailable
+        auto res_fb_acc = fb_ev_acc.compute_feedback();
+        report_test("Feedback Acc-Only Available", res_fb_acc.available, 1.0, res_fb_acc.available ? 1.0 : 0.0);
+        report_test("Feedback Acc-Only Score (~66.6667)", std::abs(res_fb_acc.score - (100.0 * 2.0 / 3.0)) < 1e-6, 100.0 * 2.0 / 3.0, res_fb_acc.score);
+        report_test("Feedback Acc-Only Coverage is 0.40", std::abs(res_fb_acc.coverage_af - 0.40) < 1e-6, 0.40, res_fb_acc.coverage_af);
+        report_test("Feedback Acc-Only Confidence (5/15 = 0.3333)", std::abs(res_fb_acc.confidence - (5.0/15.0)) < 1e-6, 5.0/15.0, res_fb_acc.confidence);
+
+        // 10. Feedback Normalization: Completion Only
+        issue_pilot::OutcomeFeedbackEvidenceV2 fb_ev_comp;
+        fb_ev_comp.l1_accept = issue_pilot::HierarchyCounts(1, 2); // Under 5 -> acceptance unavailable
+        fb_ev_comp.l1_complete = issue_pilot::HierarchyCounts(5, 5); // 5/5 -> p1 = (5+2)/9 = 7/9
+        auto res_fb_comp = fb_ev_comp.compute_feedback();
+        report_test("Feedback Comp-Only Available", res_fb_comp.available, 1.0, res_fb_comp.available ? 1.0 : 0.0);
+        report_test("Feedback Comp-Only Score (~77.7778)", std::abs(res_fb_comp.score - (100.0 * 7.0 / 9.0)) < 1e-6, 100.0 * 7.0 / 9.0, res_fb_comp.score);
+        report_test("Feedback Comp-Only Coverage is 0.60", std::abs(res_fb_comp.coverage_af - 0.60) < 1e-6, 0.60, res_fb_comp.coverage_af);
+
+        // 11. Feedback Both Dimensions Available
+        issue_pilot::OutcomeFeedbackEvidenceV2 fb_ev_both;
+        fb_ev_both.l1_accept = issue_pilot::HierarchyCounts(4, 5); // 66.6667
+        fb_ev_both.l1_complete = issue_pilot::HierarchyCounts(5, 5); // 77.7778
+        auto res_fb_both = fb_ev_both.compute_feedback();
+        double expected_f = 0.40 * (100.0 * 2.0 / 3.0) + 0.60 * (100.0 * 7.0 / 9.0);
+        report_test("Feedback Both Available Score", std::abs(res_fb_both.score - expected_f) < 1e-6, expected_f, res_fb_both.score);
+        report_test("Feedback Both Available Coverage is 1.00", std::abs(res_fb_both.coverage_af - 1.00) < 1e-6, 1.00, res_fb_both.coverage_af);
+
+        // 12. RankingEngine Helper calculate_feedback_v2
+        double eng_fb = 0.0, eng_fb_conf = 0.0, eng_fb_cov = 0.0;
+        bool eng_fb_ok = engine.calculate_feedback_v2(fb_ev_both, eng_fb, eng_fb_conf, eng_fb_cov);
+        report_test("Engine calculate_feedback_v2 Success", eng_fb_ok, 1.0, eng_fb_ok ? 1.0 : 0.0);
+        report_test("Engine calculate_feedback_v2 Score", std::abs(eng_fb - expected_f) < 1e-6, expected_f, eng_fb);
+
+        // 13. OutcomeFeedbackTracker Deduplication and Out-of-Order Handling
+        issue_pilot::OutcomeFeedbackTracker tracker;
+        issue_pilot::OutcomeEvent e1;
+        e1.user_id = "user1"; e1.issue_key = "gh:org/repo#1"; e1.technology = "python"; e1.difficulty_band = "EASY";
+        e1.event_type = issue_pilot::OutcomeEventType::ACCEPTED;
+        report_test("Tracker Record First ACCEPTED", tracker.record_event(e1), 1.0, 1.0);
+
+        // Duplicate ACCEPTED
+        issue_pilot::OutcomeEvent e2 = e1;
+        e2.event_id = "dup_event";
+        report_test("Tracker Duplicate ACCEPTED Ignored", !tracker.record_event(e2), 1.0, 1.0);
+
+        // Conflicting REJECTED
+        issue_pilot::OutcomeEvent e3 = e1;
+        e3.event_type = issue_pilot::OutcomeEventType::REJECTED;
+        report_test("Tracker Conflicting REJECTED Ignored", !tracker.record_event(e3), 1.0, 1.0);
+
+        // Out-of-order: COMPLETED without prior ACCEPTED auto-registers ACCEPTED
+        issue_pilot::OutcomeEvent e4;
+        e4.user_id = "user1"; e4.issue_key = "gh:org/repo#2"; e4.technology = "python"; e4.difficulty_band = "EASY";
+        e4.event_type = issue_pilot::OutcomeEventType::COMPLETED;
+        report_test("Tracker Out-of-Order COMPLETED Recorded", tracker.record_event(e4), 1.0, 1.0);
+
+        // Duplicate COMPLETED
+        issue_pilot::OutcomeEvent e5 = e4;
+        e5.event_id = "dup_comp";
+        report_test("Tracker Duplicate COMPLETED Ignored", !tracker.record_event(e5), 1.0, 1.0);
+
+        auto track_ev = tracker.build_evidence("user1", "python", "EASY");
+        report_test("Tracker Global Accept Trials is 2", track_ev.l1_accept.trials, 2.0, static_cast<double>(track_ev.l1_accept.trials));
+        report_test("Tracker Global Accept Successes is 2", track_ev.l1_accept.successes, 2.0, static_cast<double>(track_ev.l1_accept.successes));
+        report_test("Tracker Global Comp Trials is 1", track_ev.l1_complete.trials, 1.0, static_cast<double>(track_ev.l1_complete.trials));
+        report_test("Tracker Global Comp Successes is 1", track_ev.l1_complete.successes, 1.0, static_cast<double>(track_ev.l1_complete.successes));
     }
 
     std::cout << "\nALL UNIT TEST CHECKS (INCLUDING PHASE 1 CONTRACTS) PASSED SUCCESSFULLY!\n";

@@ -190,9 +190,31 @@ bool RankingEngine::calculate_feedback(const ContributorProfile& profile,
     return true;
 }
 
+bool RankingEngine::calculate_feedback_v2(const OutcomeFeedbackEvidenceV2 &evidence,
+                                         double &out_feedback,
+                                         double &out_confidence,
+                                         double &out_coverage) const {
+    auto res = evidence.compute_feedback();
+    out_feedback = res.score;
+    out_confidence = res.confidence;
+    out_coverage = res.coverage_af;
+    return res.available;
+}
+
 double RankingEngine::calculate_freshness(const FreshnessEvidence& evidence) const {
     double n = evidence.compute_freshness();
     return std::max(0.0, std::min(100.0, n));
+}
+
+bool RankingEngine::calculate_freshness_v2(const FreshnessEvidenceV2 &evidence,
+                                          double &out_freshness,
+                                          double &out_confidence,
+                                          double &out_coverage) const {
+    auto res = evidence.compute_freshness();
+    out_freshness = res.score;
+    out_confidence = res.confidence;
+    out_coverage = res.coverage_an;
+    return res.available;
 }
 
 ComponentScores RankingEngine::compute_scores(const ContributorProfile& profile,

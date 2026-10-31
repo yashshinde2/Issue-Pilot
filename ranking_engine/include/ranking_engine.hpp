@@ -55,7 +55,15 @@ public:
                           double &out_feedback, double &out_acceptance,
                           double &out_completion) const;
 
+  bool calculate_feedback_v2(const OutcomeFeedbackEvidenceV2 &evidence,
+                             double &out_feedback, double &out_confidence,
+                             double &out_coverage) const;
+
   double calculate_freshness(const FreshnessEvidence &evidence) const;
+
+  bool calculate_freshness_v2(const FreshnessEvidenceV2 &evidence,
+                              double &out_freshness, double &out_confidence,
+                              double &out_coverage) const;
 
   // Full Score Calculation for a Single Candidate Issue
   ComponentScores compute_scores(const ContributorProfile &profile,
