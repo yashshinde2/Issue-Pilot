@@ -85,9 +85,12 @@ public class OutcomeFeedbackTracker {
     }
 
     public synchronized boolean recordEvent(OutcomeEvent event) {
+        if (event == null) {
+            return false;
+        }
         if (event.eventId() != null && !event.eventId().isBlank()) {
             if (!seenEventIds.add(event.eventId().trim())) {
-                // Duplicate event ID ignored (idempotency)
+                // Duplicate event ID ignored (idempotent delivery deduplication)
                 return false;
             }
         }
@@ -105,42 +108,48 @@ public class OutcomeFeedbackTracker {
         IssueDecisionState state = userMap.computeIfAbsent(issueKey, k -> new IssueDecisionState(issueKey, event.technology(), event.difficultyBand()));
         state.eventHistory.add(event);
 
-        if (event.eventType() == EventType.ACCEPTED || event.eventType() == EventType.REJECTED) {
-            if (state.acceptanceDecision != null) {
-                // Contradictory decision (ACCEPTED then REJECTED, or REJECTED then ACCEPTED) or duplicate decision ignored
-                return false;
+        // Sort events deterministically by authoritative UTC timestamp, then eventId
+        state.eventHistory.sort((a, b) -> {
+            long tA = a.timestamp() != null ? a.timestamp().toEpochMilli() : 0L;
+            long tB = b.timestamp() != null ? b.timestamp().toEpochMilli() : 0L;
+            int cmp = Long.compare(tA, tB);
+            if (cmp != 0) {
+                return cmp;
             }
-            if (state.completionDecision != null && event.eventType() == EventType.REJECTED) {
-                // Cannot reject an issue that has already completed
-                return false;
+            String idA = a.eventId() != null ? a.eventId() : "";
+            String idB = b.eventId() != null ? b.eventId() : "";
+            return idA.compareTo(idB);
+        });
+
+        // Deterministic state machine replay over canonical timeline
+        EventType effectiveAcc = null;
+        EventType effectiveComp = null;
+
+        for (OutcomeEvent ev : state.eventHistory) {
+            EventType t = ev.eventType();
+            if (t == EventType.RECOMMENDATION_SHOWN) {
+                continue;
             }
-            state.acceptanceDecision = event.eventType();
-            return true;
+            if (t == EventType.ACCEPTED || t == EventType.REJECTED) {
+                // Cannot retroactively reject an issue that was already completed
+                if (effectiveComp != null && t == EventType.REJECTED) {
+                    continue;
+                }
+                effectiveAcc = t;
+            } else if (t == EventType.COMPLETED || t == EventType.NOT_COMPLETED) {
+                // Completion trials are accepted issues; rejected issues cannot complete
+                if (effectiveAcc == EventType.REJECTED) {
+                    continue;
+                }
+                effectiveComp = t;
+            } else if (t == EventType.REOPENED) {
+                // Reopening reverses previous terminal completion outcome, returning issue to in-progress
+                effectiveComp = null;
+            }
         }
 
-        if (event.eventType() == EventType.COMPLETED || event.eventType() == EventType.NOT_COMPLETED) {
-            if (state.completionDecision != null) {
-                // Duplicate completion event ignored
-                return false;
-            }
-            if (state.acceptanceDecision == EventType.REJECTED) {
-                // Conflicting state: issue was rejected, cannot complete
-                return false;
-            }
-            // Preserve completion event independently; do NOT create a synthetic acceptance trial
-            state.completionDecision = event.eventType();
-            return true;
-        }
-
-        if (event.eventType() == EventType.REOPENED) {
-            // Reopening an accepted issue reverses its terminal completion state, returning it to in-progress
-            if (state.completionDecision != null) {
-                state.completionDecision = null;
-                return true;
-            }
-            return false;
-        }
-
+        state.acceptanceDecision = effectiveAcc;
+        state.completionDecision = effectiveComp;
         return true;
     }
 

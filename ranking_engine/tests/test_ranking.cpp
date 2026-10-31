@@ -1849,98 +1849,166 @@ int main() {
         report_test("Engine calculate_feedback_v2 Success", eng_fb_ok, 1.0, eng_fb_ok ? 1.0 : 0.0);
         report_test("Engine calculate_feedback_v2 Score", std::abs(eng_fb - expected_f) < 1e-6, expected_f, eng_fb);
 
-        // 13. OutcomeFeedbackTracker Deduplication and Out-of-Order Handling
-        issue_pilot::OutcomeFeedbackTracker tracker;
-        issue_pilot::OutcomeEvent e1;
-        e1.user_id = "user1"; e1.issue_key = "gh:org/repo#1"; e1.technology = "python"; e1.difficulty_band = "EASY";
-        e1.event_type = issue_pilot::OutcomeEventType::ACCEPTED;
-        report_test("Tracker Record First ACCEPTED", tracker.record_event(e1), 1.0, 1.0);
+        // 13. OutcomeFeedbackTracker Deterministic Conflict Resolution, Deduplication, and Permutations
+        // 1. Event ID Deduplication (Idempotency)
+        issue_pilot::OutcomeFeedbackTracker tracker_dedup;
+        issue_pilot::OutcomeEvent e_dedup;
+        e_dedup.event_id = "dedup_id_1";
+        e_dedup.user_id = "user1"; e_dedup.issue_key = "gh:org/repo#1"; e_dedup.technology = "python"; e_dedup.difficulty_band = "EASY";
+        e_dedup.event_type = issue_pilot::OutcomeEventType::ACCEPTED;
+        e_dedup.timestamp_utc = 1000;
+        report_test("Tracker Deduplication First Ingestion", tracker_dedup.record_event(e_dedup), 1.0, 1.0);
+        report_test("Tracker Duplicate Event ID Rejected", !tracker_dedup.record_event(e_dedup), 1.0, 1.0);
+        auto ev_dedup = tracker_dedup.build_evidence("user1", "python", "EASY");
+        report_test("Tracker Deduplication Acc Trials", ev_dedup.l1_accept.trials == 1, 1.0, static_cast<double>(ev_dedup.l1_accept.trials));
+        report_test("Tracker Deduplication Acc Successes", ev_dedup.l1_accept.successes == 1, 1.0, static_cast<double>(ev_dedup.l1_accept.successes));
 
-        // Duplicate ACCEPTED
-        issue_pilot::OutcomeEvent e2 = e1;
-        e2.event_id = "dup_event";
-        report_test("Tracker Duplicate ACCEPTED Ignored", !tracker.record_event(e2), 1.0, 1.0);
+        // 2. ACCEPTED(T=100) and REJECTED(T=200): later event wins under both arrival permutations
+        issue_pilot::OutcomeEvent ev_acc1;
+        ev_acc1.event_id = "acc1"; ev_acc1.user_id = "u1"; ev_acc1.issue_key = "gh:r#1"; ev_acc1.technology = "python"; ev_acc1.difficulty_band = "EASY";
+        ev_acc1.event_type = issue_pilot::OutcomeEventType::ACCEPTED; ev_acc1.timestamp_utc = 100;
 
-        // Conflicting REJECTED
-        issue_pilot::OutcomeEvent e3 = e1;
-        e3.event_type = issue_pilot::OutcomeEventType::REJECTED;
-        report_test("Tracker Conflicting REJECTED Ignored", !tracker.record_event(e3), 1.0, 1.0);
+        issue_pilot::OutcomeEvent ev_rej1;
+        ev_rej1.event_id = "rej1"; ev_rej1.user_id = "u1"; ev_rej1.issue_key = "gh:r#1"; ev_rej1.technology = "python"; ev_rej1.difficulty_band = "EASY";
+        ev_rej1.event_type = issue_pilot::OutcomeEventType::REJECTED; ev_rej1.timestamp_utc = 200;
 
-        // Out-of-order arrival: COMPLETED arrives before ACCEPTED (independent preservation, no synthetic acceptance)
-        issue_pilot::OutcomeEvent e4;
-        e4.user_id = "user1"; e4.issue_key = "gh:org/repo#2"; e4.technology = "python"; e4.difficulty_band = "EASY";
-        e4.event_type = issue_pilot::OutcomeEventType::COMPLETED;
-        report_test("Tracker Out-of-Order COMPLETED Recorded", tracker.record_event(e4), 1.0, 1.0);
+        issue_pilot::OutcomeFeedbackTracker tr_ar1;
+        tr_ar1.record_event(ev_acc1);
+        tr_ar1.record_event(ev_rej1);
+        auto ev_ar1 = tr_ar1.build_evidence("u1", "python", "EASY");
 
-        // Duplicate COMPLETED ignored
-        issue_pilot::OutcomeEvent e5 = e4;
-        e5.event_id = "dup_comp";
-        report_test("Tracker Duplicate COMPLETED Ignored", !tracker.record_event(e5), 1.0, 1.0);
+        issue_pilot::OutcomeFeedbackTracker tr_ar2;
+        tr_ar2.record_event(ev_rej1);
+        tr_ar2.record_event(ev_acc1);
+        auto ev_ar2 = tr_ar2.build_evidence("u1", "python", "EASY");
 
-        // Prior to ACCEPTED arrival, repo#2 does NOT create a synthetic acceptance trial
-        auto track_ev_pre = tracker.build_evidence("user1", "python", "EASY");
-        report_test("Tracker Pre-Accept Acceptance Trials is 1", track_ev_pre.l1_accept.trials == 1, 1.0, static_cast<double>(track_ev_pre.l1_accept.trials));
-        report_test("Tracker Pre-Accept Completion Trials is 0", track_ev_pre.l1_complete.trials == 0, 0.0, static_cast<double>(track_ev_pre.l1_complete.trials));
+        report_test("Acc-Rej Forward Trials is 1", ev_ar1.l1_accept.trials == 1, 1.0, static_cast<double>(ev_ar1.l1_accept.trials));
+        report_test("Acc-Rej Forward Success is 0", ev_ar1.l1_accept.successes == 0, 0.0, static_cast<double>(ev_ar1.l1_accept.successes));
+        report_test("Acc-Rej Permutation Invariance Trials", ev_ar1.l1_accept.trials == ev_ar2.l1_accept.trials, 1.0, 1.0);
+        report_test("Acc-Rej Permutation Invariance Successes", ev_ar1.l1_accept.successes == ev_ar2.l1_accept.successes, 1.0, 1.0);
 
-        // Now subsequent ACCEPTED arrives for repo#2 (reconciles out-of-order completion)
-        issue_pilot::OutcomeEvent e4_acc;
-        e4_acc.user_id = "user1"; e4_acc.issue_key = "gh:org/repo#2"; e4_acc.technology = "python"; e4_acc.difficulty_band = "EASY";
-        e4_acc.event_type = issue_pilot::OutcomeEventType::ACCEPTED;
-        report_test("Tracker Subsequent ACCEPTED Recorded", tracker.record_event(e4_acc), 1.0, 1.0);
+        // 3. REJECTED(T=100) and ACCEPTED(T=200): later event wins under both arrival permutations
+        issue_pilot::OutcomeEvent ev_rej2;
+        ev_rej2.event_id = "rej2"; ev_rej2.user_id = "u1"; ev_rej2.issue_key = "gh:r#2"; ev_rej2.technology = "python"; ev_rej2.difficulty_band = "EASY";
+        ev_rej2.event_type = issue_pilot::OutcomeEventType::REJECTED; ev_rej2.timestamp_utc = 100;
 
-        auto track_ev = tracker.build_evidence("user1", "python", "EASY");
-        report_test("Tracker Global Accept Trials is 2", track_ev.l1_accept.trials, 2.0, static_cast<double>(track_ev.l1_accept.trials));
-        report_test("Tracker Global Accept Successes is 2", track_ev.l1_accept.successes, 2.0, static_cast<double>(track_ev.l1_accept.successes));
-        report_test("Tracker Global Comp Trials is 1", track_ev.l1_complete.trials, 1.0, static_cast<double>(track_ev.l1_complete.trials));
-        report_test("Tracker Global Comp Successes is 1", track_ev.l1_complete.successes, 1.0, static_cast<double>(track_ev.l1_complete.successes));
+        issue_pilot::OutcomeEvent ev_acc2;
+        ev_acc2.event_id = "acc2"; ev_acc2.user_id = "u1"; ev_acc2.issue_key = "gh:r#2"; ev_acc2.technology = "python"; ev_acc2.difficulty_band = "EASY";
+        ev_acc2.event_type = issue_pilot::OutcomeEventType::ACCEPTED; ev_acc2.timestamp_utc = 200;
 
-        // Arrival order invariance: reverse order (ACCEPTED then COMPLETED) produces IDENTICAL counts
-        issue_pilot::OutcomeFeedbackTracker tracker_rev;
-        issue_pilot::OutcomeEvent r1 = e1;
-        issue_pilot::OutcomeEvent r2_acc = e4_acc;
-        issue_pilot::OutcomeEvent r2_comp = e4;
-        tracker_rev.record_event(r1);
-        tracker_rev.record_event(r2_acc);
-        tracker_rev.record_event(r2_comp);
-        auto track_ev_rev = tracker_rev.build_evidence("user1", "python", "EASY");
-        report_test("Arrival Order Invariance Accept Trials", track_ev.l1_accept.trials == track_ev_rev.l1_accept.trials, static_cast<double>(track_ev.l1_accept.trials), static_cast<double>(track_ev_rev.l1_accept.trials));
-        report_test("Arrival Order Invariance Complete Trials", track_ev.l1_complete.trials == track_ev_rev.l1_complete.trials, static_cast<double>(track_ev.l1_complete.trials), static_cast<double>(track_ev_rev.l1_complete.trials));
+        issue_pilot::OutcomeFeedbackTracker tr_ra1;
+        tr_ra1.record_event(ev_rej2);
+        tr_ra1.record_event(ev_acc2);
+        auto ev_ra1 = tr_ra1.build_evidence("u1", "python", "EASY");
 
-        // Conflicting events
-        issue_pilot::OutcomeEvent conf_rej = e4;
-        conf_rej.event_type = issue_pilot::OutcomeEventType::REJECTED;
-        report_test("Tracker REJECTED After COMPLETED Ignored", !tracker.record_event(conf_rej), 1.0, 1.0);
+        issue_pilot::OutcomeFeedbackTracker tr_ra2;
+        tr_ra2.record_event(ev_acc2);
+        tr_ra2.record_event(ev_rej2);
+        auto ev_ra2 = tr_ra2.build_evidence("u1", "python", "EASY");
 
-        issue_pilot::OutcomeEvent rej_first;
-        rej_first.user_id = "user1"; rej_first.issue_key = "gh:org/repo#3"; rej_first.technology = "python"; rej_first.difficulty_band = "EASY";
-        rej_first.event_type = issue_pilot::OutcomeEventType::REJECTED;
-        report_test("Tracker REJECTED Recorded", tracker.record_event(rej_first), 1.0, 1.0);
+        report_test("Rej-Acc Forward Trials is 1", ev_ra1.l1_accept.trials == 1, 1.0, static_cast<double>(ev_ra1.l1_accept.trials));
+        report_test("Rej-Acc Forward Success is 1", ev_ra1.l1_accept.successes == 1, 1.0, static_cast<double>(ev_ra1.l1_accept.successes));
+        report_test("Rej-Acc Permutation Invariance Trials", ev_ra1.l1_accept.trials == ev_ra2.l1_accept.trials, 1.0, 1.0);
+        report_test("Rej-Acc Permutation Invariance Successes", ev_ra1.l1_accept.successes == ev_ra2.l1_accept.successes, 1.0, 1.0);
 
-        issue_pilot::OutcomeEvent comp_after_rej = rej_first;
-        comp_after_rej.event_type = issue_pilot::OutcomeEventType::COMPLETED;
-        report_test("Tracker COMPLETED After REJECTED Ignored", !tracker.record_event(comp_after_rej), 1.0, 1.0);
+        // 4. Duplicate ACCEPTED with different event IDs: exactly 1 trial (no trial inflation)
+        issue_pilot::OutcomeEvent d_acc1 = ev_acc1; d_acc1.event_id = "d_acc1"; d_acc1.issue_key = "gh:r#3"; d_acc1.timestamp_utc = 100;
+        issue_pilot::OutcomeEvent d_acc2 = ev_acc1; d_acc2.event_id = "d_acc2"; d_acc2.issue_key = "gh:r#3"; d_acc2.timestamp_utc = 200;
 
-        // Contradictory decision: ACCEPTED then REJECTED, and REJECTED then ACCEPTED
-        issue_pilot::OutcomeEvent rej_after_acc;
-        rej_after_acc.event_id = "rej_after_acc_id";
-        rej_after_acc.user_id = "user1"; rej_after_acc.issue_key = "gh:org/repo#1"; rej_after_acc.technology = "python";
-        rej_after_acc.event_type = issue_pilot::OutcomeEventType::REJECTED;
-        report_test("Tracker REJECTED After ACCEPTED Ignored", !tracker.record_event(rej_after_acc), 1.0, 1.0);
+        issue_pilot::OutcomeFeedbackTracker tr_dup_acc1;
+        tr_dup_acc1.record_event(d_acc1);
+        tr_dup_acc1.record_event(d_acc2);
+        auto ev_dup_acc1 = tr_dup_acc1.build_evidence("u1", "python", "EASY");
 
-        issue_pilot::OutcomeEvent acc_after_rej;
-        acc_after_rej.event_id = "acc_after_rej_id";
-        acc_after_rej.user_id = "user1"; acc_after_rej.issue_key = "gh:org/repo#3"; acc_after_rej.technology = "python";
-        acc_after_rej.event_type = issue_pilot::OutcomeEventType::ACCEPTED;
-        report_test("Tracker ACCEPTED After REJECTED Ignored", !tracker.record_event(acc_after_rej), 1.0, 1.0);
+        issue_pilot::OutcomeFeedbackTracker tr_dup_acc2;
+        tr_dup_acc2.record_event(d_acc2);
+        tr_dup_acc2.record_event(d_acc1);
+        auto ev_dup_acc2 = tr_dup_acc2.build_evidence("u1", "python", "EASY");
 
-        // Terminal event reversal via REOPENED
-        issue_pilot::OutcomeEvent reopen_e4;
-        reopen_e4.event_id = "reopen_e4_id";
-        reopen_e4.user_id = "user1"; reopen_e4.issue_key = "gh:org/repo#2"; reopen_e4.technology = "python";
-        reopen_e4.event_type = issue_pilot::OutcomeEventType::REOPENED;
-        report_test("Tracker REOPENED Accepted Recorded", tracker.record_event(reopen_e4), 1.0, 1.0);
-        auto track_ev_reopened = tracker.build_evidence("user1", "python", "EASY");
-        report_test("Tracker Post-Reopen Completion Trials is 0", track_ev_reopened.l1_complete.trials == 0, 0.0, static_cast<double>(track_ev_reopened.l1_complete.trials));
+        report_test("Dup-Acc Exactly 1 Trial", ev_dup_acc1.l1_accept.trials == 1, 1.0, static_cast<double>(ev_dup_acc1.l1_accept.trials));
+        report_test("Dup-Acc Exactly 1 Success", ev_dup_acc1.l1_accept.successes == 1, 1.0, static_cast<double>(ev_dup_acc1.l1_accept.successes));
+        report_test("Dup-Acc Permutation Invariance", ev_dup_acc1.l1_accept.trials == ev_dup_acc2.l1_accept.trials, 1.0, 1.0);
+
+        // 5. Duplicate REJECTED with different event IDs: exactly 1 trial (no trial inflation)
+        issue_pilot::OutcomeEvent d_rej1 = ev_rej1; d_rej1.event_id = "d_rej1"; d_rej1.issue_key = "gh:r#4"; d_rej1.timestamp_utc = 100;
+        issue_pilot::OutcomeEvent d_rej2 = ev_rej1; d_rej2.event_id = "d_rej2"; d_rej2.issue_key = "gh:r#4"; d_rej2.timestamp_utc = 200;
+
+        issue_pilot::OutcomeFeedbackTracker tr_dup_rej1;
+        tr_dup_rej1.record_event(d_rej1);
+        tr_dup_rej1.record_event(d_rej2);
+        auto ev_dup_rej1 = tr_dup_rej1.build_evidence("u1", "python", "EASY");
+
+        issue_pilot::OutcomeFeedbackTracker tr_dup_rej2;
+        tr_dup_rej2.record_event(d_rej2);
+        tr_dup_rej2.record_event(d_rej1);
+        auto ev_dup_rej2 = tr_dup_rej2.build_evidence("u1", "python", "EASY");
+
+        report_test("Dup-Rej Exactly 1 Trial", ev_dup_rej1.l1_accept.trials == 1, 1.0, static_cast<double>(ev_dup_rej1.l1_accept.trials));
+        report_test("Dup-Rej Exactly 0 Success", ev_dup_rej1.l1_accept.successes == 0, 0.0, static_cast<double>(ev_dup_rej1.l1_accept.successes));
+        report_test("Dup-Rej Permutation Invariance", ev_dup_rej1.l1_accept.trials == ev_dup_rej2.l1_accept.trials, 1.0, 1.0);
+
+        // 6. Interleaved acceptance conflict, completion, and REOPENED across permutations
+        issue_pilot::OutcomeEvent evA;
+        evA.event_id = "eA"; evA.user_id = "u1"; evA.issue_key = "gh:r#5"; evA.technology = "python"; evA.difficulty_band = "EASY";
+        evA.event_type = issue_pilot::OutcomeEventType::ACCEPTED; evA.timestamp_utc = 100;
+
+        issue_pilot::OutcomeEvent evC1 = evA; evC1.event_id = "eC1"; evC1.event_type = issue_pilot::OutcomeEventType::COMPLETED; evC1.timestamp_utc = 200;
+        issue_pilot::OutcomeEvent evR = evA; evR.event_id = "eR"; evR.event_type = issue_pilot::OutcomeEventType::REOPENED; evR.timestamp_utc = 300;
+        issue_pilot::OutcomeEvent evC2 = evA; evC2.event_id = "eC2"; evC2.event_type = issue_pilot::OutcomeEventType::COMPLETED; evC2.timestamp_utc = 400;
+        issue_pilot::OutcomeEvent evX = evA; evX.event_id = "eX"; evX.event_type = issue_pilot::OutcomeEventType::REJECTED; evX.timestamp_utc = 500;
+
+        std::vector<issue_pilot::OutcomeEvent> perm_fwd = {evA, evC1, evR, evC2, evX};
+        std::vector<issue_pilot::OutcomeEvent> perm_rev = {evX, evC2, evR, evC1, evA};
+        std::vector<issue_pilot::OutcomeEvent> perm_rnd = {evR, evA, evX, evC2, evC1};
+
+        for (const auto &p : {perm_fwd, perm_rev, perm_rnd}) {
+          issue_pilot::OutcomeFeedbackTracker tr_p;
+          for (const auto &ev : p) {
+            tr_p.record_event(ev);
+          }
+          auto ev_p = tr_p.build_evidence("u1", "python", "EASY");
+          report_test("Interleaved Acc Trials", ev_p.l1_accept.trials == 1, 1.0, static_cast<double>(ev_p.l1_accept.trials));
+          report_test("Interleaved Acc Successes", ev_p.l1_accept.successes == 1, 1.0, static_cast<double>(ev_p.l1_accept.successes));
+          report_test("Interleaved Comp Trials", ev_p.l1_complete.trials == 1, 1.0, static_cast<double>(ev_p.l1_complete.trials));
+          report_test("Interleaved Comp Successes", ev_p.l1_complete.successes == 1, 1.0, static_cast<double>(ev_p.l1_complete.successes));
+        }
+
+        // 7. Same-time conflicting events with stable tie-breaking by event ID
+        issue_pilot::OutcomeEvent evt_a = evA; evt_a.event_id = "evt_a"; evt_a.issue_key = "gh:r#6"; evt_a.event_type = issue_pilot::OutcomeEventType::ACCEPTED; evt_a.timestamp_utc = 100;
+        issue_pilot::OutcomeEvent evt_b = evA; evt_b.event_id = "evt_b"; evt_b.issue_key = "gh:r#6"; evt_b.event_type = issue_pilot::OutcomeEventType::REJECTED; evt_b.timestamp_utc = 100;
+
+        issue_pilot::OutcomeFeedbackTracker tr_st1;
+        tr_st1.record_event(evt_a);
+        tr_st1.record_event(evt_b);
+        auto ev_st1 = tr_st1.build_evidence("u1", "python", "EASY");
+
+        issue_pilot::OutcomeFeedbackTracker tr_st2;
+        tr_st2.record_event(evt_b);
+        tr_st2.record_event(evt_a);
+        auto ev_st2 = tr_st2.build_evidence("u1", "python", "EASY");
+
+        report_test("Same-Time Tie-Breaker Trials is 1", ev_st1.l1_accept.trials == 1, 1.0, static_cast<double>(ev_st1.l1_accept.trials));
+        report_test("Same-Time Tie-Breaker Success is 0", ev_st1.l1_accept.successes == 0, 0.0, static_cast<double>(ev_st1.l1_accept.successes));
+        report_test("Same-Time Permutation Invariance Trials", ev_st1.l1_accept.trials == ev_st2.l1_accept.trials, 1.0, 1.0);
+        report_test("Same-Time Permutation Invariance Successes", ev_st1.l1_accept.successes == ev_st2.l1_accept.successes, 1.0, 1.0);
+
+        // 8. Missing ordering metadata fallback
+        issue_pilot::OutcomeEvent m_a = evA; m_a.event_id = "m_a"; m_a.issue_key = "gh:r#7"; m_a.event_type = issue_pilot::OutcomeEventType::ACCEPTED; m_a.timestamp_utc = 0;
+        issue_pilot::OutcomeEvent m_b = evA; m_b.event_id = "m_b"; m_b.issue_key = "gh:r#7"; m_b.event_type = issue_pilot::OutcomeEventType::REJECTED; m_b.timestamp_utc = 0;
+
+        issue_pilot::OutcomeFeedbackTracker tr_m1;
+        tr_m1.record_event(m_a);
+        tr_m1.record_event(m_b);
+        auto ev_m1 = tr_m1.build_evidence("u1", "python", "EASY");
+
+        issue_pilot::OutcomeFeedbackTracker tr_m2;
+        tr_m2.record_event(m_b);
+        tr_m2.record_event(m_a);
+        auto ev_m2 = tr_m2.build_evidence("u1", "python", "EASY");
+
+        report_test("Missing Metadata Trials is 1", ev_m1.l1_accept.trials == 1, 1.0, static_cast<double>(ev_m1.l1_accept.trials));
+        report_test("Missing Metadata Success is 0", ev_m1.l1_accept.successes == 0, 0.0, static_cast<double>(ev_m1.l1_accept.successes));
+        report_test("Missing Metadata Permutation Invariance", ev_m1.l1_accept.trials == ev_m2.l1_accept.trials, 1.0, 1.0);
     }
 
     std::cout << "\nALL UNIT TEST CHECKS (INCLUDING PHASE 1 CONTRACTS) PASSED SUCCESSFULLY!\n";

@@ -101,48 +101,52 @@ public:
     auto &state = it->second;
     state.event_history.push_back(event);
 
-    if (event.event_type == OutcomeEventType::ACCEPTED ||
-        event.event_type == OutcomeEventType::REJECTED) {
-      if (state.has_acceptance_decision) {
-        // Duplicate acceptance event ignored
-        return false;
+    // Sort events deterministically by authoritative UTC timestamp, then event_id
+    std::sort(state.event_history.begin(), state.event_history.end(),
+              [](const OutcomeEvent &a, const OutcomeEvent &b) {
+                if (a.timestamp_utc != b.timestamp_utc) {
+                  return a.timestamp_utc < b.timestamp_utc;
+                }
+                return a.event_id < b.event_id;
+              });
+
+    // Deterministic state machine replay over canonical timeline
+    bool has_acc = false;
+    OutcomeEventType eff_acc = OutcomeEventType::RECOMMENDATION_SHOWN;
+    bool has_comp = false;
+    OutcomeEventType eff_comp = OutcomeEventType::RECOMMENDATION_SHOWN;
+
+    for (const auto &ev : state.event_history) {
+      if (ev.event_type == OutcomeEventType::RECOMMENDATION_SHOWN) {
+        continue;
       }
-      if (state.has_completion_decision &&
-          event.event_type == OutcomeEventType::REJECTED) {
-        // Cannot reject an issue that was already completed
-        return false;
+      if (ev.event_type == OutcomeEventType::ACCEPTED ||
+          ev.event_type == OutcomeEventType::REJECTED) {
+        // Cannot retroactively reject an issue that was already completed
+        if (has_comp && ev.event_type == OutcomeEventType::REJECTED) {
+          continue;
+        }
+        has_acc = true;
+        eff_acc = ev.event_type;
+      } else if (ev.event_type == OutcomeEventType::COMPLETED ||
+                 ev.event_type == OutcomeEventType::NOT_COMPLETED) {
+        // Rejected issues cannot complete
+        if (has_acc && eff_acc == OutcomeEventType::REJECTED) {
+          continue;
+        }
+        has_comp = true;
+        eff_comp = ev.event_type;
+      } else if (ev.event_type == OutcomeEventType::REOPENED) {
+        // Reopening reverses previous terminal completion outcome, returning issue to in-progress
+        has_comp = false;
+        eff_comp = OutcomeEventType::RECOMMENDATION_SHOWN;
       }
-      state.has_acceptance_decision = true;
-      state.acceptance_decision = event.event_type;
-      return true;
     }
 
-    if (event.event_type == OutcomeEventType::COMPLETED ||
-        event.event_type == OutcomeEventType::NOT_COMPLETED) {
-      if (state.has_completion_decision) {
-        // Duplicate completion event ignored
-        return false;
-      }
-      if (state.has_acceptance_decision &&
-          state.acceptance_decision == OutcomeEventType::REJECTED) {
-        // Conflicting state: rejected issue cannot be completed
-        return false;
-      }
-      // Preserve completion event independently; do NOT create a synthetic acceptance trial
-      state.has_completion_decision = true;
-      state.completion_decision = event.event_type;
-      return true;
-    }
-
-    if (event.event_type == OutcomeEventType::REOPENED) {
-      // Reopening an accepted issue reverses its terminal completion state
-      if (state.has_completion_decision) {
-        state.has_completion_decision = false;
-        return true;
-      }
-      return false;
-    }
-
+    state.has_acceptance_decision = has_acc;
+    state.acceptance_decision = eff_acc;
+    state.has_completion_decision = has_comp;
+    state.completion_decision = eff_comp;
     return true;
   }
 
