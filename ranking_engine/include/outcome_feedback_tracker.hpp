@@ -67,25 +67,32 @@ public:
   OutcomeFeedbackTracker() = default;
 
   bool record_event(const OutcomeEvent &event) {
-    audit_log_.push_back(event);
-
     std::string ev_id = trim_str(event.event_id);
-    if (!ev_id.empty()) {
-      if (seen_event_ids_.find(ev_id) != seen_event_ids_.end()) {
-        // Exact duplicate event ID ignored
-        return false;
-      }
-      seen_event_ids_.insert(ev_id);
+    if (ev_id.empty()) {
+      // Mandatory event_id integrity check: cannot track, deduplicate, or tie-break without authoritative non-blank ID
+      return false;
+    }
+    if (seen_event_ids_.find(ev_id) != seen_event_ids_.end()) {
+      // Duplicate event ID rejected (idempotent delivery deduplication)
+      return false;
     }
 
-    if (event.event_type == OutcomeEventType::RECOMMENDATION_SHOWN) {
-      return true; // Exposure-logged
+    if (event.timestamp_utc <= 0) {
+      // Mandatory timestamp authority check: cannot fabricate chronology (missing or non-positive rejected)
+      return false;
     }
 
     std::string user_id = trim_str(event.user_id);
     std::string issue_key = trim_str(event.issue_key);
     if (user_id.empty() || issue_key.empty()) {
       return false;
+    }
+
+    seen_event_ids_.insert(ev_id);
+    audit_log_.push_back(event);
+
+    if (event.event_type == OutcomeEventType::RECOMMENDATION_SHOWN) {
+      return true; // Exposure-logged
     }
 
     auto &user_map = user_issue_states_[user_id];

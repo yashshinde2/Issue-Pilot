@@ -44,12 +44,6 @@ public class OutcomeFeedbackTracker {
             if (eventType == null) {
                 throw new IllegalArgumentException("eventType must not be null");
             }
-            if (timestamp == null) {
-                timestamp = Instant.now();
-            }
-            if (eventId == null || eventId.isBlank()) {
-                eventId = UUID.randomUUID().toString();
-            }
         }
     }
 
@@ -88,12 +82,26 @@ public class OutcomeFeedbackTracker {
         if (event == null) {
             return false;
         }
-        if (event.eventId() != null && !event.eventId().isBlank()) {
-            if (!seenEventIds.add(event.eventId().trim())) {
-                // Duplicate event ID ignored (idempotent delivery deduplication)
-                return false;
-            }
+        // Mandatory eventId integrity check: cannot track, deduplicate, or tie-break without authoritative non-blank ID
+        if (event.eventId() == null || event.eventId().isBlank()) {
+            return false;
         }
+        String evId = event.eventId().trim();
+        if (!seenEventIds.add(evId)) {
+            // Duplicate event ID rejected (idempotent delivery deduplication)
+            return false;
+        }
+
+        // Mandatory timestamp authority check: cannot fabricate chronology (missing or non-positive rejected)
+        if (event.timestamp() == null || event.timestamp().toEpochMilli() <= 0L) {
+            return false;
+        }
+
+        // Mandatory user and issue identifiers
+        if (event.userId() == null || event.userId().isBlank() || event.issueKey() == null || event.issueKey().isBlank()) {
+            return false;
+        }
+
         auditLog.add(event);
 
         if (event.eventType() == EventType.RECOMMENDATION_SHOWN) {
@@ -110,15 +118,13 @@ public class OutcomeFeedbackTracker {
 
         // Sort events deterministically by authoritative UTC timestamp, then eventId
         state.eventHistory.sort((a, b) -> {
-            long tA = a.timestamp() != null ? a.timestamp().toEpochMilli() : 0L;
-            long tB = b.timestamp() != null ? b.timestamp().toEpochMilli() : 0L;
+            long tA = a.timestamp().toEpochMilli();
+            long tB = b.timestamp().toEpochMilli();
             int cmp = Long.compare(tA, tB);
             if (cmp != 0) {
                 return cmp;
             }
-            String idA = a.eventId() != null ? a.eventId() : "";
-            String idB = b.eventId() != null ? b.eventId() : "";
-            return idA.compareTo(idB);
+            return a.eventId().trim().compareTo(b.eventId().trim());
         });
 
         // Deterministic state machine replay over canonical timeline

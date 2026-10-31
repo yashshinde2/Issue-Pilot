@@ -1850,27 +1850,40 @@ int main() {
         report_test("Engine calculate_feedback_v2 Score", std::abs(eng_fb - expected_f) < 1e-6, expected_f, eng_fb);
 
         // 13. OutcomeFeedbackTracker Deterministic Conflict Resolution, Deduplication, and Permutations
-        // 1. Event ID Deduplication (Idempotency)
+        int64_t base_ts = 1730376000000LL;
+
+        // 1. Event ID Deduplication (Idempotency) and Invalid Metadata Rejection
         issue_pilot::OutcomeFeedbackTracker tracker_dedup;
         issue_pilot::OutcomeEvent e_dedup;
         e_dedup.event_id = "dedup_id_1";
         e_dedup.user_id = "user1"; e_dedup.issue_key = "gh:org/repo#1"; e_dedup.technology = "python"; e_dedup.difficulty_band = "EASY";
         e_dedup.event_type = issue_pilot::OutcomeEventType::ACCEPTED;
-        e_dedup.timestamp_utc = 1000;
+        e_dedup.timestamp_utc = base_ts + 1000;
         report_test("Tracker Deduplication First Ingestion", tracker_dedup.record_event(e_dedup), 1.0, 1.0);
         report_test("Tracker Duplicate Event ID Rejected", !tracker_dedup.record_event(e_dedup), 1.0, 1.0);
+
+        // Missing or invalid metadata rejected: cannot fabricate chronology or allow blank identifiers
+        issue_pilot::OutcomeEvent e_no_id = e_dedup; e_no_id.event_id = "";
+        report_test("Tracker Empty Event ID Rejected", !tracker_dedup.record_event(e_no_id), 1.0, 1.0);
+
+        issue_pilot::OutcomeEvent e_no_ts = e_dedup; e_no_ts.event_id = "valid_id"; e_no_ts.timestamp_utc = 0;
+        report_test("Tracker Epoch Zero Timestamp Rejected", !tracker_dedup.record_event(e_no_ts), 1.0, 1.0);
+
+        issue_pilot::OutcomeEvent e_neg_ts = e_dedup; e_neg_ts.event_id = "valid_id2"; e_neg_ts.timestamp_utc = -500;
+        report_test("Tracker Negative Timestamp Rejected", !tracker_dedup.record_event(e_neg_ts), 1.0, 1.0);
+
         auto ev_dedup = tracker_dedup.build_evidence("user1", "python", "EASY");
         report_test("Tracker Deduplication Acc Trials", ev_dedup.l1_accept.trials == 1, 1.0, static_cast<double>(ev_dedup.l1_accept.trials));
         report_test("Tracker Deduplication Acc Successes", ev_dedup.l1_accept.successes == 1, 1.0, static_cast<double>(ev_dedup.l1_accept.successes));
 
-        // 2. ACCEPTED(T=100) and REJECTED(T=200): later event wins under both arrival permutations
+        // 2. ACCEPTED(T1) and REJECTED(T2): later event wins under all 2! = 2 arrival permutations
         issue_pilot::OutcomeEvent ev_acc1;
         ev_acc1.event_id = "acc1"; ev_acc1.user_id = "u1"; ev_acc1.issue_key = "gh:r#1"; ev_acc1.technology = "python"; ev_acc1.difficulty_band = "EASY";
-        ev_acc1.event_type = issue_pilot::OutcomeEventType::ACCEPTED; ev_acc1.timestamp_utc = 100;
+        ev_acc1.event_type = issue_pilot::OutcomeEventType::ACCEPTED; ev_acc1.timestamp_utc = base_ts + 100;
 
         issue_pilot::OutcomeEvent ev_rej1;
         ev_rej1.event_id = "rej1"; ev_rej1.user_id = "u1"; ev_rej1.issue_key = "gh:r#1"; ev_rej1.technology = "python"; ev_rej1.difficulty_band = "EASY";
-        ev_rej1.event_type = issue_pilot::OutcomeEventType::REJECTED; ev_rej1.timestamp_utc = 200;
+        ev_rej1.event_type = issue_pilot::OutcomeEventType::REJECTED; ev_rej1.timestamp_utc = base_ts + 200;
 
         issue_pilot::OutcomeFeedbackTracker tr_ar1;
         tr_ar1.record_event(ev_acc1);
@@ -1887,14 +1900,14 @@ int main() {
         report_test("Acc-Rej Permutation Invariance Trials", ev_ar1.l1_accept.trials == ev_ar2.l1_accept.trials, 1.0, 1.0);
         report_test("Acc-Rej Permutation Invariance Successes", ev_ar1.l1_accept.successes == ev_ar2.l1_accept.successes, 1.0, 1.0);
 
-        // 3. REJECTED(T=100) and ACCEPTED(T=200): later event wins under both arrival permutations
+        // 3. REJECTED(T1) and ACCEPTED(T2): later event wins under all 2! = 2 arrival permutations
         issue_pilot::OutcomeEvent ev_rej2;
         ev_rej2.event_id = "rej2"; ev_rej2.user_id = "u1"; ev_rej2.issue_key = "gh:r#2"; ev_rej2.technology = "python"; ev_rej2.difficulty_band = "EASY";
-        ev_rej2.event_type = issue_pilot::OutcomeEventType::REJECTED; ev_rej2.timestamp_utc = 100;
+        ev_rej2.event_type = issue_pilot::OutcomeEventType::REJECTED; ev_rej2.timestamp_utc = base_ts + 100;
 
         issue_pilot::OutcomeEvent ev_acc2;
         ev_acc2.event_id = "acc2"; ev_acc2.user_id = "u1"; ev_acc2.issue_key = "gh:r#2"; ev_acc2.technology = "python"; ev_acc2.difficulty_band = "EASY";
-        ev_acc2.event_type = issue_pilot::OutcomeEventType::ACCEPTED; ev_acc2.timestamp_utc = 200;
+        ev_acc2.event_type = issue_pilot::OutcomeEventType::ACCEPTED; ev_acc2.timestamp_utc = base_ts + 200;
 
         issue_pilot::OutcomeFeedbackTracker tr_ra1;
         tr_ra1.record_event(ev_rej2);
@@ -1911,9 +1924,9 @@ int main() {
         report_test("Rej-Acc Permutation Invariance Trials", ev_ra1.l1_accept.trials == ev_ra2.l1_accept.trials, 1.0, 1.0);
         report_test("Rej-Acc Permutation Invariance Successes", ev_ra1.l1_accept.successes == ev_ra2.l1_accept.successes, 1.0, 1.0);
 
-        // 4. Duplicate ACCEPTED with different event IDs: exactly 1 trial (no trial inflation)
-        issue_pilot::OutcomeEvent d_acc1 = ev_acc1; d_acc1.event_id = "d_acc1"; d_acc1.issue_key = "gh:r#3"; d_acc1.timestamp_utc = 100;
-        issue_pilot::OutcomeEvent d_acc2 = ev_acc1; d_acc2.event_id = "d_acc2"; d_acc2.issue_key = "gh:r#3"; d_acc2.timestamp_utc = 200;
+        // 4. Duplicate ACCEPTED with different event IDs: exactly 1 trial under all permutations (no trial inflation)
+        issue_pilot::OutcomeEvent d_acc1 = ev_acc1; d_acc1.event_id = "d_acc1"; d_acc1.issue_key = "gh:r#3"; d_acc1.timestamp_utc = base_ts + 100;
+        issue_pilot::OutcomeEvent d_acc2 = ev_acc1; d_acc2.event_id = "d_acc2"; d_acc2.issue_key = "gh:r#3"; d_acc2.timestamp_utc = base_ts + 200;
 
         issue_pilot::OutcomeFeedbackTracker tr_dup_acc1;
         tr_dup_acc1.record_event(d_acc1);
@@ -1929,9 +1942,9 @@ int main() {
         report_test("Dup-Acc Exactly 1 Success", ev_dup_acc1.l1_accept.successes == 1, 1.0, static_cast<double>(ev_dup_acc1.l1_accept.successes));
         report_test("Dup-Acc Permutation Invariance", ev_dup_acc1.l1_accept.trials == ev_dup_acc2.l1_accept.trials, 1.0, 1.0);
 
-        // 5. Duplicate REJECTED with different event IDs: exactly 1 trial (no trial inflation)
-        issue_pilot::OutcomeEvent d_rej1 = ev_rej1; d_rej1.event_id = "d_rej1"; d_rej1.issue_key = "gh:r#4"; d_rej1.timestamp_utc = 100;
-        issue_pilot::OutcomeEvent d_rej2 = ev_rej1; d_rej2.event_id = "d_rej2"; d_rej2.issue_key = "gh:r#4"; d_rej2.timestamp_utc = 200;
+        // 5. Duplicate REJECTED with different event IDs: exactly 1 trial under all permutations (no trial inflation)
+        issue_pilot::OutcomeEvent d_rej1 = ev_rej1; d_rej1.event_id = "d_rej1"; d_rej1.issue_key = "gh:r#4"; d_rej1.timestamp_utc = base_ts + 100;
+        issue_pilot::OutcomeEvent d_rej2 = ev_rej1; d_rej2.event_id = "d_rej2"; d_rej2.issue_key = "gh:r#4"; d_rej2.timestamp_utc = base_ts + 200;
 
         issue_pilot::OutcomeFeedbackTracker tr_dup_rej1;
         tr_dup_rej1.record_event(d_rej1);
@@ -1947,35 +1960,45 @@ int main() {
         report_test("Dup-Rej Exactly 0 Success", ev_dup_rej1.l1_accept.successes == 0, 0.0, static_cast<double>(ev_dup_rej1.l1_accept.successes));
         report_test("Dup-Rej Permutation Invariance", ev_dup_rej1.l1_accept.trials == ev_dup_rej2.l1_accept.trials, 1.0, 1.0);
 
-        // 6. Interleaved acceptance conflict, completion, and REOPENED across permutations
+        // 6. Interleaved acceptance conflict, completion, and REOPENED: EXHAUSTIVE ALL 5! = 120 PERMUTATIONS
         issue_pilot::OutcomeEvent evA;
         evA.event_id = "eA"; evA.user_id = "u1"; evA.issue_key = "gh:r#5"; evA.technology = "python"; evA.difficulty_band = "EASY";
-        evA.event_type = issue_pilot::OutcomeEventType::ACCEPTED; evA.timestamp_utc = 100;
+        evA.event_type = issue_pilot::OutcomeEventType::ACCEPTED; evA.timestamp_utc = base_ts + 100;
 
-        issue_pilot::OutcomeEvent evC1 = evA; evC1.event_id = "eC1"; evC1.event_type = issue_pilot::OutcomeEventType::COMPLETED; evC1.timestamp_utc = 200;
-        issue_pilot::OutcomeEvent evR = evA; evR.event_id = "eR"; evR.event_type = issue_pilot::OutcomeEventType::REOPENED; evR.timestamp_utc = 300;
-        issue_pilot::OutcomeEvent evC2 = evA; evC2.event_id = "eC2"; evC2.event_type = issue_pilot::OutcomeEventType::COMPLETED; evC2.timestamp_utc = 400;
-        issue_pilot::OutcomeEvent evX = evA; evX.event_id = "eX"; evX.event_type = issue_pilot::OutcomeEventType::REJECTED; evX.timestamp_utc = 500;
+        issue_pilot::OutcomeEvent evC1 = evA; evC1.event_id = "eC1"; evC1.event_type = issue_pilot::OutcomeEventType::COMPLETED; evC1.timestamp_utc = base_ts + 200;
+        issue_pilot::OutcomeEvent evR = evA; evR.event_id = "eR"; evR.event_type = issue_pilot::OutcomeEventType::REOPENED; evR.timestamp_utc = base_ts + 300;
+        issue_pilot::OutcomeEvent evC2 = evA; evC2.event_id = "eC2"; evC2.event_type = issue_pilot::OutcomeEventType::COMPLETED; evC2.timestamp_utc = base_ts + 400;
+        issue_pilot::OutcomeEvent evX = evA; evX.event_id = "eX"; evX.event_type = issue_pilot::OutcomeEventType::REJECTED; evX.timestamp_utc = base_ts + 500;
 
-        std::vector<issue_pilot::OutcomeEvent> perm_fwd = {evA, evC1, evR, evC2, evX};
-        std::vector<issue_pilot::OutcomeEvent> perm_rev = {evX, evC2, evR, evC1, evA};
-        std::vector<issue_pilot::OutcomeEvent> perm_rnd = {evR, evA, evX, evC2, evC1};
+        std::vector<issue_pilot::OutcomeEvent> ev_vec = {evA, evC1, evR, evC2, evX};
+        // Sort first to generate all 120 lexicographical permutations using std::next_permutation
+        std::sort(ev_vec.begin(), ev_vec.end(), [](const issue_pilot::OutcomeEvent &a, const issue_pilot::OutcomeEvent &b) {
+          return a.event_id < b.event_id;
+        });
 
-        for (const auto &p : {perm_fwd, perm_rev, perm_rnd}) {
+        int perm_count = 0;
+        bool all_120_passed = true;
+        do {
+          perm_count++;
           issue_pilot::OutcomeFeedbackTracker tr_p;
-          for (const auto &ev : p) {
+          for (const auto &ev : ev_vec) {
             tr_p.record_event(ev);
           }
           auto ev_p = tr_p.build_evidence("u1", "python", "EASY");
-          report_test("Interleaved Acc Trials", ev_p.l1_accept.trials == 1, 1.0, static_cast<double>(ev_p.l1_accept.trials));
-          report_test("Interleaved Acc Successes", ev_p.l1_accept.successes == 1, 1.0, static_cast<double>(ev_p.l1_accept.successes));
-          report_test("Interleaved Comp Trials", ev_p.l1_complete.trials == 1, 1.0, static_cast<double>(ev_p.l1_complete.trials));
-          report_test("Interleaved Comp Successes", ev_p.l1_complete.successes == 1, 1.0, static_cast<double>(ev_p.l1_complete.successes));
-        }
+          if (ev_p.l1_accept.trials != 1 || ev_p.l1_accept.successes != 1 ||
+              ev_p.l1_complete.trials != 1 || ev_p.l1_complete.successes != 1) {
+            all_120_passed = false;
+          }
+        } while (std::next_permutation(ev_vec.begin(), ev_vec.end(), [](const issue_pilot::OutcomeEvent &a, const issue_pilot::OutcomeEvent &b) {
+          return a.event_id < b.event_id;
+        }));
+
+        report_test("Interleaved Evaluated Exactly 120 Permutations", perm_count == 120, 120.0, static_cast<double>(perm_count));
+        report_test("Interleaved All 120 Permutations Invariance Passed", all_120_passed, 1.0, 1.0);
 
         // 7. Same-time conflicting events with stable tie-breaking by event ID
-        issue_pilot::OutcomeEvent evt_a = evA; evt_a.event_id = "evt_a"; evt_a.issue_key = "gh:r#6"; evt_a.event_type = issue_pilot::OutcomeEventType::ACCEPTED; evt_a.timestamp_utc = 100;
-        issue_pilot::OutcomeEvent evt_b = evA; evt_b.event_id = "evt_b"; evt_b.issue_key = "gh:r#6"; evt_b.event_type = issue_pilot::OutcomeEventType::REJECTED; evt_b.timestamp_utc = 100;
+        issue_pilot::OutcomeEvent evt_a = evA; evt_a.event_id = "evt_a"; evt_a.issue_key = "gh:r#6"; evt_a.event_type = issue_pilot::OutcomeEventType::ACCEPTED; evt_a.timestamp_utc = base_ts + 100;
+        issue_pilot::OutcomeEvent evt_b = evA; evt_b.event_id = "evt_b"; evt_b.issue_key = "gh:r#6"; evt_b.event_type = issue_pilot::OutcomeEventType::REJECTED; evt_b.timestamp_utc = base_ts + 100;
 
         issue_pilot::OutcomeFeedbackTracker tr_st1;
         tr_st1.record_event(evt_a);
@@ -1991,24 +2014,6 @@ int main() {
         report_test("Same-Time Tie-Breaker Success is 0", ev_st1.l1_accept.successes == 0, 0.0, static_cast<double>(ev_st1.l1_accept.successes));
         report_test("Same-Time Permutation Invariance Trials", ev_st1.l1_accept.trials == ev_st2.l1_accept.trials, 1.0, 1.0);
         report_test("Same-Time Permutation Invariance Successes", ev_st1.l1_accept.successes == ev_st2.l1_accept.successes, 1.0, 1.0);
-
-        // 8. Missing ordering metadata fallback
-        issue_pilot::OutcomeEvent m_a = evA; m_a.event_id = "m_a"; m_a.issue_key = "gh:r#7"; m_a.event_type = issue_pilot::OutcomeEventType::ACCEPTED; m_a.timestamp_utc = 0;
-        issue_pilot::OutcomeEvent m_b = evA; m_b.event_id = "m_b"; m_b.issue_key = "gh:r#7"; m_b.event_type = issue_pilot::OutcomeEventType::REJECTED; m_b.timestamp_utc = 0;
-
-        issue_pilot::OutcomeFeedbackTracker tr_m1;
-        tr_m1.record_event(m_a);
-        tr_m1.record_event(m_b);
-        auto ev_m1 = tr_m1.build_evidence("u1", "python", "EASY");
-
-        issue_pilot::OutcomeFeedbackTracker tr_m2;
-        tr_m2.record_event(m_b);
-        tr_m2.record_event(m_a);
-        auto ev_m2 = tr_m2.build_evidence("u1", "python", "EASY");
-
-        report_test("Missing Metadata Trials is 1", ev_m1.l1_accept.trials == 1, 1.0, static_cast<double>(ev_m1.l1_accept.trials));
-        report_test("Missing Metadata Success is 0", ev_m1.l1_accept.successes == 0, 0.0, static_cast<double>(ev_m1.l1_accept.successes));
-        report_test("Missing Metadata Permutation Invariance", ev_m1.l1_accept.trials == ev_m2.l1_accept.trials, 1.0, 1.0);
     }
 
     std::cout << "\nALL UNIT TEST CHECKS (INCLUDING PHASE 1 CONTRACTS) PASSED SUCCESSFULLY!\n";

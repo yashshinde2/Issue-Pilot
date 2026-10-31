@@ -205,21 +205,33 @@ class OutcomeFeedbackAndFreshnessV23Test {
     @Test
     @DisplayName("OutcomeFeedbackTracker enforces deterministic conflict resolution, deduplication, and permutation invariance")
     void testOutcomeFeedbackTrackerDeterministicResolutionAndPermutations() {
-        // 1. Event ID Deduplication (Idempotency)
+        long baseTs = 1730376000000L;
+
+        // 1. Event ID Deduplication (Idempotency) and Invalid Metadata Rejection
         OutcomeFeedbackTracker trackerDedup = new OutcomeFeedbackTracker();
-        Instant t1 = Instant.ofEpochMilli(1000L);
+        Instant t1 = Instant.ofEpochMilli(baseTs + 1000L);
         OutcomeEvent e1 = new OutcomeEvent("e1", "user1", "gh:org/repo#1", "python", "EASY", EventType.ACCEPTED, t1, "c1", "w1");
         assertTrue(trackerDedup.recordEvent(e1));
         assertFalse(trackerDedup.recordEvent(e1), "Duplicate event ID must be rejected immediately (idempotency)");
+
+        // Missing or invalid metadata rejected: cannot fabricate chronology or allow blank identifiers
+        assertFalse(trackerDedup.recordEvent(new OutcomeEvent(null, "user1", "gh:org/repo#1", "python", "EASY", EventType.ACCEPTED, t1, "c1", "w1")), "Null event ID must be rejected");
+        assertFalse(trackerDedup.recordEvent(new OutcomeEvent("", "user1", "gh:org/repo#1", "python", "EASY", EventType.ACCEPTED, t1, "c1", "w1")), "Empty event ID must be rejected");
+        assertFalse(trackerDedup.recordEvent(new OutcomeEvent("   ", "user1", "gh:org/repo#1", "python", "EASY", EventType.ACCEPTED, t1, "c1", "w1")), "Blank event ID must be rejected");
+        assertFalse(trackerDedup.recordEvent(new OutcomeEvent("valid_id", "user1", "gh:org/repo#1", "python", "EASY", EventType.ACCEPTED, null, "c1", "w1")), "Null timestamp must be rejected");
+        assertFalse(trackerDedup.recordEvent(new OutcomeEvent("valid_id2", "user1", "gh:org/repo#1", "python", "EASY", EventType.ACCEPTED, Instant.ofEpochMilli(0L), "c1", "w1")), "Epoch zero timestamp must be rejected");
+        assertFalse(trackerDedup.recordEvent(new OutcomeEvent("valid_id3", "user1", "gh:org/repo#1", "python", "EASY", EventType.ACCEPTED, Instant.ofEpochMilli(-500L), "c1", "w1")), "Negative timestamp must be rejected");
+
         OutcomeFeedbackEvidenceV2 evDedup = trackerDedup.buildEvidence("user1", "python", "EASY");
         assertEquals(1, evDedup.getL1Accept().trials());
         assertEquals(1, evDedup.getL1Accept().successes());
 
-        // 2. ACCEPTED(T=100) and REJECTED(T=200): later event wins under all arrival permutations
+        // 2. ACCEPTED(T1) and REJECTED(T2): later event wins under all 2! = 2 arrival permutations
+        OutcomeEvent evAcc1 = new OutcomeEvent("ev_acc", "u1", "gh:r#1", "python", "EASY", EventType.ACCEPTED, Instant.ofEpochMilli(baseTs + 100L), "c", "w");
+        OutcomeEvent evRej1 = new OutcomeEvent("ev_rej", "u1", "gh:r#1", "python", "EASY", EventType.REJECTED, Instant.ofEpochMilli(baseTs + 200L), "c", "w");
+
         // Forward: [ACCEPTED, REJECTED]
         OutcomeFeedbackTracker trAr1 = new OutcomeFeedbackTracker();
-        OutcomeEvent evAcc1 = new OutcomeEvent("ev_acc", "u1", "gh:r#1", "python", "EASY", EventType.ACCEPTED, Instant.ofEpochMilli(100L), "c", "w");
-        OutcomeEvent evRej1 = new OutcomeEvent("ev_rej", "u1", "gh:r#1", "python", "EASY", EventType.REJECTED, Instant.ofEpochMilli(200L), "c", "w");
         assertTrue(trAr1.recordEvent(evAcc1));
         assertTrue(trAr1.recordEvent(evRej1));
         OutcomeFeedbackEvidenceV2 evAr1 = trAr1.buildEvidence("u1", "python", "EASY");
@@ -231,14 +243,15 @@ class OutcomeFeedbackAndFreshnessV23Test {
         OutcomeFeedbackEvidenceV2 evAr2 = trAr2.buildEvidence("u1", "python", "EASY");
 
         assertEquals(1, evAr1.getL1Accept().trials(), "Must have exactly 1 trial");
-        assertEquals(0, evAr1.getL1Accept().successes(), "T=200 REJECTED must supersede T=100 ACCEPTED");
+        assertEquals(0, evAr1.getL1Accept().successes(), "T2 REJECTED must supersede T1 ACCEPTED");
         assertEquals(evAr1.getL1Accept().trials(), evAr2.getL1Accept().trials());
         assertEquals(evAr1.getL1Accept().successes(), evAr2.getL1Accept().successes());
 
-        // 3. REJECTED(T=100) and ACCEPTED(T=200): later event wins under all arrival permutations
+        // 3. REJECTED(T1) and ACCEPTED(T2): later event wins under all 2! = 2 arrival permutations
+        OutcomeEvent evRej2 = new OutcomeEvent("ev_rej2", "u1", "gh:r#2", "python", "EASY", EventType.REJECTED, Instant.ofEpochMilli(baseTs + 100L), "c", "w");
+        OutcomeEvent evAcc2 = new OutcomeEvent("ev_acc2", "u1", "gh:r#2", "python", "EASY", EventType.ACCEPTED, Instant.ofEpochMilli(baseTs + 200L), "c", "w");
+
         OutcomeFeedbackTracker trRa1 = new OutcomeFeedbackTracker();
-        OutcomeEvent evRej2 = new OutcomeEvent("ev_rej2", "u1", "gh:r#2", "python", "EASY", EventType.REJECTED, Instant.ofEpochMilli(100L), "c", "w");
-        OutcomeEvent evAcc2 = new OutcomeEvent("ev_acc2", "u1", "gh:r#2", "python", "EASY", EventType.ACCEPTED, Instant.ofEpochMilli(200L), "c", "w");
         assertTrue(trRa1.recordEvent(evRej2));
         assertTrue(trRa1.recordEvent(evAcc2));
         OutcomeFeedbackEvidenceV2 evRa1 = trRa1.buildEvidence("u1", "python", "EASY");
@@ -249,14 +262,15 @@ class OutcomeFeedbackAndFreshnessV23Test {
         OutcomeFeedbackEvidenceV2 evRa2 = trRa2.buildEvidence("u1", "python", "EASY");
 
         assertEquals(1, evRa1.getL1Accept().trials(), "Must have exactly 1 trial");
-        assertEquals(1, evRa1.getL1Accept().successes(), "T=200 ACCEPTED must supersede T=100 REJECTED");
+        assertEquals(1, evRa1.getL1Accept().successes(), "T2 ACCEPTED must supersede T1 REJECTED");
         assertEquals(evRa1.getL1Accept().trials(), evRa2.getL1Accept().trials());
         assertEquals(evRa1.getL1Accept().successes(), evRa2.getL1Accept().successes());
 
-        // 4. Duplicate ACCEPTED with different event IDs: exactly 1 trial (no trial inflation)
+        // 4. Duplicate ACCEPTED with different event IDs: exactly 1 trial under all permutations (no trial inflation)
+        OutcomeEvent dAcc1 = new OutcomeEvent("d_acc1", "u1", "gh:r#3", "python", "EASY", EventType.ACCEPTED, Instant.ofEpochMilli(baseTs + 100L), "c", "w");
+        OutcomeEvent dAcc2 = new OutcomeEvent("d_acc2", "u1", "gh:r#3", "python", "EASY", EventType.ACCEPTED, Instant.ofEpochMilli(baseTs + 200L), "c", "w");
+
         OutcomeFeedbackTracker trDupAcc1 = new OutcomeFeedbackTracker();
-        OutcomeEvent dAcc1 = new OutcomeEvent("d_acc1", "u1", "gh:r#3", "python", "EASY", EventType.ACCEPTED, Instant.ofEpochMilli(100L), "c", "w");
-        OutcomeEvent dAcc2 = new OutcomeEvent("d_acc2", "u1", "gh:r#3", "python", "EASY", EventType.ACCEPTED, Instant.ofEpochMilli(200L), "c", "w");
         assertTrue(trDupAcc1.recordEvent(dAcc1));
         assertTrue(trDupAcc1.recordEvent(dAcc2));
         OutcomeFeedbackEvidenceV2 evDupAcc1 = trDupAcc1.buildEvidence("u1", "python", "EASY");
@@ -271,10 +285,11 @@ class OutcomeFeedbackAndFreshnessV23Test {
         assertEquals(evDupAcc1.getL1Accept().trials(), evDupAcc2.getL1Accept().trials());
         assertEquals(evDupAcc1.getL1Accept().successes(), evDupAcc2.getL1Accept().successes());
 
-        // 5. Duplicate REJECTED with different event IDs: exactly 1 trial (no trial inflation)
+        // 5. Duplicate REJECTED with different event IDs: exactly 1 trial under all permutations (no trial inflation)
+        OutcomeEvent dRej1 = new OutcomeEvent("d_rej1", "u1", "gh:r#4", "python", "EASY", EventType.REJECTED, Instant.ofEpochMilli(baseTs + 100L), "c", "w");
+        OutcomeEvent dRej2 = new OutcomeEvent("d_rej2", "u1", "gh:r#4", "python", "EASY", EventType.REJECTED, Instant.ofEpochMilli(baseTs + 200L), "c", "w");
+
         OutcomeFeedbackTracker trDupRej1 = new OutcomeFeedbackTracker();
-        OutcomeEvent dRej1 = new OutcomeEvent("d_rej1", "u1", "gh:r#4", "python", "EASY", EventType.REJECTED, Instant.ofEpochMilli(100L), "c", "w");
-        OutcomeEvent dRej2 = new OutcomeEvent("d_rej2", "u1", "gh:r#4", "python", "EASY", EventType.REJECTED, Instant.ofEpochMilli(200L), "c", "w");
         assertTrue(trDupRej1.recordEvent(dRej1));
         assertTrue(trDupRej1.recordEvent(dRej2));
         OutcomeFeedbackEvidenceV2 evDupRej1 = trDupRej1.buildEvidence("u1", "python", "EASY");
@@ -289,32 +304,33 @@ class OutcomeFeedbackAndFreshnessV23Test {
         assertEquals(evDupRej1.getL1Accept().trials(), evDupRej2.getL1Accept().trials());
         assertEquals(evDupRej1.getL1Accept().successes(), evDupRej2.getL1Accept().successes());
 
-        // 6. Interleaved acceptance conflict, completion, and REOPENED under multiple arrival permutations
-        OutcomeEvent evA = new OutcomeEvent("eA", "u1", "gh:r#5", "python", "EASY", EventType.ACCEPTED, Instant.ofEpochMilli(100L), "c", "w");
-        OutcomeEvent evC1 = new OutcomeEvent("eC1", "u1", "gh:r#5", "python", "EASY", EventType.COMPLETED, Instant.ofEpochMilli(200L), "c", "w");
-        OutcomeEvent evR = new OutcomeEvent("eR", "u1", "gh:r#5", "python", "EASY", EventType.REOPENED, Instant.ofEpochMilli(300L), "c", "w");
-        OutcomeEvent evC2 = new OutcomeEvent("eC2", "u1", "gh:r#5", "python", "EASY", EventType.COMPLETED, Instant.ofEpochMilli(400L), "c", "w");
-        OutcomeEvent evX = new OutcomeEvent("eX", "u1", "gh:r#5", "python", "EASY", EventType.REJECTED, Instant.ofEpochMilli(500L), "c", "w");
+        // 6. Interleaved acceptance conflict, completion, and REOPENED: EXHAUSTIVE ALL 5! = 120 PERMUTATIONS
+        OutcomeEvent evA = new OutcomeEvent("eA", "u1", "gh:r#5", "python", "EASY", EventType.ACCEPTED, Instant.ofEpochMilli(baseTs + 100L), "c", "w");
+        OutcomeEvent evC1 = new OutcomeEvent("eC1", "u1", "gh:r#5", "python", "EASY", EventType.COMPLETED, Instant.ofEpochMilli(baseTs + 200L), "c", "w");
+        OutcomeEvent evR = new OutcomeEvent("eR", "u1", "gh:r#5", "python", "EASY", EventType.REOPENED, Instant.ofEpochMilli(baseTs + 300L), "c", "w");
+        OutcomeEvent evC2 = new OutcomeEvent("eC2", "u1", "gh:r#5", "python", "EASY", EventType.COMPLETED, Instant.ofEpochMilli(baseTs + 400L), "c", "w");
+        OutcomeEvent evX = new OutcomeEvent("eX", "u1", "gh:r#5", "python", "EASY", EventType.REJECTED, Instant.ofEpochMilli(baseTs + 500L), "c", "w");
 
-        List<OutcomeEvent> perm1 = List.of(evA, evC1, evR, evC2, evX); // Forward
-        List<OutcomeEvent> perm2 = List.of(evX, evC2, evR, evC1, evA); // Reverse
-        List<OutcomeEvent> perm3 = List.of(evR, evA, evX, evC2, evC1); // Scrambled
+        List<OutcomeEvent> eventList = new java.util.ArrayList<>(List.of(evA, evC1, evR, evC2, evX));
+        List<List<OutcomeEvent>> all120Permutations = new java.util.ArrayList<>();
+        generatePermutations(eventList, 0, all120Permutations);
+        assertEquals(120, all120Permutations.size(), "Exhaustive permutation test must evaluate exactly 5! = 120 sequences");
 
-        for (List<OutcomeEvent> perm : List.of(perm1, perm2, perm3)) {
+        for (List<OutcomeEvent> perm : all120Permutations) {
             OutcomeFeedbackTracker trP = new OutcomeFeedbackTracker();
             for (OutcomeEvent ev : perm) {
                 assertTrue(trP.recordEvent(ev));
             }
             OutcomeFeedbackEvidenceV2 evP = trP.buildEvidence("u1", "python", "EASY");
-            assertEquals(1, evP.getL1Accept().trials());
-            assertEquals(1, evP.getL1Accept().successes(), "Retroactive REJECTED after completion must be ignored");
-            assertEquals(1, evP.getL1Complete().trials());
-            assertEquals(1, evP.getL1Complete().successes(), "Reopening then re-completing must yield exactly 1 completed trial");
+            assertEquals(1, evP.getL1Accept().trials(), "Acceptance trials must be 1 across all permutations");
+            assertEquals(1, evP.getL1Accept().successes(), "Retroactive REJECTED after completion must be ignored across all permutations");
+            assertEquals(1, evP.getL1Complete().trials(), "Completion trials must be 1 across all permutations");
+            assertEquals(1, evP.getL1Complete().successes(), "Reopening then re-completing must yield exactly 1 completed trial across all permutations");
         }
 
         // 7. Same-time conflicting events with stable tie-breaking by event ID
-        OutcomeEvent evtA = new OutcomeEvent("evt_a", "u1", "gh:r#6", "python", "EASY", EventType.ACCEPTED, Instant.ofEpochMilli(100L), "c", "w");
-        OutcomeEvent evtB = new OutcomeEvent("evt_b", "u1", "gh:r#6", "python", "EASY", EventType.REJECTED, Instant.ofEpochMilli(100L), "c", "w");
+        OutcomeEvent evtA = new OutcomeEvent("evt_a", "u1", "gh:r#6", "python", "EASY", EventType.ACCEPTED, Instant.ofEpochMilli(baseTs + 100L), "c", "w");
+        OutcomeEvent evtB = new OutcomeEvent("evt_b", "u1", "gh:r#6", "python", "EASY", EventType.REJECTED, Instant.ofEpochMilli(baseTs + 100L), "c", "w");
 
         OutcomeFeedbackTracker trSt1 = new OutcomeFeedbackTracker();
         assertTrue(trSt1.recordEvent(evtA));
@@ -330,27 +346,18 @@ class OutcomeFeedbackAndFreshnessV23Test {
         assertEquals(0, evSt1.getL1Accept().successes());
         assertEquals(evSt1.getL1Accept().trials(), evSt2.getL1Accept().trials());
         assertEquals(evSt1.getL1Accept().successes(), evSt2.getL1Accept().successes());
-
-        // 8. Missing ordering metadata fallback
-        OutcomeEvent mA = new OutcomeEvent("m_a", "u1", "gh:r#7", "python", "EASY", EventType.ACCEPTED, null, "c", "w");
-        OutcomeEvent mB = new OutcomeEvent("m_b", "u1", "gh:r#7", "python", "EASY", EventType.REJECTED, null, "c", "w");
-
-        OutcomeFeedbackTracker trM1 = new OutcomeFeedbackTracker();
-        assertTrue(trM1.recordEvent(mA));
-        assertTrue(trM1.recordEvent(mB));
-        OutcomeFeedbackEvidenceV2 evM1 = trM1.buildEvidence("u1", "python", "EASY");
-
-        OutcomeFeedbackTracker trM2 = new OutcomeFeedbackTracker();
-        assertTrue(trM2.recordEvent(mB));
-        assertTrue(trM2.recordEvent(mA));
-        OutcomeFeedbackEvidenceV2 evM2 = trM2.buildEvidence("u1", "python", "EASY");
-
-        assertEquals(1, evM1.getL1Accept().trials());
-        assertEquals(0, evM1.getL1Accept().successes());
-        assertEquals(evM1.getL1Accept().trials(), evM2.getL1Accept().trials());
-        assertEquals(evM1.getL1Accept().successes(), evM2.getL1Accept().successes());
     }
 
+    private static void generatePermutations(List<OutcomeEvent> list, int k, List<List<OutcomeEvent>> result) {
+        for (int i = k; i < list.size(); i++) {
+            java.util.Collections.swap(list, i, k);
+            generatePermutations(list, k + 1, result);
+            java.util.Collections.swap(list, k, i);
+        }
+        if (k == list.size() - 1) {
+            result.add(new java.util.ArrayList<>(list));
+        }
+    }
     @Test
     @DisplayName("Randomized property tests for Freshness and Hierarchical Feedback")
     void testRandomizedPropertyTesting() {
