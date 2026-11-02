@@ -2000,7 +2000,92 @@ int main() {
         report_test("Interleaved All 120 Permutations Invariance Passed", all_120_passed, 1.0, 1.0);
     }
 
-    std::cout << "\nALL UNIT TEST CHECKS (INCLUDING PHASE 1 CONTRACTS) PASSED SUCCESSFULLY!\n";
+        // 14. Eight-stage event creation, authoritative commit, concurrent CAS allocation, and conflict quarantine lifecycle
+    {
+        issue_pilot::OutcomeFeedbackTracker tr;
+        int64_t base_ts = 1730376000000LL;
+
+        // Stage A: Decision creation and authoritative commit
+        auto res_a = tr.commit_decision("e1", "u1", "gh:r#1", "exp_1", "python", "EASY", issue_pilot::OutcomeEventType::ACCEPTED, base_ts + 100, 0);
+        report_test("Stage A: Commit Decision Status", res_a.status == issue_pilot::CommitStatus::COMMITTED, 1.0, 1.0);
+        report_test("Stage A: Committed Revision", res_a.committed_revision == 1, 1.0, 1.0);
+
+        // Stage B: Revision allocation under concurrent requests (CAS conflict)
+        auto res_b = tr.commit_decision("e2_race", "u1", "gh:r#1", "exp_1", "python", "EASY", issue_pilot::OutcomeEventType::REJECTED, base_ts + 150, 0);
+        report_test("Stage B: Concurrent CAS Conflict", res_b.status == issue_pilot::CommitStatus::CONCURRENT_CAS_CONFLICT, 1.0, 1.0);
+
+        // Stage C: Network delivery in normal and reversed order
+        issue_pilot::OutcomeFeedbackTracker tr_c1;
+        issue_pilot::OutcomeEvent ev_c1{"r1", "u1", "gh:r#1", "python", "EASY", issue_pilot::OutcomeEventType::ACCEPTED, base_ts + 100, "c", "w", 1, "exp_c"};
+        issue_pilot::OutcomeEvent ev_c2{"r2", "u1", "gh:r#1", "python", "EASY", issue_pilot::OutcomeEventType::REJECTED, base_ts + 200, "c", "w", 2, "exp_c"};
+        tr_c1.record_event(ev_c1);
+        tr_c1.record_event(ev_c2);
+        auto res_norm = tr_c1.build_evidence("u1", "python", "EASY");
+
+        issue_pilot::OutcomeFeedbackTracker tr_c2;
+        tr_c2.record_event(ev_c2); // Reversed delivery!
+        tr_c2.record_event(ev_c1);
+        auto res_rev = tr_c2.build_evidence("u1", "python", "EASY");
+
+        report_test("Stage C: Normal vs Reversed Trials", res_norm.l1_accept.trials == 1 && res_rev.l1_accept.trials == 1, 1.0, 1.0);
+        report_test("Stage C: Normal vs Reversed Successes", res_norm.l1_accept.successes == 0 && res_rev.l1_accept.successes == 0, 1.0, 1.0);
+
+        // Stage D: Retry and duplicate delivery (IDEMPOTENT_REPLAY)
+        auto res_d = tr.commit_decision("e1", "u1", "gh:r#1", "exp_1", "python", "EASY", issue_pilot::OutcomeEventType::ACCEPTED, base_ts + 100, 0);
+        report_test("Stage D: Idempotent Replay Status", res_d.status == issue_pilot::CommitStatus::IDEMPOTENT_REPLAY, 1.0, 1.0);
+
+        // Stage E: Stale offline update arriving after newer committed decision
+        auto res_e1 = tr.commit_decision("e3", "u1", "gh:r#1", "exp_1", "python", "EASY", issue_pilot::OutcomeEventType::REJECTED, base_ts + 200, 1);
+        report_test("Stage E: Newer Commit Status", res_e1.status == issue_pilot::CommitStatus::COMMITTED, 1.0, 1.0);
+        auto res_e2 = tr.commit_decision("e_stale", "u1", "gh:r#1", "exp_1", "python", "EASY", issue_pilot::OutcomeEventType::ACCEPTED, base_ts + 100, 0);
+        report_test("Stage E: Stale Revision Status", res_e2.status == issue_pilot::CommitStatus::STALE_REVISION_CONFLICT, 1.0, 1.0);
+
+        // Stage F: Two devices attempting conflicting decisions concurrently (Same-revision quarantine)
+        issue_pilot::OutcomeFeedbackTracker tr_f;
+        issue_pilot::OutcomeEvent dev_a{"fa", "u1", "gh:r#2", "python", "EASY", issue_pilot::OutcomeEventType::ACCEPTED, base_ts + 100, "c", "w", 1, "exp_f"};
+        issue_pilot::OutcomeEvent dev_b{"fb", "u1", "gh:r#2", "python", "EASY", issue_pilot::OutcomeEventType::REJECTED, base_ts + 100, "c", "w", 1, "exp_f"};
+        tr_f.record_event(dev_a);
+        tr_f.record_event(dev_b);
+        auto res_f = tr_f.build_evidence("u1", "python", "EASY");
+        report_test("Stage F: Same-Revision Quarantine Trials", res_f.l1_accept.trials == 0, 0.0, static_cast<double>(res_f.l1_accept.trials));
+
+        // Stage G: Separate exposure sessions for the same user and issue (no trial collision)
+        issue_pilot::OutcomeFeedbackTracker tr_g;
+        auto res_g1 = tr_g.commit_decision("g1", "u1", "gh:r#99", "exp_session_1", "python", "EASY", issue_pilot::OutcomeEventType::ACCEPTED, base_ts + 100, 0);
+        auto res_g2 = tr_g.commit_decision("g2", "u1", "gh:r#99", "exp_session_2", "python", "EASY", issue_pilot::OutcomeEventType::REJECTED, base_ts + 200, 0);
+        report_test("Stage G: Exposure 1 Commit", res_g1.status == issue_pilot::CommitStatus::COMMITTED, 1.0, 1.0);
+        report_test("Stage G: Exposure 2 Commit", res_g2.status == issue_pilot::CommitStatus::COMMITTED, 1.0, 1.0);
+        auto res_g = tr_g.build_evidence("u1", "python", "EASY");
+        report_test("Stage G: Separate Exposure Trials Count", res_g.l1_accept.trials == 2, 2.0, static_cast<double>(res_g.l1_accept.trials));
+        report_test("Stage G: Separate Exposure Successes Count", res_g.l1_accept.successes == 1, 1.0, static_cast<double>(res_g.l1_accept.successes));
+
+        // Stage H: Same-revision conflicts across transitions
+        // H.1 COMPLETED vs NOT_COMPLETED
+        issue_pilot::OutcomeFeedbackTracker tr_h1;
+        tr_h1.record_event(issue_pilot::OutcomeEvent{"h1_acc", "u1", "gh:r#3", "python", "EASY", issue_pilot::OutcomeEventType::ACCEPTED, base_ts + 100, "c", "w", 1, "exp_h1"});
+        tr_h1.record_event(issue_pilot::OutcomeEvent{"h1_c", "u1", "gh:r#3", "python", "EASY", issue_pilot::OutcomeEventType::COMPLETED, base_ts + 200, "c", "w", 2, "exp_h1"});
+        tr_h1.record_event(issue_pilot::OutcomeEvent{"h1_nc", "u1", "gh:r#3", "python", "EASY", issue_pilot::OutcomeEventType::NOT_COMPLETED, base_ts + 200, "c", "w", 2, "exp_h1"});
+        auto res_h1 = tr_h1.build_evidence("u1", "python", "EASY");
+        report_test("Stage H.1: Conflicting Completion Quarantined", res_h1.l1_complete.trials == 0, 0.0, static_cast<double>(res_h1.l1_complete.trials));
+
+        // H.2 COMPLETED vs REOPENED
+        issue_pilot::OutcomeFeedbackTracker tr_h2;
+        tr_h2.record_event(issue_pilot::OutcomeEvent{"h2_acc", "u1", "gh:r#4", "python", "EASY", issue_pilot::OutcomeEventType::ACCEPTED, base_ts + 100, "c", "w", 1, "exp_h2"});
+        tr_h2.record_event(issue_pilot::OutcomeEvent{"h2_c", "u1", "gh:r#4", "python", "EASY", issue_pilot::OutcomeEventType::COMPLETED, base_ts + 200, "c", "w", 2, "exp_h2"});
+        tr_h2.record_event(issue_pilot::OutcomeEvent{"h2_r", "u1", "gh:r#4", "python", "EASY", issue_pilot::OutcomeEventType::REOPENED, base_ts + 200, "c", "w", 2, "exp_h2"});
+        auto res_h2 = tr_h2.build_evidence("u1", "python", "EASY");
+        report_test("Stage H.2: Completed vs Reopened Quarantined", res_h2.l1_complete.trials == 0, 0.0, static_cast<double>(res_h2.l1_complete.trials));
+
+        // H.3 NOT_COMPLETED vs REOPENED
+        issue_pilot::OutcomeFeedbackTracker tr_h3;
+        tr_h3.record_event(issue_pilot::OutcomeEvent{"h3_acc", "u1", "gh:r#5", "python", "EASY", issue_pilot::OutcomeEventType::ACCEPTED, base_ts + 100, "c", "w", 1, "exp_h3"});
+        tr_h3.record_event(issue_pilot::OutcomeEvent{"h3_nc", "u1", "gh:r#5", "python", "EASY", issue_pilot::OutcomeEventType::NOT_COMPLETED, base_ts + 200, "c", "w", 2, "exp_h3"});
+        tr_h3.record_event(issue_pilot::OutcomeEvent{"h3_r", "u1", "gh:r#5", "python", "EASY", issue_pilot::OutcomeEventType::REOPENED, base_ts + 200, "c", "w", 2, "exp_h3"});
+        auto res_h3 = tr_h3.build_evidence("u1", "python", "EASY");
+        report_test("Stage H.3: Not Completed vs Reopened Quarantined", res_h3.l1_complete.trials == 0, 0.0, static_cast<double>(res_h3.l1_complete.trials));
+    }
+
+std::cout << "\nALL UNIT TEST CHECKS (INCLUDING PHASE 1 CONTRACTS) PASSED SUCCESSFULLY!\n";
     std::cout << "Executed: " << total_assertions << " | Passed: " << passed_assertions << " | Failed: " << (total_assertions - passed_assertions) << "\n";
     std::cout << "========================================\n";
     return (total_assertions == passed_assertions) ? 0 : 1;

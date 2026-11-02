@@ -19,6 +19,13 @@ enum class OutcomeEventType {
   REOPENED
 };
 
+enum class CommitStatus {
+  COMMITTED,
+  IDEMPOTENT_REPLAY,
+  STALE_REVISION_CONFLICT,
+  CONCURRENT_CAS_CONFLICT
+};
+
 struct OutcomeEvent {
   std::string event_id;
   std::string user_id;
@@ -30,16 +37,26 @@ struct OutcomeEvent {
   std::string cohort_key;
   std::string exposure_window;
   int64_t decision_revision{1};
+  std::string exposure_id;
+};
+
+struct CommitResult {
+  CommitStatus status{CommitStatus::CONCURRENT_CAS_CONFLICT};
+  OutcomeEvent event;
+  int64_t committed_revision{-1};
+  std::string message;
 };
 
 class OutcomeFeedbackTracker {
 private:
   std::unordered_set<std::string> seen_event_ids_;
 
-  struct IssueDecisionState {
+  struct ExposureDecisionState {
+    std::string exposure_key;
     std::string issue_key;
     std::string technology;
     std::string difficulty_band;
+    int64_t current_revision{0};
     bool has_acceptance_decision{false};
     OutcomeEventType acceptance_decision{
         OutcomeEventType::RECOMMENDATION_SHOWN};
@@ -47,11 +64,12 @@ private:
     OutcomeEventType completion_decision{
         OutcomeEventType::RECOMMENDATION_SHOWN};
     std::vector<OutcomeEvent> event_history;
+    std::unordered_map<std::string, OutcomeEvent> committed_events;
   };
 
   std::unordered_map<std::string,
-                     std::unordered_map<std::string, IssueDecisionState>>
-      user_issue_states_;
+                     std::unordered_map<std::string, ExposureDecisionState>>
+      user_exposure_states_;
   std::vector<OutcomeEvent> audit_log_;
 
   static std::string canonical_tech(const std::string &tech) {
@@ -67,6 +85,76 @@ private:
 
 public:
   OutcomeFeedbackTracker() = default;
+
+  CommitResult commit_decision(
+      const std::string &event_id,
+      const std::string &user_id,
+      const std::string &issue_key,
+      const std::string &exposure_id,
+      const std::string &technology,
+      const std::string &difficulty_band,
+      OutcomeEventType event_type,
+      int64_t timestamp_utc,
+      int64_t expected_base_revision) {
+
+    std::string ev_id = trim_str(event_id);
+    std::string u_id = trim_str(user_id);
+    std::string i_key = trim_str(issue_key);
+    std::string exp_id = trim_str(exposure_id);
+    std::string exp_key = !exp_id.empty() ? exp_id : i_key;
+
+    if (ev_id.empty() || u_id.empty() || i_key.empty()) {
+      return {CommitStatus::CONCURRENT_CAS_CONFLICT, {}, -1, "Mandatory metadata missing"};
+    }
+
+    auto &user_map = user_exposure_states_[u_id];
+    auto it = user_map.find(exp_key);
+    if (it == user_map.end()) {
+      ExposureDecisionState new_state;
+      new_state.exposure_key = exp_key;
+      new_state.issue_key = i_key;
+      new_state.technology = canonical_tech(technology);
+      new_state.difficulty_band = canonical_band(difficulty_band);
+      it = user_map.emplace(exp_key, std::move(new_state)).first;
+    }
+
+    auto &state = it->second;
+
+    // Check idempotent replay by event_id
+    auto c_it = state.committed_events.find(ev_id);
+    if (c_it != state.committed_events.end()) {
+      return {CommitStatus::IDEMPOTENT_REPLAY, c_it->second, c_it->second.decision_revision, "Idempotent duplicate event replay"};
+    }
+
+    // Compare-And-Swap check against authoritative committed revision
+    if (expected_base_revision != state.current_revision) {
+      if (expected_base_revision < state.current_revision - 1) {
+        return {CommitStatus::STALE_REVISION_CONFLICT, {}, state.current_revision, "Stale offline decision"};
+      } else {
+        return {CommitStatus::CONCURRENT_CAS_CONFLICT, {}, state.current_revision, "Concurrent CAS conflict"};
+      }
+    }
+
+    // CAS succeeded: increment revision and commit
+    int64_t allocated_revision = state.current_revision + 1;
+    state.current_revision = allocated_revision;
+
+    OutcomeEvent ev;
+    ev.event_id = ev_id;
+    ev.user_id = u_id;
+    ev.issue_key = i_key;
+    ev.technology = technology;
+    ev.difficulty_band = difficulty_band;
+    ev.event_type = event_type;
+    ev.timestamp_utc = timestamp_utc > 0 ? timestamp_utc : 1;
+    ev.decision_revision = allocated_revision;
+    ev.exposure_id = exp_id;
+
+    state.committed_events[ev_id] = ev;
+    record_event(ev);
+
+    return {CommitStatus::COMMITTED, ev, allocated_revision, "Committed"};
+  }
 
   bool record_event(const OutcomeEvent &event) {
     std::string ev_id = trim_str(event.event_id);
@@ -91,6 +179,9 @@ public:
 
     std::string user_id = trim_str(event.user_id);
     std::string issue_key = trim_str(event.issue_key);
+    std::string exp_id = trim_str(event.exposure_id);
+    std::string exp_key = !exp_id.empty() ? exp_id : issue_key;
+
     if (user_id.empty() || issue_key.empty()) {
       return false;
     }
@@ -102,14 +193,15 @@ public:
       return true; // Exposure-logged
     }
 
-    auto &user_map = user_issue_states_[user_id];
-    auto it = user_map.find(issue_key);
+    auto &user_map = user_exposure_states_[user_id];
+    auto it = user_map.find(exp_key);
     if (it == user_map.end()) {
-      IssueDecisionState new_state;
+      ExposureDecisionState new_state;
+      new_state.exposure_key = exp_key;
       new_state.issue_key = issue_key;
       new_state.technology = canonical_tech(event.technology);
       new_state.difficulty_band = canonical_band(event.difficulty_band);
-      it = user_map.emplace(issue_key, std::move(new_state)).first;
+      it = user_map.emplace(exp_key, std::move(new_state)).first;
     }
 
     auto &state = it->second;
@@ -143,22 +235,20 @@ public:
       bool r_has_acc = false;
       bool r_has_rej = false;
       bool r_has_comp = false;
-      OutcomeEventType r_comp_type = OutcomeEventType::RECOMMENDATION_SHOWN;
+      bool r_has_not_comp = false;
       bool r_has_reopen = false;
 
       for (const auto &ev : rev_events) {
         if (ev.event_type == OutcomeEventType::ACCEPTED) r_has_acc = true;
         else if (ev.event_type == OutcomeEventType::REJECTED) r_has_rej = true;
-        else if (ev.event_type == OutcomeEventType::COMPLETED || ev.event_type == OutcomeEventType::NOT_COMPLETED) {
-          r_has_comp = true;
-          r_comp_type = ev.event_type;
-        } else if (ev.event_type == OutcomeEventType::REOPENED) {
-          r_has_reopen = true;
-        }
+        else if (ev.event_type == OutcomeEventType::COMPLETED) r_has_comp = true;
+        else if (ev.event_type == OutcomeEventType::NOT_COMPLETED) r_has_not_comp = true;
+        else if (ev.event_type == OutcomeEventType::REOPENED) r_has_reopen = true;
       }
 
+      // 1. Acceptance transition at this revision
       if (r_has_acc && r_has_rej) {
-        // Conflicting decisions at the EXACT SAME revision: QUARANTINE!
+        // Conflicting decisions at same revision: quarantine acceptance!
         has_acc = false;
         eff_acc = OutcomeEventType::RECOMMENDATION_SHOWN;
       } else if (r_has_acc) {
@@ -171,16 +261,27 @@ public:
         }
       }
 
-      if (r_has_reopen) {
+      // 2. Completion transition at this revision
+      int comp_signals = (r_has_comp ? 1 : 0) + (r_has_not_comp ? 1 : 0) + (r_has_reopen ? 1 : 0);
+      if (comp_signals > 1) {
+        // Conflicting completion signals at same revision: quarantine completion!
+        has_comp = false;
+        eff_comp = OutcomeEventType::RECOMMENDATION_SHOWN;
+      } else if (r_has_reopen) {
         has_comp = false;
         eff_comp = OutcomeEventType::RECOMMENDATION_SHOWN;
       } else if (r_has_comp) {
-        if (has_acc && eff_acc == OutcomeEventType::REJECTED) {
-          // rejected cannot complete
-        } else {
-          has_comp = true;
-          eff_comp = r_comp_type;
-        }
+        has_comp = true;
+        eff_comp = OutcomeEventType::COMPLETED;
+      } else if (r_has_not_comp) {
+        has_comp = true;
+        eff_comp = OutcomeEventType::NOT_COMPLETED;
+      }
+
+      // 3. Mathematical invariant: completion requires accepted status
+      if (!has_acc || eff_acc != OutcomeEventType::ACCEPTED) {
+        has_comp = false;
+        eff_comp = OutcomeEventType::RECOMMENDATION_SHOWN;
       }
     }
 
@@ -202,8 +303,8 @@ public:
     evidence.technology = can_tech;
     evidence.difficulty_band = can_band;
 
-    auto u_it = user_issue_states_.find(evidence.user_id);
-    if (u_it == user_issue_states_.end() || u_it->second.empty()) {
+    auto u_it = user_exposure_states_.find(evidence.user_id);
+    if (u_it == user_exposure_states_.end() || u_it->second.empty()) {
       // Cold start: empty counts
       evidence.l1_accept = HierarchyCounts(0, 0);
       evidence.l2_accept = HierarchyCounts(0, 0);
@@ -283,7 +384,7 @@ public:
   const std::vector<OutcomeEvent> &get_audit_log() const { return audit_log_; }
 
   void clear() {
-    user_issue_states_.clear();
+    user_exposure_states_.clear();
     audit_log_.clear();
     seen_event_ids_.clear();
   }

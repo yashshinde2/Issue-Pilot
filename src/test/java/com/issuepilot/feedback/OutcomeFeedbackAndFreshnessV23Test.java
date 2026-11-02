@@ -407,4 +407,111 @@ class OutcomeFeedbackAndFreshnessV23Test {
             }
         }
     }
+
+    @Test
+    @DisplayName("Eight-stage event creation, authoritative commit, concurrent revision allocation, network delivery, and conflict quarantine lifecycle")
+    void testEightStageCreationDeliveryAndQuarantineLifecycle() {
+        OutcomeFeedbackTracker tr = new OutcomeFeedbackTracker();
+        java.time.Instant baseTs = java.time.Instant.ofEpochMilli(1730376000000L);
+
+        // Stage A: Decision creation and authoritative commit
+        OutcomeFeedbackTracker.CommitResult resA = tr.commitDecision(
+                "e1", "u1", "gh:r#1", "exp_1", "python", "EASY",
+                OutcomeFeedbackTracker.EventType.ACCEPTED, baseTs.plusMillis(100), 0L);
+        assertEquals(OutcomeFeedbackTracker.CommitStatus.COMMITTED, resA.status());
+        assertEquals(1L, resA.committedRevision());
+        assertNotNull(resA.event());
+
+        // Stage B: Revision allocation under concurrent requests (CAS conflict)
+        OutcomeFeedbackTracker.CommitResult resB = tr.commitDecision(
+                "e2_race", "u1", "gh:r#1", "exp_1", "python", "EASY",
+                OutcomeFeedbackTracker.EventType.REJECTED, baseTs.plusMillis(150), 0L);
+        assertEquals(OutcomeFeedbackTracker.CommitStatus.CONCURRENT_CAS_CONFLICT, resB.status());
+
+        // Stage C: Network delivery in normal and reversed order
+        OutcomeFeedbackTracker trC1 = new OutcomeFeedbackTracker();
+        OutcomeFeedbackTracker.OutcomeEvent evC1 = new OutcomeFeedbackTracker.OutcomeEvent("r1", "u1", "gh:r#1", "python", "EASY", OutcomeFeedbackTracker.EventType.ACCEPTED, baseTs.plusMillis(100), "c", "w", 1L, "exp_c");
+        OutcomeFeedbackTracker.OutcomeEvent evC2 = new OutcomeFeedbackTracker.OutcomeEvent("r2", "u1", "gh:r#1", "python", "EASY", OutcomeFeedbackTracker.EventType.REJECTED, baseTs.plusMillis(200), "c", "w", 2L, "exp_c");
+        assertTrue(trC1.recordEvent(evC1));
+        assertTrue(trC1.recordEvent(evC2));
+        com.issuepilot.model.EvidenceModelsV2.OutcomeFeedbackEvidenceV2 resNorm = trC1.buildEvidence("u1", "python", "EASY");
+
+        OutcomeFeedbackTracker trC2 = new OutcomeFeedbackTracker();
+        assertTrue(trC2.recordEvent(evC2)); // Reversed delivery!
+        assertTrue(trC2.recordEvent(evC1));
+        com.issuepilot.model.EvidenceModelsV2.OutcomeFeedbackEvidenceV2 resRev = trC2.buildEvidence("u1", "python", "EASY");
+
+        assertEquals(1, resNorm.getL1Accept().trials());
+        assertEquals(0, resNorm.getL1Accept().successes(), "Revision 2 REJECTED must supersede Revision 1 ACCEPTED");
+        assertEquals(resNorm.getL1Accept().trials(), resRev.getL1Accept().trials());
+        assertEquals(resNorm.getL1Accept().successes(), resRev.getL1Accept().successes());
+
+        // Stage D: Retry and duplicate delivery (IDEMPOTENT_REPLAY)
+        OutcomeFeedbackTracker.CommitResult resD = tr.commitDecision(
+                "e1", "u1", "gh:r#1", "exp_1", "python", "EASY",
+                OutcomeFeedbackTracker.EventType.ACCEPTED, baseTs.plusMillis(100), 0L);
+        assertEquals(OutcomeFeedbackTracker.CommitStatus.IDEMPOTENT_REPLAY, resD.status());
+
+        // Stage E: Stale offline update arriving after newer committed decision
+        OutcomeFeedbackTracker.CommitResult resE1 = tr.commitDecision(
+                "e3", "u1", "gh:r#1", "exp_1", "python", "EASY",
+                OutcomeFeedbackTracker.EventType.REJECTED, baseTs.plusMillis(200), 1L);
+        assertEquals(OutcomeFeedbackTracker.CommitStatus.COMMITTED, resE1.status());
+        OutcomeFeedbackTracker.CommitResult resE2 = tr.commitDecision(
+                "e_stale", "u1", "gh:r#1", "exp_1", "python", "EASY",
+                OutcomeFeedbackTracker.EventType.ACCEPTED, baseTs.plusMillis(100), 0L);
+        assertEquals(OutcomeFeedbackTracker.CommitStatus.STALE_REVISION_CONFLICT, resE2.status());
+
+        // Stage F: Two devices attempting conflicting decisions concurrently (Same-revision quarantine)
+        OutcomeFeedbackTracker trF = new OutcomeFeedbackTracker();
+        OutcomeFeedbackTracker.OutcomeEvent devA = new OutcomeFeedbackTracker.OutcomeEvent("fa", "u1", "gh:r#2", "python", "EASY", OutcomeFeedbackTracker.EventType.ACCEPTED, baseTs.plusMillis(100), "c", "w", 1L, "exp_f");
+        OutcomeFeedbackTracker.OutcomeEvent devB = new OutcomeFeedbackTracker.OutcomeEvent("fb", "u1", "gh:r#2", "python", "EASY", OutcomeFeedbackTracker.EventType.REJECTED, baseTs.plusMillis(100), "c", "w", 1L, "exp_f");
+        assertTrue(trF.recordEvent(devA));
+        assertTrue(trF.recordEvent(devB));
+        com.issuepilot.model.EvidenceModelsV2.OutcomeFeedbackEvidenceV2 resF = trF.buildEvidence("u1", "python", "EASY");
+        assertEquals(0, resF.getL1Accept().trials(), "Conflicting decisions at same revision must be quarantined");
+
+        // Stage G: Separate exposure sessions for the same user and issue (no trial collision)
+        OutcomeFeedbackTracker trG = new OutcomeFeedbackTracker();
+        OutcomeFeedbackTracker.CommitResult resG1 = trG.commitDecision(
+                "g1", "u1", "gh:r#99", "exp_session_1", "python", "EASY",
+                OutcomeFeedbackTracker.EventType.ACCEPTED, baseTs.plusMillis(100), 0L);
+        OutcomeFeedbackTracker.CommitResult resG2 = trG.commitDecision(
+                "g2", "u1", "gh:r#99", "exp_session_2", "python", "EASY",
+                OutcomeFeedbackTracker.EventType.REJECTED, baseTs.plusMillis(200), 0L);
+        assertEquals(OutcomeFeedbackTracker.CommitStatus.COMMITTED, resG1.status());
+        assertEquals(OutcomeFeedbackTracker.CommitStatus.COMMITTED, resG2.status());
+        com.issuepilot.model.EvidenceModelsV2.OutcomeFeedbackEvidenceV2 resG = trG.buildEvidence("u1", "python", "EASY");
+        assertEquals(2, resG.getL1Accept().trials(), "Separate exposures must create distinct trials");
+        assertEquals(1, resG.getL1Accept().successes(), "1 accepted, 1 rejected");
+
+        // Stage H: Same-revision conflicts across transitions
+        // H.1 COMPLETED vs NOT_COMPLETED
+        OutcomeFeedbackTracker trH1 = new OutcomeFeedbackTracker();
+        assertTrue(trH1.recordEvent(new OutcomeFeedbackTracker.OutcomeEvent("h1_acc", "u1", "gh:r#3", "python", "EASY", OutcomeFeedbackTracker.EventType.ACCEPTED, baseTs.plusMillis(100), "c", "w", 1L, "exp_h1")));
+        assertTrue(trH1.recordEvent(new OutcomeFeedbackTracker.OutcomeEvent("h1_c", "u1", "gh:r#3", "python", "EASY", OutcomeFeedbackTracker.EventType.COMPLETED, baseTs.plusMillis(200), "c", "w", 2L, "exp_h1")));
+        assertTrue(trH1.recordEvent(new OutcomeFeedbackTracker.OutcomeEvent("h1_nc", "u1", "gh:r#3", "python", "EASY", OutcomeFeedbackTracker.EventType.NOT_COMPLETED, baseTs.plusMillis(200), "c", "w", 2L, "exp_h1")));
+        com.issuepilot.model.EvidenceModelsV2.OutcomeFeedbackEvidenceV2 resH1 = trH1.buildEvidence("u1", "python", "EASY");
+        assertEquals(1, resH1.getL1Accept().trials());
+        assertEquals(1, resH1.getL1Accept().successes());
+        assertEquals(0, resH1.getL1Complete().trials(), "Conflicting COMPLETED vs NOT_COMPLETED must quarantine completion");
+
+        // H.2 COMPLETED vs REOPENED
+        OutcomeFeedbackTracker trH2 = new OutcomeFeedbackTracker();
+        assertTrue(trH2.recordEvent(new OutcomeFeedbackTracker.OutcomeEvent("h2_acc", "u1", "gh:r#4", "python", "EASY", OutcomeFeedbackTracker.EventType.ACCEPTED, baseTs.plusMillis(100), "c", "w", 1L, "exp_h2")));
+        assertTrue(trH2.recordEvent(new OutcomeFeedbackTracker.OutcomeEvent("h2_c", "u1", "gh:r#4", "python", "EASY", OutcomeFeedbackTracker.EventType.COMPLETED, baseTs.plusMillis(200), "c", "w", 2L, "exp_h2")));
+        assertTrue(trH2.recordEvent(new OutcomeFeedbackTracker.OutcomeEvent("h2_r", "u1", "gh:r#4", "python", "EASY", OutcomeFeedbackTracker.EventType.REOPENED, baseTs.plusMillis(200), "c", "w", 2L, "exp_h2")));
+        com.issuepilot.model.EvidenceModelsV2.OutcomeFeedbackEvidenceV2 resH2 = trH2.buildEvidence("u1", "python", "EASY");
+        assertEquals(1, resH2.getL1Accept().trials());
+        assertEquals(0, resH2.getL1Complete().trials(), "Conflicting COMPLETED vs REOPENED must quarantine completion");
+
+        // H.3 NOT_COMPLETED vs REOPENED
+        OutcomeFeedbackTracker trH3 = new OutcomeFeedbackTracker();
+        assertTrue(trH3.recordEvent(new OutcomeFeedbackTracker.OutcomeEvent("h3_acc", "u1", "gh:r#5", "python", "EASY", OutcomeFeedbackTracker.EventType.ACCEPTED, baseTs.plusMillis(100), "c", "w", 1L, "exp_h3")));
+        assertTrue(trH3.recordEvent(new OutcomeFeedbackTracker.OutcomeEvent("h3_nc", "u1", "gh:r#5", "python", "EASY", OutcomeFeedbackTracker.EventType.NOT_COMPLETED, baseTs.plusMillis(200), "c", "w", 2L, "exp_h3")));
+        assertTrue(trH3.recordEvent(new OutcomeFeedbackTracker.OutcomeEvent("h3_r", "u1", "gh:r#5", "python", "EASY", OutcomeFeedbackTracker.EventType.REOPENED, baseTs.plusMillis(200), "c", "w", 2L, "exp_h3")));
+        com.issuepilot.model.EvidenceModelsV2.OutcomeFeedbackEvidenceV2 resH3 = trH3.buildEvidence("u1", "python", "EASY");
+        assertEquals(1, resH3.getL1Accept().trials());
+        assertEquals(0, resH3.getL1Complete().trials(), "Conflicting NOT_COMPLETED vs REOPENED must quarantine completion");
+    }
 }

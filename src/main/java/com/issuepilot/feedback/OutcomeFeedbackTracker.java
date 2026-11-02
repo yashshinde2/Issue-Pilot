@@ -23,6 +23,19 @@ public class OutcomeFeedbackTracker {
         REOPENED
     }
 
+    public enum CommitStatus {
+        COMMITTED,
+        IDEMPOTENT_REPLAY,
+        STALE_REVISION_CONFLICT,
+        CONCURRENT_CAS_CONFLICT
+    }
+
+    public record CommitResult(
+            CommitStatus status,
+            OutcomeEvent event,
+            long committedRevision,
+            String message) {}
+
     public record OutcomeEvent(
             String eventId,
             String userId,
@@ -33,7 +46,22 @@ public class OutcomeFeedbackTracker {
             Instant timestamp,
             String cohortKey,
             String exposureWindow,
-            long decisionRevision) {
+            long decisionRevision,
+            String exposureId) {
+
+        public OutcomeEvent(
+                String eventId,
+                String userId,
+                String issueKey,
+                String technology,
+                String difficultyBand,
+                EventType eventType,
+                Instant timestamp,
+                String cohortKey,
+                String exposureWindow,
+                long decisionRevision) {
+            this(eventId, userId, issueKey, technology, difficultyBand, eventType, timestamp, cohortKey, exposureWindow, decisionRevision, null);
+        }
 
         public OutcomeEvent(
                 String eventId,
@@ -45,7 +73,7 @@ public class OutcomeFeedbackTracker {
                 Instant timestamp,
                 String cohortKey,
                 String exposureWindow) {
-            this(eventId, userId, issueKey, technology, difficultyBand, eventType, timestamp, cohortKey, exposureWindow, 1L);
+            this(eventId, userId, issueKey, technology, difficultyBand, eventType, timestamp, cohortKey, exposureWindow, 1L, null);
         }
 
         public OutcomeEvent {
@@ -55,15 +83,19 @@ public class OutcomeFeedbackTracker {
         }
     }
 
-    private static class IssueDecisionState {
+    public static class ExposureDecisionState {
+        final String exposureKey;
         final String issueKey;
         final String technology;
         final String difficultyBand;
+        long currentRevision = 0L;
         EventType acceptanceDecision; // ACCEPTED or REJECTED
         EventType completionDecision; // COMPLETED or NOT_COMPLETED
         final List<OutcomeEvent> eventHistory = new ArrayList<>();
+        final Map<String, OutcomeEvent> committedEvents = new ConcurrentHashMap<>();
 
-        IssueDecisionState(String issueKey, String technology, String difficultyBand) {
+        ExposureDecisionState(String exposureKey, String issueKey, String technology, String difficultyBand) {
+            this.exposureKey = exposureKey;
             this.issueKey = issueKey;
             this.technology = canonicalTech(technology);
             this.difficultyBand = canonicalBand(difficultyBand);
@@ -72,9 +104,29 @@ public class OutcomeFeedbackTracker {
         public String getIssueKey() {
             return issueKey;
         }
+
+        public String getExposureKey() {
+            return exposureKey;
+        }
+
+        public long getCurrentRevision() {
+            return currentRevision;
+        }
+
+        public EventType getAcceptanceDecision() {
+            return acceptanceDecision;
+        }
+
+        public EventType getCompletionDecision() {
+            return completionDecision;
+        }
+
+        public List<OutcomeEvent> getEventHistory() {
+            return Collections.unmodifiableList(eventHistory);
+        }
     }
 
-    private final Map<String, Map<String, IssueDecisionState>> userIssueStates = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, ExposureDecisionState>> userExposureStates = new ConcurrentHashMap<>();
     private final List<OutcomeEvent> auditLog = Collections.synchronizedList(new ArrayList<>());
     private final Set<String> seenEventIds = ConcurrentHashMap.newKeySet();
 
@@ -84,6 +136,77 @@ public class OutcomeFeedbackTracker {
 
     private static String canonicalBand(String band) {
         return band != null && !band.isBlank() ? band.trim().toUpperCase(Locale.ROOT) : null;
+    }
+
+    public synchronized CommitResult commitDecision(
+            String eventId,
+            String userId,
+            String issueKey,
+            String exposureId,
+            String technology,
+            String difficultyBand,
+            EventType eventType,
+            Instant timestamp,
+            long expectedBaseRevision) {
+
+        if (eventId == null || eventId.isBlank()) {
+            return new CommitResult(CommitStatus.CONCURRENT_CAS_CONFLICT, null, -1L, "eventId is required");
+        }
+        if (userId == null || userId.isBlank() || issueKey == null || issueKey.isBlank()) {
+            return new CommitResult(CommitStatus.CONCURRENT_CAS_CONFLICT, null, -1L, "userId and issueKey are required");
+        }
+        if (eventType == null) {
+            return new CommitResult(CommitStatus.CONCURRENT_CAS_CONFLICT, null, -1L, "eventType is required");
+        }
+        Instant effectiveTs = timestamp != null ? timestamp : Instant.now();
+
+        String uId = userId.trim();
+        String iKey = issueKey.trim();
+        String expId = exposureId != null && !exposureId.isBlank() ? exposureId.trim() : null;
+        String expKey = expId != null ? expId : iKey;
+
+        Map<String, ExposureDecisionState> userMap = userExposureStates.computeIfAbsent(uId, k -> new ConcurrentHashMap<>());
+        ExposureDecisionState state = userMap.computeIfAbsent(expKey, k -> new ExposureDecisionState(expKey, iKey, technology, difficultyBand));
+
+        // Check idempotent replay by eventId
+        if (state.committedEvents.containsKey(eventId.trim())) {
+            OutcomeEvent existing = state.committedEvents.get(eventId.trim());
+            return new CommitResult(CommitStatus.IDEMPOTENT_REPLAY, existing, existing.decisionRevision(), "Idempotent duplicate event replay");
+        }
+
+        // Compare-And-Swap check against authoritative committed revision
+        if (expectedBaseRevision != state.currentRevision) {
+            if (expectedBaseRevision < state.currentRevision - 1) {
+                return new CommitResult(CommitStatus.STALE_REVISION_CONFLICT, null, state.currentRevision,
+                        "Stale offline decision: base revision " + expectedBaseRevision + " is behind current " + state.currentRevision);
+            } else {
+                return new CommitResult(CommitStatus.CONCURRENT_CAS_CONFLICT, null, state.currentRevision,
+                        "Concurrent CAS conflict: expected base revision " + expectedBaseRevision + " != current " + state.currentRevision);
+            }
+        }
+
+        // CAS succeeded: increment revision and commit
+        long allocatedRevision = state.currentRevision + 1;
+        state.currentRevision = allocatedRevision;
+
+        OutcomeEvent committedEvent = new OutcomeEvent(
+                eventId.trim(),
+                uId,
+                iKey,
+                technology,
+                difficultyBand,
+                eventType,
+                effectiveTs,
+                null,
+                null,
+                allocatedRevision,
+                expId
+        );
+
+        state.committedEvents.put(eventId.trim(), committedEvent);
+        recordEvent(committedEvent);
+
+        return new CommitResult(CommitStatus.COMMITTED, committedEvent, allocatedRevision, "Committed revision " + allocatedRevision);
     }
 
     public synchronized boolean recordEvent(OutcomeEvent event) {
@@ -124,9 +247,11 @@ public class OutcomeFeedbackTracker {
 
         String userId = event.userId().trim();
         String issueKey = event.issueKey().trim();
+        String expId = event.exposureId() != null && !event.exposureId().isBlank() ? event.exposureId().trim() : null;
+        String expKey = expId != null ? expId : issueKey;
 
-        Map<String, IssueDecisionState> userMap = userIssueStates.computeIfAbsent(userId, k -> new ConcurrentHashMap<>());
-        IssueDecisionState state = userMap.computeIfAbsent(issueKey, k -> new IssueDecisionState(issueKey, event.technology(), event.difficultyBand()));
+        Map<String, ExposureDecisionState> userMap = userExposureStates.computeIfAbsent(userId, k -> new ConcurrentHashMap<>());
+        ExposureDecisionState state = userMap.computeIfAbsent(expKey, k -> new ExposureDecisionState(expKey, issueKey, event.technology(), event.difficultyBand()));
         state.eventHistory.add(event);
 
         // Sort events deterministically by (decisionRevision, timestamp, eventId)
@@ -156,20 +281,22 @@ public class OutcomeFeedbackTracker {
 
             boolean hasAcc = false;
             boolean hasRej = false;
-            OutcomeEvent compEv = null;
+            boolean hasComp = false;
+            boolean hasNotComp = false;
             boolean hasReopen = false;
 
             for (OutcomeEvent ev : revEvents) {
                 EventType t = ev.eventType();
                 if (t == EventType.ACCEPTED) hasAcc = true;
                 else if (t == EventType.REJECTED) hasRej = true;
-                else if (t == EventType.COMPLETED || t == EventType.NOT_COMPLETED) compEv = ev;
+                else if (t == EventType.COMPLETED) hasComp = true;
+                else if (t == EventType.NOT_COMPLETED) hasNotComp = true;
                 else if (t == EventType.REOPENED) hasReopen = true;
             }
 
+            // 1. Acceptance transition at this revision
             if (hasAcc && hasRej) {
-                // Conflicting decisions at the EXACT SAME revision: QUARANTINE!
-                // An arbitrary UUID must NOT pick a winner. Quarantine unresolvable conflict.
+                // Same-revision conflict: quarantine acceptance!
                 effectiveAcc = null;
             } else if (hasAcc) {
                 effectiveAcc = EventType.ACCEPTED;
@@ -181,15 +308,25 @@ public class OutcomeFeedbackTracker {
                 }
             }
 
-            if (hasReopen) {
+            // 2. Completion transition at this revision
+            // Check for same-revision completion conflicts across transitions:
+            // COMPLETED vs NOT_COMPLETED, COMPLETED vs REOPENED, NOT_COMPLETED vs REOPENED
+            int compSignals = (hasComp ? 1 : 0) + (hasNotComp ? 1 : 0) + (hasReopen ? 1 : 0);
+            if (compSignals > 1) {
+                // Conflicting completion signals at same revision: quarantine completion!
+                effectiveComp = null;
+            } else if (hasReopen) {
                 // Reopening reverses previous terminal completion outcome
                 effectiveComp = null;
-            } else if (compEv != null) {
-                if (effectiveAcc == EventType.REJECTED) {
-                    // Rejected issues cannot complete
-                } else {
-                    effectiveComp = compEv.eventType();
-                }
+            } else if (hasComp) {
+                effectiveComp = EventType.COMPLETED;
+            } else if (hasNotComp) {
+                effectiveComp = EventType.NOT_COMPLETED;
+            }
+
+            // 3. Strict mathematical invariant: completion requires accepted status
+            if (effectiveAcc != EventType.ACCEPTED) {
+                effectiveComp = null;
             }
         }
 
@@ -206,7 +343,7 @@ public class OutcomeFeedbackTracker {
         evidence.setTechnology(canTech);
         evidence.setDifficultyBand(canBand);
 
-        Map<String, IssueDecisionState> userMap = userIssueStates.get(userId != null ? userId.trim() : "");
+        Map<String, ExposureDecisionState> userMap = userExposureStates.get(userId != null ? userId.trim() : "");
         if (userMap == null || userMap.isEmpty()) {
             // Cold start: empty hierarchy counts
             evidence.setL1Accept(new HierarchyCounts(0, 0));
@@ -226,7 +363,7 @@ public class OutcomeFeedbackTracker {
         int l2CompTrials = 0, l2CompSuccess = 0;
         int l3CompTrials = 0, l3CompSuccess = 0;
 
-        for (IssueDecisionState s : userMap.values()) {
+        for (ExposureDecisionState s : userMap.values()) {
             boolean matchTech = canTech != null && Objects.equals(canTech, s.technology);
             boolean matchDiff = matchTech && canBand != null && Objects.equals(canBand, s.difficultyBand);
 
@@ -292,9 +429,8 @@ public class OutcomeFeedbackTracker {
     }
 
     public void clear() {
-        userIssueStates.clear();
+        userExposureStates.clear();
         auditLog.clear();
         seenEventIds.clear();
     }
 }
-
