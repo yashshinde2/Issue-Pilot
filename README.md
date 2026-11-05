@@ -3,6 +3,8 @@
 
 Issue Pilot is an end-to-end open-source issue recommendation, ranking, and preference-learning system conforming to the **Issue Pilot Version 2.3 Production Algorithm Specification**. It computes personalized suitability scores ($0 - 100$) for open-source contributors using an explainable, deterministic C++ ranking engine backed by a shared candidate pool in MongoDB Atlas, with an independent C++ vote-affinity engine that models contributor preference from issue likes and dislikes, and a deterministic Compare-And-Set (CAS) outcome feedback tracker with hierarchical backoff.
 
+> **Comprehensive Algorithm Reference**: For the full, in-depth specification covering every mathematical formula, parameter justification, threshold rationale, and worked golden vector, see [`Issue_Pilot_Ranking_and_Vote_Affinity_Algorithm.md`](file:///d:/Issue%20Pilot/Issue_Pilot_Ranking_and_Vote_Affinity_Algorithm.md).
+
 ---
 
 ### Architecture & System Data-Flow
@@ -192,6 +194,7 @@ d:/Issue Pilot/
 ├── .env.example                  # Template configuration without credentials
 ├── .env                          # Local active configuration (ignored by Git)
 ├── atlas-credentials.env         # Live MongoDB Atlas connection string (ignored by Git)
+├── Issue_Pilot_Ranking_and_Vote_Affinity_Algorithm.md # Detailed mathematical & parameter specification
 └── Issue_Pilot_Production_Algorithm_Specification_V2_3.md # Authoritative V2.3 specification
 ```
 
